@@ -56,6 +56,15 @@ const FrameHeader = packed struct {
 
 const CompressionAlgorithm = enum {};
 
+const ValueTag = enum {
+    Set,
+    NotSet,
+};
+const Value = union(ValueTag) {
+    Set: []u8,
+    NotSet: void,
+};
+
 const StartupFrame = struct {
     cql_version: []const u8,
     compression: ?CompressionAlgorithm,
@@ -139,6 +148,23 @@ pub fn FrameDeserializer(comptime InStreamType: type) type {
                 const result = try self.allocator.alloc(u8, @intCast(usize, len));
                 _ = try self.in_stream.readAll(result);
                 return result;
+            }
+        }
+
+        pub fn readValue(self: *Self) !?Value {
+            const len = try self.readInt(i32);
+
+            if (len >= 0) {
+                const result = try self.allocator.alloc(u8, @intCast(usize, len));
+                _ = try self.in_stream.readAll(result);
+
+                return Value{ .Set = result };
+            } else if (len == -1) {
+                return null;
+            } else if (len == -2) {
+                return Value.NotSet;
+            } else {
+                return error.InvalidValueLength;
             }
         }
     };
@@ -265,6 +291,43 @@ test "frame deserializer" {
         resetAndWrite(fbs_type, &fbs, "\xff\xff\xff\xff");
         result = try d.readBytes();
         testing.expect(result == null);
+    }
+
+    // Value
+    {
+        // Normal value
+        resetAndWrite(fbs_type, &fbs, "\x00\x00\x00\x02\xFE\xFF");
+
+        var value = try d.readValue();
+        if (value) |v| {
+            testing.expect(v == .Set);
+
+            const bytes = v.Set;
+            defer std.testing.allocator.free(bytes);
+            testing.expectEqualSlices(u8, "\xFE\xFF", bytes);
+        } else {
+            std.debug.panic("expected bytes to not be null", .{});
+        }
+
+        // Null value
+
+        resetAndWrite(fbs_type, &fbs, "\xff\xff\xff\xff");
+
+        value = try d.readValue();
+        if (value) |v| {
+            std.debug.panic("expected bytes to be null", .{});
+        }
+
+        // "Not set" value
+
+        resetAndWrite(fbs_type, &fbs, "\xff\xff\xff\xfe");
+
+        value = try d.readValue();
+        if (value) |v| {
+            testing.expect(v == .NotSet);
+        } else {
+            std.debug.panic("expected bytes to not be null", .{});
+        }
     }
 }
 
