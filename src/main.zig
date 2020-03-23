@@ -144,18 +144,17 @@ pub fn FrameDeserializer(comptime InStreamType: type) type {
         /// Read a length-prefixed string from the stream. The length is 2 bytes.
         /// The string can't be null.
         pub fn readString(self: *Self) ![]const u8 {
-            return self.readStringGeneric(.Short);
+            if (try self.readBytesGeneric(.Short)) |v| {
+                return v;
+            } else {
+                return error.UnexpectedEOF;
+            }
         }
 
         /// Read a length-prefixed string from the stream. The length is 4 bytes.
         /// The string can't be null.
         pub fn readLongString(self: *Self) ![]const u8 {
-            return self.readStringGeneric(.Long);
-        }
-
-        /// Read a string from the stream in a generic way.
-        fn readStringGeneric(self: *Self, comptime T: BytesType) ![]const u8 {
-            if (try self.readBytesGeneric(T)) |v| {
+            if (try self.readBytesGeneric(.Long)) |v| {
                 return v;
             } else {
                 return error.UnexpectedEOF;
