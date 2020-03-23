@@ -77,6 +77,11 @@ fn readStartupFrame(allocator: *std.mem.Allocator, deserializer: FrameDeserializ
 }
 
 pub fn FrameDeserializer(comptime InStreamType: type) type {
+    const BytesType = enum {
+        Short,
+        Long,
+    };
+
     return struct {
         const Self = @This();
 
@@ -92,22 +97,41 @@ pub fn FrameDeserializer(comptime InStreamType: type) type {
 
         pub fn deinit(self: *Self) void {}
 
+        /// Read either a short, a int or a long from the stream.
         pub fn readInt(self: *Self, comptime T: type) !T {
             return self.in_stream.readIntBig(T);
         }
 
+        /// Read a single byte from the stream
         pub fn readByte(self: *Self) !u8 {
             return self.in_stream.readByte();
         }
 
-        pub fn readString(self: *Self, comptime IntType: type) ![]const u8 {
-            const len = switch (IntType.bit_count) {
-                16 => @as(usize, try self.readInt(u16)),
-                32 => @as(usize, try self.readInt(u32)),
-                else => @compileError("invalid string length type " ++ @typeName(IntType)),
+        /// Read a length-prefixed byte slice from the stream. The length is 2 bytes.
+        /// The slice can be null.
+        pub fn readShortBytes(self: *Self) !?[]const u8 {
+            return self.readBytesGeneric(.Short);
+        }
+
+        /// Read a length-prefixed byte slice from the stream. The length is 4 bytes.
+        /// The slice can be null.
+        pub fn readBytes(self: *Self) !?[]const u8 {
+            return self.readBytesGeneric(.Long);
+        }
+
+        /// Read bytes from the stream in a generic way.
+        fn readBytesGeneric(self: *Self, comptime T: BytesType) !?[]const u8 {
+            const len = switch (T) {
+                .Short => @as(i32, try self.readInt(i16)),
+                .Long => @as(i32, try self.readInt(i32)),
+                else => @compileError("invalid bytes length type " ++ @typeName(IntType)),
             };
 
-            const buf = try self.allocator.alloc(u8, len);
+            if (len < 0) {
+                return null;
+            }
+
+            const buf = try self.allocator.alloc(u8, @intCast(usize, len));
 
             const n_read = try self.in_stream.readAll(buf);
             if (n_read != len) {
@@ -117,12 +141,35 @@ pub fn FrameDeserializer(comptime InStreamType: type) type {
             return buf;
         }
 
+        /// Read a length-prefixed string from the stream. The length is 2 bytes.
+        /// The string can't be null.
+        pub fn readString(self: *Self) ![]const u8 {
+            return self.readStringGeneric(.Short);
+        }
+
+        /// Read a length-prefixed string from the stream. The length is 4 bytes.
+        /// The string can't be null.
+        pub fn readLongString(self: *Self) ![]const u8 {
+            return self.readStringGeneric(.Long);
+        }
+
+        /// Read a string from the stream in a generic way.
+        fn readStringGeneric(self: *Self, comptime T: BytesType) ![]const u8 {
+            if (try self.readBytesGeneric(T)) |v| {
+                return v;
+            } else {
+                return error.UnexpectedEOF;
+            }
+        }
+
+        /// Read a UUID from the stream.
         pub fn readUUID(self: *Self) ![16]u8 {
             var buf: [16]u8 = undefined;
             _ = try self.in_stream.readAll(&buf);
             return buf;
         }
 
+        /// Read a list of string from the stream.
         pub fn readStringList(self: *Self) !ArrayList([]const u8) {
             const len = @as(usize, try self.readInt(u16));
 
@@ -130,7 +177,7 @@ pub fn FrameDeserializer(comptime InStreamType: type) type {
 
             var i: usize = 0;
             while (i < len) {
-                const tmp = try self.readString(u16);
+                const tmp = try self.readString();
                 try list.append(tmp);
 
                 i += 1;
@@ -139,18 +186,8 @@ pub fn FrameDeserializer(comptime InStreamType: type) type {
             return list;
         }
 
-        pub fn readBytes(self: *Self) !?[]const u8 {
-            const len = try self.readInt(i32);
-
-            if (len < 0) {
-                return null;
-            } else {
-                const result = try self.allocator.alloc(u8, @intCast(usize, len));
-                _ = try self.in_stream.readAll(result);
-                return result;
-            }
-        }
-
+        /// Read a value from the stream.
+        /// A value can be null.
         pub fn readValue(self: *Self) !?Value {
             const len = try self.readInt(i32);
 
@@ -224,15 +261,13 @@ test "frame deserializer" {
     // Strings
     {
         resetAndWrite(fbs_type, &fbs, "\x00\x06foobar");
-        const result = try d.readString(u16);
+        var result = try d.readString();
 
         defer std.testing.allocator.free(result);
         testing.expectEqualSlices(u8, "foobar", result);
-    }
 
-    {
         resetAndWrite(fbs_type, &fbs, "\x00\x00\x00\x06foobar");
-        const result = try d.readString(i32);
+        result = try d.readLongString();
 
         defer std.testing.allocator.free(result);
         testing.expectEqualSlices(u8, "foobar", result);
@@ -268,8 +303,9 @@ test "frame deserializer" {
         testing.expectEqualSlices(u8, "bar", tmp);
     }
 
-    // Bytes
+    // Bytes and Short bytes
     {
+        // int32 + bytes
         resetAndWrite(fbs_type, &fbs, "\x00\x00\x00\x0A123456789A");
         var result = try d.readBytes();
         if (result) |bytes| {
@@ -290,6 +326,29 @@ test "frame deserializer" {
 
         resetAndWrite(fbs_type, &fbs, "\xff\xff\xff\xff");
         result = try d.readBytes();
+        testing.expect(result == null);
+
+        // int16 + bytes
+        resetAndWrite(fbs_type, &fbs, "\x00\x0A123456789A");
+        result = try d.readShortBytes();
+        if (result) |bytes| {
+            defer std.testing.allocator.free(bytes);
+            testing.expectEqualSlices(u8, "123456789A", bytes);
+        } else {
+            std.debug.panic("expected bytes to not be null", .{});
+        }
+
+        resetAndWrite(fbs_type, &fbs, "\x00\x00");
+        result = try d.readShortBytes();
+        if (result) |bytes| {
+            defer std.testing.allocator.free(bytes);
+            testing.expectEqualSlices(u8, "", bytes);
+        } else {
+            std.debug.panic("expected bytes to not be null", .{});
+        }
+
+        resetAndWrite(fbs_type, &fbs, "\xff\xff");
+        result = try d.readShortBytes();
         testing.expect(result == null);
     }
 
