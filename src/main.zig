@@ -1,5 +1,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
+const net = std.net;
+const os = std.os;
 const testing = std.testing;
 const ArrayList = std.ArrayList;
 
@@ -75,24 +77,6 @@ fn readStartupFrame(allocator: *std.mem.Allocator, deserializer: FrameDeserializ
 
     unreachable;
 }
-
-const InetType = enum {
-    IPv4,
-    IPv6,
-};
-
-const Inet = struct {
-    typ: InetType,
-    buf: [16]u8 = undefined,
-    port: i32,
-
-    pub fn addr(self: *@This()) []u8 {
-        return switch (self.typ) {
-            .IPv4 => self.buf[0..4],
-            .IPv6 => self.buf[0..16],
-        };
-    }
-};
 
 pub fn FrameDeserializer(comptime InStreamType: type) type {
     const BytesType = enum {
@@ -233,25 +217,36 @@ pub fn FrameDeserializer(comptime InStreamType: type) type {
         //     return self.readInt(u16);
         // }
 
-        pub fn readInet(self: *Self) !Inet {
+        pub fn readInetaddr(self: *Self) !net.Address {
+            return self.readInetGeneric(false);
+        }
+
+        pub fn readInet(self: *Self) !net.Address {
+            return self.readInetGeneric(true);
+        }
+
+        fn readInetGeneric(self: *Self, with_port: bool) !net.Address {
             const n = try self.readByte();
 
-            var inet: Inet = undefined;
-            switch (n) {
+            return switch (n) {
                 4 => {
-                    _ = try self.in_stream.readAll(inet.buf[0..4]);
-                    inet.typ = .IPv4;
+                    var buf: [4]u8 = undefined;
+                    _ = try self.in_stream.readAll(&buf);
+
+                    const port = if (with_port) try self.readInt(i32) else 0;
+
+                    return net.Address.initIp4(buf, @intCast(u16, port));
                 },
                 16 => {
-                    _ = try self.in_stream.readAll(inet.buf[0..16]);
-                    inet.typ = .IPv6;
+                    var buf: [16]u8 = undefined;
+                    _ = try self.in_stream.readAll(&buf);
+
+                    const port = if (with_port) try self.readInt(i32) else 0;
+
+                    return net.Address.initIp6(buf, @intCast(u16, port), 0, 0);
                 },
                 else => return error.InvalidInetSize,
-            }
-
-            inet.port = try self.readInt(i32);
-
-            return inet;
+            };
         }
     };
 }
@@ -444,15 +439,33 @@ test "frame deserializer" {
         resetAndWrite(fbs_type, &fbs, "\x04\x12\x34\x56\x78\x00\x00\x00\x22");
 
         var result = try d.readInet();
-        testing.expectEqualSlices(u8, "\x12\x34\x56\x78", result.addr());
-        testing.expectEqual(@as(i32, 34), result.port);
+        testing.expectEqual(@as(u16, os.AF_INET), result.any.family);
+        testing.expectEqual(@as(u32, 0x78563412), result.in.addr);
+        testing.expectEqual(@as(u16, 34), result.getPort());
 
         // IPv6
         resetAndWrite(fbs_type, &fbs, "\x10\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\x00\x00\x00\x22");
 
         result = try d.readInet();
-        testing.expectEqualSlices(u8, "\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff", result.addr());
-        testing.expectEqual(@as(i32, 34), result.port);
+        testing.expectEqual(@as(u16, os.AF_INET6), result.any.family);
+        testing.expectEqualSlices(u8, "\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff", &result.in6.addr);
+        testing.expectEqual(@as(u16, 34), result.getPort());
+
+        // IPv4 without port
+        resetAndWrite(fbs_type, &fbs, "\x04\x12\x34\x56\x78");
+
+        result = try d.readInetaddr();
+        testing.expectEqual(@as(u16, os.AF_INET), result.any.family);
+        testing.expectEqual(@as(u32, 0x78563412), result.in.addr);
+        testing.expectEqual(@as(u16, 0), result.getPort());
+
+        // IPv6 without port
+        resetAndWrite(fbs_type, &fbs, "\x10\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff");
+
+        result = try d.readInetaddr();
+        testing.expectEqual(@as(u16, os.AF_INET6), result.any.family);
+        testing.expectEqualSlices(u8, "\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff", &result.in6.addr);
+        testing.expectEqual(@as(u16, 0), result.getPort());
     }
 }
 
