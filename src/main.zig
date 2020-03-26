@@ -248,8 +248,28 @@ pub fn FrameDeserializer(comptime InStreamType: type) type {
                 else => return error.InvalidInetSize,
             };
         }
+
+        pub fn readConsistency(self: *Self) !Consistency {
+            const n = try self.readInt(u16);
+
+            return @intToEnum(Consistency, n);
+        }
     };
 }
+
+const Consistency = packed enum(u16) {
+    Any = 0x0000,
+    One = 0x0001,
+    Two = 0x0002,
+    Three = 0x0003,
+    Quorum = 0x0004,
+    All = 0x0005,
+    LocalQuorum = 0x0006,
+    EachQuorum = 0x0007,
+    Serial = 0x0008,
+    LocalSerial = 0x0009,
+    LocalOne = 0x000A,
+};
 
 pub fn Frame(comptime T: type) type {
     return struct {
@@ -466,6 +486,34 @@ test "frame deserializer" {
         testing.expectEqual(@as(u16, os.AF_INET6), result.any.family);
         testing.expectEqualSlices(u8, "\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff", &result.in6.addr);
         testing.expectEqual(@as(u16, 0), result.getPort());
+    }
+
+    // Consistency
+    {
+        const testCase = struct {
+            exp: Consistency,
+            b: []const u8,
+        };
+
+        const testCases = [_]testCase{
+            testCase{ .exp = Consistency.Any, .b = "\x00\x00" },
+            testCase{ .exp = Consistency.One, .b = "\x00\x01" },
+            testCase{ .exp = Consistency.Two, .b = "\x00\x02" },
+            testCase{ .exp = Consistency.Three, .b = "\x00\x03" },
+            testCase{ .exp = Consistency.Quorum, .b = "\x00\x04" },
+            testCase{ .exp = Consistency.All, .b = "\x00\x05" },
+            testCase{ .exp = Consistency.LocalQuorum, .b = "\x00\x06" },
+            testCase{ .exp = Consistency.EachQuorum, .b = "\x00\x07" },
+            testCase{ .exp = Consistency.Serial, .b = "\x00\x08" },
+            testCase{ .exp = Consistency.LocalSerial, .b = "\x00\x09" },
+            testCase{ .exp = Consistency.LocalOne, .b = "\x00\x0A" },
+        };
+
+        for (testCases) |tc| {
+            resetAndWrite(fbs_type, &fbs, tc.b);
+            var result = try d.readConsistency();
+            testing.expectEqual(tc.exp, result);
+        }
     }
 }
 
