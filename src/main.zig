@@ -76,6 +76,24 @@ fn readStartupFrame(allocator: *std.mem.Allocator, deserializer: FrameDeserializ
     unreachable;
 }
 
+const InetType = enum {
+    IPv4,
+    IPv6,
+};
+
+const Inet = struct {
+    typ: InetType,
+    buf: [16]u8 = undefined,
+    port: i32,
+
+    pub fn addr(self: *@This()) []u8 {
+        return switch (self.typ) {
+            .IPv4 => self.buf[0..4],
+            .IPv6 => self.buf[0..16],
+        };
+    }
+};
+
 pub fn FrameDeserializer(comptime InStreamType: type) type {
     const BytesType = enum {
         Short,
@@ -202,6 +220,38 @@ pub fn FrameDeserializer(comptime InStreamType: type) type {
             } else {
                 return error.InvalidValueLength;
             }
+        }
+
+        pub fn readVarint(self: *Self, comptime IntType: type) !IntType {
+            // TODO(vincent): implement this for uvint and vint
+            unreachable;
+        }
+
+        // TODO(vincent): add read option
+
+        // pub fn readOptionID(self: *Self) !u16 {
+        //     return self.readInt(u16);
+        // }
+
+        pub fn readInet(self: *Self) !Inet {
+            const n = try self.readByte();
+
+            var inet: Inet = undefined;
+            switch (n) {
+                4 => {
+                    _ = try self.in_stream.readAll(inet.buf[0..4]);
+                    inet.typ = .IPv4;
+                },
+                16 => {
+                    _ = try self.in_stream.readAll(inet.buf[0..16]);
+                    inet.typ = .IPv6;
+                },
+                else => return error.InvalidInetSize,
+            }
+
+            inet.port = try self.readInt(i32);
+
+            return inet;
         }
     };
 }
@@ -386,6 +436,23 @@ test "frame deserializer" {
         } else {
             std.debug.panic("expected bytes to not be null", .{});
         }
+    }
+
+    // Inet
+    {
+        // IPv4
+        resetAndWrite(fbs_type, &fbs, "\x04\x12\x34\x56\x78\x00\x00\x00\x22");
+
+        var result = try d.readInet();
+        testing.expectEqualSlices(u8, "\x12\x34\x56\x78", result.addr());
+        testing.expectEqual(@as(i32, 34), result.port);
+
+        // IPv6
+        resetAndWrite(fbs_type, &fbs, "\x10\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\x00\x00\x00\x22");
+
+        result = try d.readInet();
+        testing.expectEqualSlices(u8, "\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff", result.addr());
+        testing.expectEqual(@as(i32, 34), result.port);
     }
 }
 
