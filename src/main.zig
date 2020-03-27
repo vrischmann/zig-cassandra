@@ -4,6 +4,7 @@ const net = std.net;
 const os = std.os;
 const testing = std.testing;
 const ArrayList = std.ArrayList;
+const StringHashMap = std.StringHashMap;
 
 const ProtocolVersion = packed enum(u8) {
     V3,
@@ -254,6 +255,24 @@ pub fn FrameDeserializer(comptime InStreamType: type) type {
 
             return @intToEnum(Consistency, n);
         }
+
+        pub fn readStringMap(self: *Self) !StringHashMap([]const u8) {
+            const n = try self.readInt(u16);
+
+            var map = StringHashMap([]const u8).init(self.allocator);
+
+            var i: usize = 0;
+            while (i < n) : (i += 1) {
+                const k = try self.readString();
+                const v = try self.readString();
+
+                _ = try map.put(k, v);
+            }
+
+            return map;
+        }
+
+        pub fn readStringMultimap(self: *Self) ![]ArrayList(KeyValue) {}
     };
 }
 
@@ -513,6 +532,24 @@ test "frame deserializer" {
             resetAndWrite(fbs_type, &fbs, tc.b);
             var result = try d.readConsistency();
             testing.expectEqual(tc.exp, result);
+        }
+    }
+
+    // String map
+    {
+        resetAndWrite(fbs_type, &fbs, "\x00\x02\x00\x03foo\x00\x03baz\x00\x03bar\x00\x03baz");
+
+        var result = try d.readStringMap();
+        defer result.deinit();
+        testing.expectEqual(@as(usize, 2), result.count());
+
+        var it = result.iterator();
+        while (it.next()) |entry| {
+            testing.expect(std.mem.eql(u8, "foo", entry.key) or std.mem.eql(u8, "bar", entry.key));
+            testing.expectEqualSlices(u8, "baz", entry.value);
+
+            defer testing.allocator.free(entry.key);
+            defer testing.allocator.free(entry.value);
         }
     }
 }
