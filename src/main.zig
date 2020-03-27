@@ -272,7 +272,9 @@ pub fn FrameDeserializer(comptime InStreamType: type) type {
             return map;
         }
 
-        pub fn readStringMultimap(self: *Self) ![]ArrayList(KeyValue) {}
+        pub fn readStringMultimap(self: *Self) ![]ArrayList(KeyValue) {
+            unreachable;
+        }
     };
 }
 
