@@ -56,9 +56,17 @@ const FrameHeader = packed struct {
     stream: u16,
     opcode: Opcode,
     body_len: u32,
+
+    pub fn read(comptime InStreamType: type, in: InStreamType) !FrameHeader {
+        var deserializer = std.io.deserializer(builtin.Endian.Big, std.io.Packing.Byte, in);
+        return deserializer.deserialize(FrameHeader);
+    }
 };
 
-const CompressionAlgorithm = enum {};
+const CompressionAlgorithm = enum {
+    LZ4,
+    Snappy,
+};
 
 const ValueTag = enum {
     Set,
@@ -69,18 +77,60 @@ const Value = union(ValueTag) {
     NotSet: void,
 };
 
-const StartupFrame = struct {
-    cql_version: []const u8,
-    compression: ?CompressionAlgorithm,
+const StartupFrameError = error{
+    InvalidCQLVersion,
+    InvalidCompression,
 };
 
-fn readStartupFrame(allocator: *std.mem.Allocator, deserializer: FrameDeserializer) !StartupFrame {
-    const map = try deserializer.readStringMap();
+const StartupFrame = struct {
+    const Self = @This();
 
-    unreachable;
-}
+    allocator: *std.mem.Allocator,
 
-pub fn FrameDeserializer(comptime InStreamType: type) type {
+    cql_version: []const u8,
+    compression: ?CompressionAlgorithm,
+
+    pub fn deinit(self: *Self) void {
+        self.allocator.free(self.cql_version);
+    }
+
+    pub fn read(allocator: *std.mem.Allocator, comptime FramerType: type, framer: *FramerType) !StartupFrame {
+        const map = try framer.readStringMap();
+        defer framer.deinitStringMap(map);
+
+        var frame = Self{
+            .allocator = allocator,
+            .cql_version = undefined,
+            .compression = null,
+        };
+
+        // TODO(vincent): maybe avoid copying the strings ?
+
+        // CQL_VERSION is mandatory and the only version supported is 3.0.0 right now.
+        if (map.get("CQL_VERSION")) |version| {
+            if (!std.mem.eql(u8, "3.0.0", version.value)) {
+                return StartupFrameError.InvalidCQLVersion;
+            }
+            frame.cql_version = try std.mem.dupe(allocator, u8, version.value);
+        } else {
+            return StartupFrameError.InvalidCQLVersion;
+        }
+
+        if (map.get("COMPRESSION")) |compression| {
+            if (std.mem.eql(u8, compression.value, "lz4")) {
+                frame.compression = CompressionAlgorithm.LZ4;
+            } else if (std.mem.eql(u8, compression.value, "snappy")) {
+                frame.compression = CompressionAlgorithm.Snappy;
+            } else {
+                return StartupFrameError.InvalidCompression;
+            }
+        }
+
+        return frame;
+    }
+};
+
+pub fn Framer(comptime InStreamType: type) type {
     const BytesType = enum {
         Short,
         Long,
@@ -257,6 +307,15 @@ pub fn FrameDeserializer(comptime InStreamType: type) type {
             return @intToEnum(Consistency, n);
         }
 
+        pub fn deinitStringMap(self: *Self, map: std.StringHashMap([]const u8)) void {
+            var it = map.iterator();
+            while (it.next()) |entry| {
+                self.allocator.free(entry.key);
+                self.allocator.free(entry.value);
+            }
+            map.deinit();
+        }
+
         pub fn readStringMap(self: *Self) !std.StringHashMap([]const u8) {
             const n = try self.readInt(u16);
 
@@ -334,7 +393,7 @@ fn resetAndWrite(comptime T: type, fbs: *T, data: []const u8) void {
     fbs.reset();
 }
 
-test "frame deserializer" {
+test "framer" {
     // Do some setup
     //
 
@@ -344,33 +403,33 @@ test "frame deserializer" {
     const fbs_type = @TypeOf(fbs);
     var in_stream = fbs.inStream();
 
-    // Make our frame deserializer
-    var d = FrameDeserializer(@TypeOf(in_stream)).init(std.testing.allocator, in_stream);
+    // Make our framer
+    var framer = Framer(@TypeOf(in_stream)).init(testing.allocator, in_stream);
 
     // Int types
 
     resetAndWrite(fbs_type, &fbs, "\x00\x20\x11\x00");
-    testing.expectEqual(@as(i32, 2101504), try d.readInt(i32));
+    testing.expectEqual(@as(i32, 2101504), try framer.readInt(i32));
 
     resetAndWrite(fbs_type, &fbs, "\x00\x00\x40\x00\x00\x20\x11\x00");
-    testing.expectEqual(@as(i64, 70368746279168), try d.readInt(i64));
+    testing.expectEqual(@as(i64, 70368746279168), try framer.readInt(i64));
 
     resetAndWrite(fbs_type, &fbs, "\x11\x00");
-    testing.expectEqual(@as(u16, 4352), try d.readInt(u16));
+    testing.expectEqual(@as(u16, 4352), try framer.readInt(u16));
 
     resetAndWrite(fbs_type, &fbs, "\xff");
-    testing.expectEqual(@as(u8, 0xFF), try d.readByte());
+    testing.expectEqual(@as(u8, 0xFF), try framer.readByte());
 
     // Strings
     {
         resetAndWrite(fbs_type, &fbs, "\x00\x06foobar");
-        var result = try d.readString();
+        var result = try framer.readString();
 
         defer std.testing.allocator.free(result);
         testing.expectEqualSlices(u8, "foobar", result);
 
         resetAndWrite(fbs_type, &fbs, "\x00\x00\x00\x06foobar");
-        result = try d.readLongString();
+        result = try framer.readLongString();
 
         defer std.testing.allocator.free(result);
         testing.expectEqualSlices(u8, "foobar", result);
@@ -382,14 +441,14 @@ test "frame deserializer" {
         try std.os.getrandom(&uuid);
         resetAndWrite(fbs_type, &fbs, &uuid);
 
-        testing.expectEqualSlices(u8, &uuid, &(try d.readUUID()));
+        testing.expectEqualSlices(u8, &uuid, &(try framer.readUUID()));
     }
 
     // String list
     {
         resetAndWrite(fbs_type, &fbs, "\x00\x02\x00\x03foo\x00\x03bar");
 
-        var list = try d.readStringList();
+        var list = try framer.readStringList();
         defer list.deinit();
 
         var result = list.toOwnedSlice();
@@ -410,7 +469,7 @@ test "frame deserializer" {
     {
         // int32 + bytes
         resetAndWrite(fbs_type, &fbs, "\x00\x00\x00\x0A123456789A");
-        var result = try d.readBytes();
+        var result = try framer.readBytes();
         if (result) |bytes| {
             defer std.testing.allocator.free(bytes);
             testing.expectEqualSlices(u8, "123456789A", bytes);
@@ -419,7 +478,7 @@ test "frame deserializer" {
         }
 
         resetAndWrite(fbs_type, &fbs, "\x00\x00\x00\x00");
-        result = try d.readBytes();
+        result = try framer.readBytes();
         if (result) |bytes| {
             defer std.testing.allocator.free(bytes);
             testing.expectEqualSlices(u8, "", bytes);
@@ -428,12 +487,12 @@ test "frame deserializer" {
         }
 
         resetAndWrite(fbs_type, &fbs, "\xff\xff\xff\xff");
-        result = try d.readBytes();
+        result = try framer.readBytes();
         testing.expect(result == null);
 
         // int16 + bytes
         resetAndWrite(fbs_type, &fbs, "\x00\x0A123456789A");
-        result = try d.readShortBytes();
+        result = try framer.readShortBytes();
         if (result) |bytes| {
             defer std.testing.allocator.free(bytes);
             testing.expectEqualSlices(u8, "123456789A", bytes);
@@ -442,7 +501,7 @@ test "frame deserializer" {
         }
 
         resetAndWrite(fbs_type, &fbs, "\x00\x00");
-        result = try d.readShortBytes();
+        result = try framer.readShortBytes();
         if (result) |bytes| {
             defer std.testing.allocator.free(bytes);
             testing.expectEqualSlices(u8, "", bytes);
@@ -451,7 +510,7 @@ test "frame deserializer" {
         }
 
         resetAndWrite(fbs_type, &fbs, "\xff\xff");
-        result = try d.readShortBytes();
+        result = try framer.readShortBytes();
         testing.expect(result == null);
     }
 
@@ -460,7 +519,7 @@ test "frame deserializer" {
         // Normal value
         resetAndWrite(fbs_type, &fbs, "\x00\x00\x00\x02\xFE\xFF");
 
-        var value = try d.readValue();
+        var value = try framer.readValue();
         if (value) |v| {
             testing.expect(v == .Set);
 
@@ -475,7 +534,7 @@ test "frame deserializer" {
 
         resetAndWrite(fbs_type, &fbs, "\xff\xff\xff\xff");
 
-        value = try d.readValue();
+        value = try framer.readValue();
         if (value) |v| {
             std.debug.panic("expected bytes to be null", .{});
         }
@@ -484,7 +543,7 @@ test "frame deserializer" {
 
         resetAndWrite(fbs_type, &fbs, "\xff\xff\xff\xfe");
 
-        value = try d.readValue();
+        value = try framer.readValue();
         if (value) |v| {
             testing.expect(v == .NotSet);
         } else {
@@ -497,7 +556,7 @@ test "frame deserializer" {
         // IPv4
         resetAndWrite(fbs_type, &fbs, "\x04\x12\x34\x56\x78\x00\x00\x00\x22");
 
-        var result = try d.readInet();
+        var result = try framer.readInet();
         testing.expectEqual(@as(u16, os.AF_INET), result.any.family);
         testing.expectEqual(@as(u32, 0x78563412), result.in.addr);
         testing.expectEqual(@as(u16, 34), result.getPort());
@@ -505,7 +564,7 @@ test "frame deserializer" {
         // IPv6
         resetAndWrite(fbs_type, &fbs, "\x10\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\x00\x00\x00\x22");
 
-        result = try d.readInet();
+        result = try framer.readInet();
         testing.expectEqual(@as(u16, os.AF_INET6), result.any.family);
         testing.expectEqualSlices(u8, "\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff", &result.in6.addr);
         testing.expectEqual(@as(u16, 34), result.getPort());
@@ -513,7 +572,7 @@ test "frame deserializer" {
         // IPv4 without port
         resetAndWrite(fbs_type, &fbs, "\x04\x12\x34\x56\x78");
 
-        result = try d.readInetaddr();
+        result = try framer.readInetaddr();
         testing.expectEqual(@as(u16, os.AF_INET), result.any.family);
         testing.expectEqual(@as(u32, 0x78563412), result.in.addr);
         testing.expectEqual(@as(u16, 0), result.getPort());
@@ -521,7 +580,7 @@ test "frame deserializer" {
         // IPv6 without port
         resetAndWrite(fbs_type, &fbs, "\x10\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff");
 
-        result = try d.readInetaddr();
+        result = try framer.readInetaddr();
         testing.expectEqual(@as(u16, os.AF_INET6), result.any.family);
         testing.expectEqualSlices(u8, "\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff", &result.in6.addr);
         testing.expectEqual(@as(u16, 0), result.getPort());
@@ -550,7 +609,7 @@ test "frame deserializer" {
 
         for (testCases) |tc| {
             resetAndWrite(fbs_type, &fbs, tc.b);
-            var result = try d.readConsistency();
+            var result = try framer.readConsistency();
             testing.expectEqual(tc.exp, result);
         }
     }
@@ -559,7 +618,7 @@ test "frame deserializer" {
     {
         resetAndWrite(fbs_type, &fbs, "\x00\x02\x00\x03foo\x00\x03baz\x00\x03bar\x00\x03baz");
 
-        var result = try d.readStringMap();
+        var result = try framer.readStringMap();
         defer result.deinit();
         testing.expectEqual(@as(usize, 2), result.count());
 
@@ -577,7 +636,7 @@ test "frame deserializer" {
     {
         resetAndWrite(fbs_type, &fbs, "\x00\x02\x00\x03foo\x00\x03bar\x00\x03foo\x00\x03baz");
 
-        var result = try d.readStringMultimap();
+        var result = try framer.readStringMultimap();
         defer result.deinit();
         testing.expectEqual(@as(usize, 1), result.count());
 
@@ -631,12 +690,12 @@ test "parse protocol version" {
 
         var in = std.io.fixedBufferStream(&tc.b);
 
-        var deserializer = std.io.deserializer(builtin.Endian.Big, std.io.Packing.Byte, in.inStream());
+        var d = std.io.deserializer(builtin.Endian.Big, std.io.Packing.Byte, in.inStream());
         if (tc.err) |err| {
-            testing.expectError(err, deserializer.deserialize(ProtocolVersion));
+            testing.expectError(err, d.deserialize(ProtocolVersion));
         } else {
-            testing.expectEqual(tc.exp, try deserializer.deserialize(ProtocolVersion));
-            testing.expectEqual(tc.exp, try deserializer.deserialize(ProtocolVersion));
+            testing.expectEqual(tc.exp, try d.deserialize(ProtocolVersion));
+            testing.expectEqual(tc.exp, try d.deserialize(ProtocolVersion));
         }
     }
 }
@@ -646,9 +705,7 @@ test "parse startup frame header" {
     const frame = "\x04\x00\x00\x00\x01\x00\x00\x00\x16\x00\x01\x00\x0b\x43\x51\x4c\x5f\x56\x45\x52\x53\x49\x4f\x4e\x00\x05\x33\x2e\x30\x2e\x30";
     var in = std.io.fixedBufferStream(frame);
 
-    var deserializer = std.io.deserializer(builtin.Endian.Big, std.io.Packing.Byte, in.inStream());
-
-    const header = try deserializer.deserialize(FrameHeader);
+    const header = try FrameHeader.read(@TypeOf(in.inStream()), in.inStream());
 
     testing.expectEqual(ProtocolVersion.V4, header.version);
     testing.expectEqual(@as(u8, 0), header.flags);
@@ -659,10 +716,12 @@ test "parse startup frame header" {
 
 test "parse startup framer" {
     // from cqlsh exported via Wireshark
-    const frame = "\x04\x00\x00\x00\x01\x00\x00\x00\x16\x00\x01\x00\x0b\x43\x51\x4c\x5f\x56\x45\x52\x53\x49\x4f\x4e\x00\x05\x33\x2e\x30\x2e\x30";
-    var in = std.io.fixedBufferStream(frame);
+    const data = "\x04\x00\x00\x00\x01\x00\x00\x00\x16\x00\x01\x00\x0b\x43\x51\x4c\x5f\x56\x45\x52\x53\x49\x4f\x4e\x00\x05\x33\x2e\x30\x2e\x30";
+    var fbs = std.io.fixedBufferStream(data);
+    var in_stream = fbs.inStream();
 
-    var deserializer = std.io.deserializer(builtin.Endian.Big, std.io.Packing.Byte, in.inStream());
+    const header = try FrameHeader.read(@TypeOf(in_stream), in_stream);
 
-    const header = try deserializer.deserialize(FrameHeader);
+    var framer = Framer(@TypeOf(in_stream)).init(testing.allocator, in_stream);
+    const frame = try StartupFrame.read(testing.allocator, @TypeOf(framer), &framer);
 }
