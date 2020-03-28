@@ -384,20 +384,15 @@ fn resetAndWrite(comptime T: type, fbs: *T, data: []const u8) void {
     fbs.reset();
 }
 
-test "framer" {
-    // Do some setup
-    //
-
-    // Make a reusable stream
+test "framer: read int" {
     var buf: [1024]u8 = undefined;
     var fbs = std.io.fixedBufferStream(&buf);
     const fbs_type = @TypeOf(fbs);
     var in_stream = fbs.inStream();
 
-    // Make our framer
     var framer = Framer(@TypeOf(in_stream)).init(testing.allocator, in_stream);
 
-    // Int types
+    // read all int types
 
     resetAndWrite(fbs_type, &fbs, "\x00\x20\x11\x00");
     testing.expectEqual(@as(i32, 2101504), try framer.readInt(i32));
@@ -410,14 +405,25 @@ test "framer" {
 
     resetAndWrite(fbs_type, &fbs, "\xff");
     testing.expectEqual(@as(u8, 0xFF), try framer.readByte());
+}
 
-    // Strings
+test "framer: read strings and bytes" {
+    var buf: [1024]u8 = undefined;
+    var fbs = std.io.fixedBufferStream(&buf);
+    const fbs_type = @TypeOf(fbs);
+    var in_stream = fbs.inStream();
+
+    var framer = Framer(@TypeOf(in_stream)).init(testing.allocator, in_stream);
+
+    // short string
     {
         resetAndWrite(fbs_type, &fbs, "\x00\x06foobar");
         var result = try framer.readString();
 
         defer std.testing.allocator.free(result);
         testing.expectEqualSlices(u8, "foobar", result);
+
+        // long string
 
         resetAndWrite(fbs_type, &fbs, "\x00\x00\x00\x06foobar");
         result = try framer.readLongString();
@@ -426,37 +432,6 @@ test "framer" {
         testing.expectEqualSlices(u8, "foobar", result);
     }
 
-    // UUID
-    {
-        var uuid: [16]u8 = undefined;
-        try std.os.getrandom(&uuid);
-        resetAndWrite(fbs_type, &fbs, &uuid);
-
-        testing.expectEqualSlices(u8, &uuid, &(try framer.readUUID()));
-    }
-
-    // String list
-    {
-        resetAndWrite(fbs_type, &fbs, "\x00\x02\x00\x03foo\x00\x03bar");
-
-        var list = try framer.readStringList();
-        defer list.deinit();
-
-        var result = list.toOwnedSlice();
-        defer std.testing.allocator.free(result);
-
-        testing.expectEqual(@as(usize, 2), result.len);
-
-        var tmp = result[0];
-        defer std.testing.allocator.free(tmp);
-        testing.expectEqualSlices(u8, "foo", tmp);
-
-        tmp = result[1];
-        defer std.testing.allocator.free(tmp);
-        testing.expectEqualSlices(u8, "bar", tmp);
-    }
-
-    // Bytes and Short bytes
     {
         // int32 + bytes
         resetAndWrite(fbs_type, &fbs, "\x00\x00\x00\x0A123456789A");
@@ -504,142 +479,222 @@ test "framer" {
         result = try framer.readShortBytes();
         testing.expect(result == null);
     }
+}
 
-    // Value
-    {
-        // Normal value
-        resetAndWrite(fbs_type, &fbs, "\x00\x00\x00\x02\xFE\xFF");
+test "framer: read uuid" {
+    var buf: [1024]u8 = undefined;
+    var fbs = std.io.fixedBufferStream(&buf);
+    const fbs_type = @TypeOf(fbs);
+    var in_stream = fbs.inStream();
 
-        var value = try framer.readValue();
-        if (value) |v| {
-            testing.expect(v == .Set);
+    var framer = Framer(@TypeOf(in_stream)).init(testing.allocator, in_stream);
 
-            const bytes = v.Set;
-            defer std.testing.allocator.free(bytes);
-            testing.expectEqualSlices(u8, "\xFE\xFF", bytes);
-        } else {
-            std.debug.panic("expected bytes to not be null", .{});
-        }
+    // read UUID
 
-        // Null value
+    var uuid: [16]u8 = undefined;
+    try std.os.getrandom(&uuid);
+    resetAndWrite(fbs_type, &fbs, &uuid);
 
-        resetAndWrite(fbs_type, &fbs, "\xff\xff\xff\xff");
+    testing.expectEqualSlices(u8, &uuid, &(try framer.readUUID()));
+}
 
-        value = try framer.readValue();
-        if (value) |v| {
-            std.debug.panic("expected bytes to be null", .{});
-        }
+test "framer: read string list" {
+    var buf: [1024]u8 = undefined;
+    var fbs = std.io.fixedBufferStream(&buf);
+    const fbs_type = @TypeOf(fbs);
+    var in_stream = fbs.inStream();
 
-        // "Not set" value
+    var framer = Framer(@TypeOf(in_stream)).init(testing.allocator, in_stream);
 
-        resetAndWrite(fbs_type, &fbs, "\xff\xff\xff\xfe");
+    // read string lists
 
-        value = try framer.readValue();
-        if (value) |v| {
-            testing.expect(v == .NotSet);
-        } else {
-            std.debug.panic("expected bytes to not be null", .{});
-        }
+    resetAndWrite(fbs_type, &fbs, "\x00\x02\x00\x03foo\x00\x03bar");
+
+    var list = try framer.readStringList();
+    defer list.deinit();
+
+    var result = list.toOwnedSlice();
+    defer std.testing.allocator.free(result);
+
+    testing.expectEqual(@as(usize, 2), result.len);
+
+    var tmp = result[0];
+    defer std.testing.allocator.free(tmp);
+    testing.expectEqualSlices(u8, "foo", tmp);
+
+    tmp = result[1];
+    defer std.testing.allocator.free(tmp);
+    testing.expectEqualSlices(u8, "bar", tmp);
+}
+
+test "framer: read value" {
+    var buf: [1024]u8 = undefined;
+    var fbs = std.io.fixedBufferStream(&buf);
+    const fbs_type = @TypeOf(fbs);
+    var in_stream = fbs.inStream();
+
+    var framer = Framer(@TypeOf(in_stream)).init(testing.allocator, in_stream);
+
+    // Normal value
+    resetAndWrite(fbs_type, &fbs, "\x00\x00\x00\x02\xFE\xFF");
+
+    var value = try framer.readValue();
+    if (value) |v| {
+        testing.expect(v == .Set);
+
+        const bytes = v.Set;
+        defer std.testing.allocator.free(bytes);
+        testing.expectEqualSlices(u8, "\xFE\xFF", bytes);
+    } else {
+        std.debug.panic("expected bytes to not be null", .{});
     }
 
-    // Inet
-    {
-        // IPv4
-        resetAndWrite(fbs_type, &fbs, "\x04\x12\x34\x56\x78\x00\x00\x00\x22");
+    // Null value
 
-        var result = try framer.readInet();
-        testing.expectEqual(@as(u16, os.AF_INET), result.any.family);
-        testing.expectEqual(@as(u32, 0x78563412), result.in.addr);
-        testing.expectEqual(@as(u16, 34), result.getPort());
+    resetAndWrite(fbs_type, &fbs, "\xff\xff\xff\xff");
 
-        // IPv6
-        resetAndWrite(fbs_type, &fbs, "\x10\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\x00\x00\x00\x22");
-
-        result = try framer.readInet();
-        testing.expectEqual(@as(u16, os.AF_INET6), result.any.family);
-        testing.expectEqualSlices(u8, "\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff", &result.in6.addr);
-        testing.expectEqual(@as(u16, 34), result.getPort());
-
-        // IPv4 without port
-        resetAndWrite(fbs_type, &fbs, "\x04\x12\x34\x56\x78");
-
-        result = try framer.readInetaddr();
-        testing.expectEqual(@as(u16, os.AF_INET), result.any.family);
-        testing.expectEqual(@as(u32, 0x78563412), result.in.addr);
-        testing.expectEqual(@as(u16, 0), result.getPort());
-
-        // IPv6 without port
-        resetAndWrite(fbs_type, &fbs, "\x10\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff");
-
-        result = try framer.readInetaddr();
-        testing.expectEqual(@as(u16, os.AF_INET6), result.any.family);
-        testing.expectEqualSlices(u8, "\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff", &result.in6.addr);
-        testing.expectEqual(@as(u16, 0), result.getPort());
+    value = try framer.readValue();
+    if (value) |v| {
+        std.debug.panic("expected bytes to be null", .{});
     }
 
-    // Consistency
-    {
-        const testCase = struct {
-            exp: Consistency,
-            b: []const u8,
-        };
+    // "Not set" value
 
-        const testCases = [_]testCase{
-            testCase{ .exp = Consistency.Any, .b = "\x00\x00" },
-            testCase{ .exp = Consistency.One, .b = "\x00\x01" },
-            testCase{ .exp = Consistency.Two, .b = "\x00\x02" },
-            testCase{ .exp = Consistency.Three, .b = "\x00\x03" },
-            testCase{ .exp = Consistency.Quorum, .b = "\x00\x04" },
-            testCase{ .exp = Consistency.All, .b = "\x00\x05" },
-            testCase{ .exp = Consistency.LocalQuorum, .b = "\x00\x06" },
-            testCase{ .exp = Consistency.EachQuorum, .b = "\x00\x07" },
-            testCase{ .exp = Consistency.Serial, .b = "\x00\x08" },
-            testCase{ .exp = Consistency.LocalSerial, .b = "\x00\x09" },
-            testCase{ .exp = Consistency.LocalOne, .b = "\x00\x0A" },
-        };
+    resetAndWrite(fbs_type, &fbs, "\xff\xff\xff\xfe");
 
-        for (testCases) |tc| {
-            resetAndWrite(fbs_type, &fbs, tc.b);
-            var result = try framer.readConsistency();
-            testing.expectEqual(tc.exp, result);
-        }
+    value = try framer.readValue();
+    if (value) |v| {
+        testing.expect(v == .NotSet);
+    } else {
+        std.debug.panic("expected bytes to not be null", .{});
     }
+}
 
-    // String map
-    {
-        resetAndWrite(fbs_type, &fbs, "\x00\x02\x00\x03foo\x00\x03baz\x00\x03bar\x00\x03baz");
+test "framer: read inet and inetaddr" {
+    var buf: [1024]u8 = undefined;
+    var fbs = std.io.fixedBufferStream(&buf);
+    const fbs_type = @TypeOf(fbs);
+    var in_stream = fbs.inStream();
 
-        var result = try framer.readStringMap();
-        defer result.deinit();
-        testing.expectEqual(@as(usize, 2), result.count());
+    var framer = Framer(@TypeOf(in_stream)).init(testing.allocator, in_stream);
 
-        var it = result.iterator();
-        while (it.next()) |entry| {
-            testing.expect(std.mem.eql(u8, "foo", entry.key) or std.mem.eql(u8, "bar", entry.key));
-            testing.expectEqualSlices(u8, "baz", entry.value);
-        }
+    // IPv4
+    resetAndWrite(fbs_type, &fbs, "\x04\x12\x34\x56\x78\x00\x00\x00\x22");
+
+    var result = try framer.readInet();
+    testing.expectEqual(@as(u16, os.AF_INET), result.any.family);
+    testing.expectEqual(@as(u32, 0x78563412), result.in.addr);
+    testing.expectEqual(@as(u16, 34), result.getPort());
+
+    // IPv6
+    resetAndWrite(fbs_type, &fbs, "\x10\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\x00\x00\x00\x22");
+
+    result = try framer.readInet();
+    testing.expectEqual(@as(u16, os.AF_INET6), result.any.family);
+    testing.expectEqualSlices(u8, "\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff", &result.in6.addr);
+    testing.expectEqual(@as(u16, 34), result.getPort());
+
+    // IPv4 without port
+    resetAndWrite(fbs_type, &fbs, "\x04\x12\x34\x56\x78");
+
+    result = try framer.readInetaddr();
+    testing.expectEqual(@as(u16, os.AF_INET), result.any.family);
+    testing.expectEqual(@as(u32, 0x78563412), result.in.addr);
+    testing.expectEqual(@as(u16, 0), result.getPort());
+
+    // IPv6 without port
+    resetAndWrite(fbs_type, &fbs, "\x10\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff");
+
+    result = try framer.readInetaddr();
+    testing.expectEqual(@as(u16, os.AF_INET6), result.any.family);
+    testing.expectEqualSlices(u8, "\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff", &result.in6.addr);
+    testing.expectEqual(@as(u16, 0), result.getPort());
+}
+
+test "framer: read consistency" {
+    var buf: [1024]u8 = undefined;
+    var fbs = std.io.fixedBufferStream(&buf);
+    const fbs_type = @TypeOf(fbs);
+    var in_stream = fbs.inStream();
+
+    var framer = Framer(@TypeOf(in_stream)).init(testing.allocator, in_stream);
+
+    const testCase = struct {
+        exp: Consistency,
+        b: []const u8,
+    };
+
+    const testCases = [_]testCase{
+        testCase{ .exp = Consistency.Any, .b = "\x00\x00" },
+        testCase{ .exp = Consistency.One, .b = "\x00\x01" },
+        testCase{ .exp = Consistency.Two, .b = "\x00\x02" },
+        testCase{ .exp = Consistency.Three, .b = "\x00\x03" },
+        testCase{ .exp = Consistency.Quorum, .b = "\x00\x04" },
+        testCase{ .exp = Consistency.All, .b = "\x00\x05" },
+        testCase{ .exp = Consistency.LocalQuorum, .b = "\x00\x06" },
+        testCase{ .exp = Consistency.EachQuorum, .b = "\x00\x07" },
+        testCase{ .exp = Consistency.Serial, .b = "\x00\x08" },
+        testCase{ .exp = Consistency.LocalSerial, .b = "\x00\x09" },
+        testCase{ .exp = Consistency.LocalOne, .b = "\x00\x0A" },
+    };
+
+    for (testCases) |tc| {
+        resetAndWrite(fbs_type, &fbs, tc.b);
+        var result = try framer.readConsistency();
+        testing.expectEqual(tc.exp, result);
     }
+}
 
-    // String multimap
-    {
-        resetAndWrite(fbs_type, &fbs, "\x00\x02\x00\x03foo\x00\x03bar\x00\x03foo\x00\x03baz");
+test "framer: read stringmap" {
+    var buf: [1024]u8 = undefined;
+    var fbs = std.io.fixedBufferStream(&buf);
+    const fbs_type = @TypeOf(fbs);
+    var in_stream = fbs.inStream();
 
-        var result = try framer.readStringMultimap();
-        defer result.deinit();
-        testing.expectEqual(@as(usize, 1), result.count());
+    var framer = Framer(@TypeOf(in_stream)).init(testing.allocator, in_stream);
 
-        var it = result.iterator();
-        if (it.next()) |entry| {
-            testing.expect(std.mem.eql(u8, "foo", entry.key));
+    // 2 elements string map
 
-            const slice = entry.value.span();
+    resetAndWrite(fbs_type, &fbs, "\x00\x02\x00\x03foo\x00\x03baz\x00\x03bar\x00\x03baz");
 
-            testing.expectEqual(@as(usize, 2), slice.len);
-            testing.expectEqualSlices(u8, "bar", slice[0]);
-            testing.expectEqualSlices(u8, "baz", slice[1]);
-        } else {
-            std.debug.panic("expected bytes to not be null", .{});
-        }
+    var result = try framer.readStringMap();
+    defer result.deinit();
+    testing.expectEqual(@as(usize, 2), result.count());
+
+    var it = result.iterator();
+    while (it.next()) |entry| {
+        testing.expect(std.mem.eql(u8, "foo", entry.key) or std.mem.eql(u8, "bar", entry.key));
+        testing.expectEqualSlices(u8, "baz", entry.value);
+    }
+}
+
+test "framer: read string multimap" {
+    var buf: [1024]u8 = undefined;
+    var fbs = std.io.fixedBufferStream(&buf);
+    const fbs_type = @TypeOf(fbs);
+    var in_stream = fbs.inStream();
+
+    var framer = Framer(@TypeOf(in_stream)).init(testing.allocator, in_stream);
+
+    // 1 key, 2 values multimap
+
+    resetAndWrite(fbs_type, &fbs, "\x00\x02\x00\x03foo\x00\x03bar\x00\x03foo\x00\x03baz");
+
+    var result = try framer.readStringMultimap();
+    defer result.deinit();
+    testing.expectEqual(@as(usize, 1), result.count());
+
+    var it = result.iterator();
+    if (it.next()) |entry| {
+        testing.expect(std.mem.eql(u8, "foo", entry.key));
+
+        const slice = entry.value.span();
+
+        testing.expectEqual(@as(usize, 2), slice.len);
+        testing.expectEqualSlices(u8, "bar", slice[0]);
+        testing.expectEqualSlices(u8, "baz", slice[1]);
+    } else {
+        std.debug.panic("expected bytes to not be null", .{});
     }
 }
 
@@ -688,27 +743,18 @@ test "parse protocol version" {
     }
 }
 
-test "parse startup frame header" {
-    // from cqlsh exported via Wireshark
-    const frame = "\x04\x00\x00\x00\x01\x00\x00\x00\x16\x00\x01\x00\x0b\x43\x51\x4c\x5f\x56\x45\x52\x53\x49\x4f\x4e\x00\x05\x33\x2e\x30\x2e\x30";
-    var in = std.io.fixedBufferStream(frame);
-
-    const header = try FrameHeader.read(@TypeOf(in.inStream()), in.inStream());
-
-    testing.expectEqual(ProtocolVersion.V4, header.version);
-    testing.expectEqual(@as(u8, 0), header.flags);
-    testing.expectEqual(@as(u16, 0), header.stream);
-    testing.expectEqual(Opcode.Startup, header.opcode);
-    testing.expectEqual(@as(u32, 22), header.body_len);
-}
-
-test "parse startup framer" {
+test "frame: parse startup frame" {
     // from cqlsh exported via Wireshark
     const data = "\x04\x00\x00\x00\x01\x00\x00\x00\x16\x00\x01\x00\x0b\x43\x51\x4c\x5f\x56\x45\x52\x53\x49\x4f\x4e\x00\x05\x33\x2e\x30\x2e\x30";
     var fbs = std.io.fixedBufferStream(data);
     var in_stream = fbs.inStream();
 
     const header = try FrameHeader.read(@TypeOf(in_stream), in_stream);
+    testing.expectEqual(ProtocolVersion.V4, header.version);
+    testing.expectEqual(@as(u8, 0), header.flags);
+    testing.expectEqual(@as(u16, 0), header.stream);
+    testing.expectEqual(Opcode.Startup, header.opcode);
+    testing.expectEqual(@as(u32, 22), header.body_len);
 
     var framer = Framer(@TypeOf(in_stream)).init(testing.allocator, in_stream);
     const frame = try StartupFrame.read(testing.allocator, @TypeOf(framer), &framer);
