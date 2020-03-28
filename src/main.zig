@@ -4,7 +4,6 @@ const net = std.net;
 const os = std.os;
 const testing = std.testing;
 const ArrayList = std.ArrayList;
-const StringHashMap = std.StringHashMap;
 
 const ProtocolVersion = packed enum(u8) {
     V3,
@@ -79,20 +78,51 @@ fn readStartupFrame(allocator: *std.mem.Allocator, deserializer: FrameDeserializ
     unreachable;
 }
 
-const StringMap = struct {
+const StringMultimap = struct {
     const Self = @This();
 
-    allocator: *std.mem.Allocator,
-    map: *StringHashMap(ArrayList([]const u8)),
+    const MapType = @TypeOf(std.StringHashMap(ArrayList([]const u8)));
+
+    // map: std.StringHashMap(ArrayList([]const u8)),
+    map: MapType,
+
+    const KV = struct {
+        key: []const u8,
+        value: []const u8,
+    };
+
+    // const Iterator = struct {
+    //     outer_it: *Self.map.Iterator,
+
+    //     pub fn next(it: *Iterator) ?*KV {}
+    // };
 
     pub fn init(allocator: *std.mem.Allocator) Self {
         return Self{
             .allocator = allocator,
-            .map = StringHashMap(ArrayList([]const u8)).init(allocator),
+            .map = std.StringHashMap(ArrayList([]const u8)).init(allocator),
         };
     }
 
-    pub fn deinit() void {}
+    pub fn put(self: *Self, key: []const u8, value: []const u8) !void {
+        const old_value = try self.map.getOrPut(key);
+        if (old_value.found_existing) {
+            _ = try old_value.kv.value.append(value);
+        } else {
+            var list = ArrayList([]const u8).init(self.allocator);
+            _ = try list.append(value);
+
+            old_value.kv.value = list;
+        }
+    }
+
+    pub fn count(self: *Self) usize {
+        return self.map.count();
+    }
+
+    // pub fn iterator(self: *Self) @TypeOf(Iterator) {
+    //     return self.map.iterator();
+    // }
 
     pub fn deserialize() void {}
 };
@@ -274,10 +304,10 @@ pub fn FrameDeserializer(comptime InStreamType: type) type {
             return @intToEnum(Consistency, n);
         }
 
-        pub fn readStringMap(self: *Self) !StringHashMap([]const u8) {
+        pub fn readStringMap(self: *Self) !std.StringHashMap([]const u8) {
             const n = try self.readInt(u16);
 
-            var map = StringHashMap([]const u8).init(self.allocator);
+            var map = std.StringHashMap([]const u8).init(self.allocator);
 
             var i: usize = 0;
             while (i < n) : (i += 1) {
@@ -290,25 +320,17 @@ pub fn FrameDeserializer(comptime InStreamType: type) type {
             return map;
         }
 
-        pub fn readStringMultimap(self: *Self) !StringHashMap(ArrayList([]const u8)) {
+        pub fn readStringMultimap(self: *Self) !StringMultimap {
             const n = try self.readInt(u16);
 
-            var map = StringHashMap(ArrayList([]const u8)).init(self.allocator);
+            var map = StringMultimap.init(self.allocator);
 
             var i: usize = 0;
             while (i < n) : (i += 1) {
                 const k = try self.readString();
                 const v = try self.readString();
 
-                const old_value = try map.getOrPut(k);
-                if (old_value.found_existing) {
-                    _ = try old_value.kv.value.append(v);
-                } else {
-                    var list = ArrayList([]const u8).init(self.allocator);
-                    _ = try list.append(v);
-
-                    old_value.kv.value = list;
-                }
+                _ = try map.put(k, v);
             }
 
             return map;
