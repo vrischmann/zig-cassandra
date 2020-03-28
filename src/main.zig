@@ -4,7 +4,8 @@ const net = std.net;
 const os = std.os;
 const testing = std.testing;
 const ArrayList = std.ArrayList;
-const StringHashMap = std.StringHashMap;
+
+const Multimap = @import("multimap.zig").Multimap;
 
 const ProtocolVersion = packed enum(u8) {
     V3,
@@ -78,24 +79,6 @@ fn readStartupFrame(allocator: *std.mem.Allocator, deserializer: FrameDeserializ
 
     unreachable;
 }
-
-const StringMap = struct {
-    const Self = @This();
-
-    allocator: *std.mem.Allocator,
-    map: *StringHashMap(ArrayList([]const u8)),
-
-    pub fn init(allocator: *std.mem.Allocator) Self {
-        return Self{
-            .allocator = allocator,
-            .map = StringHashMap(ArrayList([]const u8)).init(allocator),
-        };
-    }
-
-    pub fn deinit() void {}
-
-    pub fn deserialize() void {}
-};
 
 pub fn FrameDeserializer(comptime InStreamType: type) type {
     const BytesType = enum {
@@ -274,10 +257,10 @@ pub fn FrameDeserializer(comptime InStreamType: type) type {
             return @intToEnum(Consistency, n);
         }
 
-        pub fn readStringMap(self: *Self) !StringHashMap([]const u8) {
+        pub fn readStringMap(self: *Self) !std.StringHashMap([]const u8) {
             const n = try self.readInt(u16);
 
-            var map = StringHashMap([]const u8).init(self.allocator);
+            var map = std.StringHashMap([]const u8).init(self.allocator);
 
             var i: usize = 0;
             while (i < n) : (i += 1) {
@@ -290,25 +273,22 @@ pub fn FrameDeserializer(comptime InStreamType: type) type {
             return map;
         }
 
-        pub fn readStringMultimap(self: *Self) !StringHashMap(ArrayList([]const u8)) {
+        pub fn readStringMultimap(self: *Self) !Multimap {
             const n = try self.readInt(u16);
 
-            var map = StringHashMap(ArrayList([]const u8)).init(self.allocator);
+            var map = Multimap.init(self.allocator);
 
             var i: usize = 0;
             while (i < n) : (i += 1) {
+                // NOTE(vincent): the multimap makes a copy of both key and value
+                // so we discard the strings here
                 const k = try self.readString();
+                defer self.allocator.free(k);
+
                 const v = try self.readString();
+                defer self.allocator.free(v);
 
-                const old_value = try map.getOrPut(k);
-                if (old_value.found_existing) {
-                    _ = try old_value.kv.value.append(v);
-                } else {
-                    var list = ArrayList([]const u8).init(self.allocator);
-                    _ = try list.append(v);
-
-                    old_value.kv.value = list;
-                }
+                _ = try map.put(k, v);
             }
 
             return map;
@@ -604,20 +584,12 @@ test "frame deserializer" {
         var it = result.iterator();
         if (it.next()) |entry| {
             testing.expect(std.mem.eql(u8, "foo", entry.key));
-            defer testing.allocator.free(entry.key);
 
-            var list = entry.value;
-            defer list.deinit();
-
-            const slice = list.span();
+            const slice = entry.value.span();
 
             testing.expectEqual(@as(usize, 2), slice.len);
-
             testing.expectEqualSlices(u8, "bar", slice[0]);
             testing.expectEqualSlices(u8, "baz", slice[1]);
-
-            defer testing.allocator.free(slice[0]);
-            defer testing.allocator.free(slice[1]);
         } else {
             std.debug.panic("expected bytes to not be null", .{});
         }
