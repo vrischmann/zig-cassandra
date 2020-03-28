@@ -58,13 +58,20 @@ pub const Multimap = struct {
     }
 
     pub fn put(self: *Self, key: []const u8, value: []const u8) !void {
-        var entry = try self.map.getOrPut(key);
-        if (entry.found_existing) {
-            _ = try entry.kv.value.append(value);
+        const value_dup = try std.mem.dupe(self.allocator, u8, value);
+        errdefer self.allocator.free(value_dup);
+
+        if (self.map.get(key)) |kv| {
+            _ = try kv.value.append(value_dup);
         } else {
+            const key_dup = try std.mem.dupe(self.allocator, u8, key);
+            errdefer self.allocator.free(key_dup);
+
             var list = EntryList.init(self.allocator);
-            _ = try list.append(value);
-            entry.kv.value = list;
+            errdefer list.deinit();
+
+            _ = try list.append(value_dup);
+            _ = try self.map.put(key_dup, list);
         }
     }
 
@@ -79,22 +86,19 @@ test "multimap" {
     var m = Multimap.init(testing.allocator);
     defer m.deinit();
 
-    const key = try std.mem.dupe(testing.allocator, u8, "foo");
-    const v1 = try std.mem.dupe(testing.allocator, u8, "bar");
-    const v2 = try std.mem.dupe(testing.allocator, u8, "baz");
+    _ = try m.put("foo", "bar");
+    _ = try m.put("foo", "baz");
+    _ = try m.put("fou", "bar");
+    _ = try m.put("fou", "baz");
 
-    _ = try m.put(key, v1);
-    _ = try m.put(key, v2);
+    testing.expectEqual(@as(usize, 2), m.count());
 
-    testing.expectEqual(@as(usize, 1), m.count());
-
-    if (m.iterator().next()) |entry| {
-        testing.expectEqualSlices(u8, "foo", entry.key);
+    var it = m.iterator();
+    while (it.next()) |entry| {
+        testing.expect(std.mem.eql(u8, "foo", entry.key) or std.mem.eql(u8, "fou", entry.key));
 
         const slice = entry.value.span();
         testing.expectEqualSlices(u8, "bar", slice[0]);
         testing.expectEqualSlices(u8, "baz", slice[1]);
-    } else {
-        std.debug.panic("expected entry to not be null", .{});
     }
 }
