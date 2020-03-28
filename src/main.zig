@@ -5,6 +5,8 @@ const os = std.os;
 const testing = std.testing;
 const ArrayList = std.ArrayList;
 
+const Multimap = @import("multimap.zig").Multimap;
+
 const ProtocolVersion = packed enum(u8) {
     V3,
     V4,
@@ -77,55 +79,6 @@ fn readStartupFrame(allocator: *std.mem.Allocator, deserializer: FrameDeserializ
 
     unreachable;
 }
-
-const StringMultimap = struct {
-    const Self = @This();
-
-    const MapType = @TypeOf(std.StringHashMap(ArrayList([]const u8)));
-
-    // map: std.StringHashMap(ArrayList([]const u8)),
-    map: MapType,
-
-    const KV = struct {
-        key: []const u8,
-        value: []const u8,
-    };
-
-    // const Iterator = struct {
-    //     outer_it: *Self.map.Iterator,
-
-    //     pub fn next(it: *Iterator) ?*KV {}
-    // };
-
-    pub fn init(allocator: *std.mem.Allocator) Self {
-        return Self{
-            .allocator = allocator,
-            .map = std.StringHashMap(ArrayList([]const u8)).init(allocator),
-        };
-    }
-
-    pub fn put(self: *Self, key: []const u8, value: []const u8) !void {
-        const old_value = try self.map.getOrPut(key);
-        if (old_value.found_existing) {
-            _ = try old_value.kv.value.append(value);
-        } else {
-            var list = ArrayList([]const u8).init(self.allocator);
-            _ = try list.append(value);
-
-            old_value.kv.value = list;
-        }
-    }
-
-    pub fn count(self: *Self) usize {
-        return self.map.count();
-    }
-
-    // pub fn iterator(self: *Self) @TypeOf(Iterator) {
-    //     return self.map.iterator();
-    // }
-
-    pub fn deserialize() void {}
-};
 
 pub fn FrameDeserializer(comptime InStreamType: type) type {
     const BytesType = enum {
@@ -320,10 +273,10 @@ pub fn FrameDeserializer(comptime InStreamType: type) type {
             return map;
         }
 
-        pub fn readStringMultimap(self: *Self) !StringMultimap {
+        pub fn readStringMultimap(self: *Self) !Multimap {
             const n = try self.readInt(u16);
 
-            var map = StringMultimap.init(self.allocator);
+            var map = Multimap.init(self.allocator);
 
             var i: usize = 0;
             while (i < n) : (i += 1) {
