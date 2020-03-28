@@ -5,7 +5,7 @@ const os = std.os;
 const testing = std.testing;
 const ArrayList = std.ArrayList;
 
-const Multimap = @import("multimap.zig").Multimap;
+const StringMap = @import("string_map.zig");
 
 const ProtocolVersion = packed enum(u8) {
     V3,
@@ -96,7 +96,7 @@ const StartupFrame = struct {
 
     pub fn read(allocator: *std.mem.Allocator, comptime FramerType: type, framer: *FramerType) !StartupFrame {
         const map = try framer.readStringMap();
-        defer framer.deinitStringMap(map);
+        defer map.deinit();
 
         var frame = Self{
             .allocator = allocator,
@@ -307,19 +307,10 @@ pub fn Framer(comptime InStreamType: type) type {
             return @intToEnum(Consistency, n);
         }
 
-        pub fn deinitStringMap(self: *Self, map: std.StringHashMap([]const u8)) void {
-            var it = map.iterator();
-            while (it.next()) |entry| {
-                self.allocator.free(entry.key);
-                self.allocator.free(entry.value);
-            }
-            map.deinit();
-        }
-
-        pub fn readStringMap(self: *Self) !std.StringHashMap([]const u8) {
+        pub fn readStringMap(self: *Self) !StringMap.Map {
             const n = try self.readInt(u16);
 
-            var map = std.StringHashMap([]const u8).init(self.allocator);
+            var map = StringMap.Map.init(self.allocator);
 
             var i: usize = 0;
             while (i < n) : (i += 1) {
@@ -332,10 +323,10 @@ pub fn Framer(comptime InStreamType: type) type {
             return map;
         }
 
-        pub fn readStringMultimap(self: *Self) !Multimap {
+        pub fn readStringMultimap(self: *Self) !StringMap.Multimap {
             const n = try self.readInt(u16);
 
-            var map = Multimap.init(self.allocator);
+            var map = StringMap.Multimap.init(self.allocator);
 
             var i: usize = 0;
             while (i < n) : (i += 1) {
@@ -626,9 +617,6 @@ test "framer" {
         while (it.next()) |entry| {
             testing.expect(std.mem.eql(u8, "foo", entry.key) or std.mem.eql(u8, "bar", entry.key));
             testing.expectEqualSlices(u8, "baz", entry.value);
-
-            defer testing.allocator.free(entry.key);
-            defer testing.allocator.free(entry.value);
         }
     }
 
