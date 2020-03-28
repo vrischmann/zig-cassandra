@@ -79,6 +79,24 @@ fn readStartupFrame(allocator: *std.mem.Allocator, deserializer: FrameDeserializ
     unreachable;
 }
 
+const StringMap = struct {
+    const Self = @This();
+
+    allocator: *std.mem.Allocator,
+    map: *StringHashMap(ArrayList([]const u8)),
+
+    pub fn init(allocator: *std.mem.Allocator) Self {
+        return Self{
+            .allocator = allocator,
+            .map = StringHashMap(ArrayList([]const u8)).init(allocator),
+        };
+    }
+
+    pub fn deinit() void {}
+
+    pub fn deserialize() void {}
+};
+
 pub fn FrameDeserializer(comptime InStreamType: type) type {
     const BytesType = enum {
         Short,
@@ -272,8 +290,28 @@ pub fn FrameDeserializer(comptime InStreamType: type) type {
             return map;
         }
 
-        pub fn readStringMultimap(self: *Self) ![]ArrayList(KeyValue) {
-            unreachable;
+        pub fn readStringMultimap(self: *Self) !StringHashMap(ArrayList([]const u8)) {
+            const n = try self.readInt(u16);
+
+            var map = StringHashMap(ArrayList([]const u8)).init(self.allocator);
+
+            var i: usize = 0;
+            while (i < n) : (i += 1) {
+                const k = try self.readString();
+                const v = try self.readString();
+
+                const old_value = try map.getOrPut(k);
+                if (old_value.found_existing) {
+                    _ = try old_value.kv.value.append(v);
+                } else {
+                    var list = ArrayList([]const u8).init(self.allocator);
+                    _ = try list.append(v);
+
+                    old_value.kv.value = list;
+                }
+            }
+
+            return map;
         }
     };
 }
@@ -552,6 +590,36 @@ test "frame deserializer" {
 
             defer testing.allocator.free(entry.key);
             defer testing.allocator.free(entry.value);
+        }
+    }
+
+    // String multimap
+    {
+        resetAndWrite(fbs_type, &fbs, "\x00\x02\x00\x03foo\x00\x03bar\x00\x03foo\x00\x03baz");
+
+        var result = try d.readStringMultimap();
+        defer result.deinit();
+        testing.expectEqual(@as(usize, 1), result.count());
+
+        var it = result.iterator();
+        if (it.next()) |entry| {
+            testing.expect(std.mem.eql(u8, "foo", entry.key));
+            defer testing.allocator.free(entry.key);
+
+            var list = entry.value;
+            defer list.deinit();
+
+            const slice = list.span();
+
+            testing.expectEqual(@as(usize, 2), slice.len);
+
+            testing.expectEqualSlices(u8, "bar", slice[0]);
+            testing.expectEqualSlices(u8, "baz", slice[1]);
+
+            defer testing.allocator.free(slice[0]);
+            defer testing.allocator.free(slice[1]);
+        } else {
+            std.debug.panic("expected bytes to not be null", .{});
         }
     }
 }
