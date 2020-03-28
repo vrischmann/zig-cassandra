@@ -280,8 +280,13 @@ pub fn FrameDeserializer(comptime InStreamType: type) type {
 
             var i: usize = 0;
             while (i < n) : (i += 1) {
+                // NOTE(vincent): the multimap makes a copy of both key and value
+                // so we discard the strings here
                 const k = try self.readString();
+                defer self.allocator.free(k);
+
                 const v = try self.readString();
+                defer self.allocator.free(v);
 
                 _ = try map.put(k, v);
             }
@@ -579,20 +584,12 @@ test "frame deserializer" {
         var it = result.iterator();
         if (it.next()) |entry| {
             testing.expect(std.mem.eql(u8, "foo", entry.key));
-            defer testing.allocator.free(entry.key);
 
-            var list = entry.value;
-            defer list.deinit();
-
-            const slice = list.span();
+            const slice = entry.value.span();
 
             testing.expectEqual(@as(usize, 2), slice.len);
-
             testing.expectEqualSlices(u8, "bar", slice[0]);
             testing.expectEqualSlices(u8, "baz", slice[1]);
-
-            defer testing.allocator.free(slice[0]);
-            defer testing.allocator.free(slice[1]);
         } else {
             std.debug.panic("expected bytes to not be null", .{});
         }
