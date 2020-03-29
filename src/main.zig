@@ -97,13 +97,13 @@ const FunctionFailureError = struct {
 const WriteError = struct {
     // TODO(vincent): document this
     const WriteType = enum {
-        Simple,
-        Batch,
-        UnloggedBatch,
-        Conunter,
-        BatchLog,
+        SIMPLE,
+        BATCH,
+        UNLOGGED_BATCH,
+        COUNTER,
+        BATCH_LOG,
         CAS,
-        View,
+        VIEW,
         CDC,
     };
 
@@ -126,6 +126,7 @@ const WriteError = struct {
         received: u32,
         block_for: u32,
         reason_map: std.ArrayList(Reason),
+        write_type: WriteType,
     };
 
     const CASUnknown = struct {
@@ -198,13 +199,13 @@ const ErrorFrame = struct {
     error_code: ErrorCode,
     message: []const u8,
 
-    unavaiable_replicas_error: ?UnavailableReplicasError,
+    unavaiable_replicas: ?UnavailableReplicasError,
     function_failure: ?FunctionFailureError,
     write_timeout: ?WriteError.Timeout,
     read_timeout: ?ReadError.Timeout,
     write_failure: ?WriteError.Failure,
     read_failure: ?ReadError.Failure,
-    cas_unknown: ?WriteError.CASUnknown,
+    cas_write_unknown: ?WriteError.CASUnknown,
     already_exists: ?AlreadyExistsError,
     unprepared: ?UnpreparedError,
 
@@ -239,6 +240,126 @@ const ErrorFrame = struct {
         frame.allocator = allocator;
         frame.error_code = @intToEnum(ErrorCode, try framer.readInt(u32));
         frame.message = try framer.readString();
+
+        switch (frame.error_code) {
+            .UnavailableReplicas => {
+                frame.unavaiable_replicas = UnavailableReplicasError{
+                    .consistency_level = try framer.readConsistency(),
+                    .required = try framer.readInt(u32),
+                    .alive = try framer.readInt(u32),
+                };
+            },
+            .FunctionFailure => {
+                frame.function_failure = FunctionFailureError{
+                    .keyspace = try framer.readString(),
+                    .function = try framer.readString(),
+                    .arg_types = try framer.readStringList(),
+                };
+            },
+            .WriteTimeout => {
+                var write_timeout = WriteError.Timeout{
+                    .consistency_level = try framer.readConsistency(),
+                    .received = try framer.readInt(u32),
+                    .block_for = try framer.readInt(u32),
+                    .write_type = undefined,
+                    .contentions = null,
+                };
+
+                if (std.meta.stringToEnum(WriteError.WriteType, try framer.readString())) |write_type| {
+                    write_timeout.write_type = write_type;
+                } else {
+                    return error.InvalidWriteType;
+                }
+
+                if (write_timeout.write_type == .CAS) {
+                    write_timeout.contentions = try framer.readInt(u16);
+                }
+
+                frame.write_timeout = write_timeout;
+            },
+            .ReadTimeout => {
+                frame.read_timeout = ReadError.Timeout{
+                    .consistency_level = try framer.readConsistency(),
+                    .received = try framer.readInt(u32),
+                    .block_for = try framer.readInt(u32),
+                    .data_present = try framer.readByte(),
+                };
+            },
+            .WriteFailure => {
+                var write_failure = WriteError.Failure{
+                    .consistency_level = try framer.readConsistency(),
+                    .received = try framer.readInt(u32),
+                    .block_for = try framer.readInt(u32),
+                    .reason_map = std.ArrayList(WriteError.Failure.Reason).init(allocator),
+                    .write_type = undefined,
+                };
+
+                const n = try framer.readInt(u32);
+                var i: usize = 0;
+                while (i < n) : (i += 1) {
+                    const reason = WriteError.Failure.Reason{
+                        .endpoint = try framer.readInetaddr(),
+                        .failure_code = try framer.readInt(u16),
+                    };
+                    _ = try write_failure.reason_map.append(reason);
+                }
+
+                if (std.meta.stringToEnum(WriteError.WriteType, try framer.readString())) |write_type| {
+                    write_failure.write_type = write_type;
+                } else {
+                    return error.InvalidWriteType;
+                }
+
+                frame.write_failure = write_failure;
+            },
+            .ReadFailure => {
+                var read_failure = ReadError.Failure{
+                    .consistency_level = try framer.readConsistency(),
+                    .received = try framer.readInt(u32),
+                    .block_for = try framer.readInt(u32),
+                    .reason_map = std.ArrayList(ReadError.Failure.Reason).init(allocator),
+                    .data_present = undefined,
+                };
+
+                const n = try framer.readInt(u32);
+                var i: usize = 0;
+                while (i < n) : (i += 1) {
+                    const reason = ReadError.Failure.Reason{
+                        .endpoint = try framer.readInetaddr(),
+                        .failure_code = try framer.readInt(u16),
+                    };
+                    _ = try read_failure.reason_map.append(reason);
+                }
+
+                read_failure.data_present = try framer.readByte();
+
+                frame.read_failure = read_failure;
+            },
+            .CASWriteUnknown => {
+                frame.cas_write_unknown = WriteError.CASUnknown{
+                    .consistency_level = try framer.readConsistency(),
+                    .received = try framer.readInt(u32),
+                    .block_for = try framer.readInt(u32),
+                };
+            },
+            .AlreadyExists => {
+                frame.already_exists = AlreadyExistsError{
+                    .keyspace = try framer.readString(),
+                    .table = try framer.readString(),
+                };
+            },
+            .Unprepared => {
+                if (try framer.readShortBytes()) |statement_id| {
+                    frame.unprepared = UnpreparedError{
+                        .statement_id = statement_id,
+                    };
+                } else {
+                    // TODO(vincent): make this a proper error ?
+                    return error.InvalidStatementID;
+                }
+            },
+            else => {},
+        }
 
         return frame;
     }
@@ -913,7 +1034,7 @@ test "frame: parse startup frame" {
     defer frame.deinit();
 }
 
-test "error frame: invalid query" {
+test "error frame: invalid query, no keyspace specified" {
     const data = "\x84\x00\x00\x02\x00\x00\x00\x00\x5e\x00\x00\x22\x00\x00\x58\x4e\x6f\x20\x6b\x65\x79\x73\x70\x61\x63\x65\x20\x68\x61\x73\x20\x62\x65\x65\x6e\x20\x73\x70\x65\x63\x69\x66\x69\x65\x64\x2e\x20\x55\x53\x45\x20\x61\x20\x6b\x65\x79\x73\x70\x61\x63\x65\x2c\x20\x6f\x72\x20\x65\x78\x70\x6c\x69\x63\x69\x74\x6c\x79\x20\x73\x70\x65\x63\x69\x66\x79\x20\x6b\x65\x79\x73\x70\x61\x63\x65\x2e\x74\x61\x62\x6c\x65\x6e\x61\x6d\x65";
     var fbs = std.io.fixedBufferStream(data);
     var in_stream = fbs.inStream();
@@ -931,4 +1052,29 @@ test "error frame: invalid query" {
     defer frame.deinit();
 
     testing.expectEqual(ErrorCode.InvalidQuery, frame.error_code);
+    testing.expectEqualSlices(u8, "No keyspace has been specified. USE a keyspace, or explicitly specify keyspace.tablename", frame.message);
+}
+
+test "error frame: already exists" {
+    const data = "\x84\x00\x00\x23\x00\x00\x00\x00\x53\x00\x00\x24\x00\x00\x3e\x43\x61\x6e\x6e\x6f\x74\x20\x61\x64\x64\x20\x61\x6c\x72\x65\x61\x64\x79\x20\x65\x78\x69\x73\x74\x69\x6e\x67\x20\x74\x61\x62\x6c\x65\x20\x22\x68\x65\x6c\x6c\x6f\x22\x20\x74\x6f\x20\x6b\x65\x79\x73\x70\x61\x63\x65\x20\x22\x66\x6f\x6f\x62\x61\x72\x22\x00\x06\x66\x6f\x6f\x62\x61\x72\x00\x05\x68\x65\x6c\x6c\x6f";
+    var fbs = std.io.fixedBufferStream(data);
+    var in_stream = fbs.inStream();
+
+    const header = try FrameHeader.read(@TypeOf(in_stream), in_stream);
+    testing.expectEqual(ProtocolVersion.V4, header.version);
+    testing.expectEqual(@as(u8, 0), header.flags);
+    testing.expectEqual(@as(u16, 35), header.stream);
+    testing.expectEqual(Opcode.Error, header.opcode);
+    testing.expectEqual(@as(u32, 83), header.body_len);
+    testing.expectEqual(@as(usize, 83), data.len - @sizeOf(FrameHeader));
+
+    var framer = Framer(@TypeOf(in_stream)).init(testing.allocator, in_stream);
+    const frame = try ErrorFrame.read(testing.allocator, @TypeOf(framer), &framer);
+    defer frame.deinit();
+
+    testing.expectEqual(ErrorCode.AlreadyExists, frame.error_code);
+    testing.expectEqualSlices(u8, "Cannot add already existing table \"hello\" to keyspace \"foobar\"", frame.message);
+    const already_exists_error = frame.already_exists.?;
+    testing.expectEqualSlices(u8, "foobar", already_exists_error.keyspace);
+    testing.expectEqualSlices(u8, "hello", already_exists_error.table);
 }
