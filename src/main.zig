@@ -435,49 +435,35 @@ test "framer: read strings and bytes" {
     {
         // int32 + bytes
         resetAndWrite(fbs_type, &fbs, "\x00\x00\x00\x0A123456789A");
-        var result = try framer.readBytes();
-        if (result) |bytes| {
-            defer std.testing.allocator.free(bytes);
-            testing.expectEqualSlices(u8, "123456789A", bytes);
-        } else {
-            std.debug.panic("expected bytes to not be null", .{});
-        }
+        var result = (try framer.readBytes()).?;
+        defer std.testing.allocator.free(result);
+        testing.expectEqualSlices(u8, "123456789A", result);
 
         resetAndWrite(fbs_type, &fbs, "\x00\x00\x00\x00");
-        result = try framer.readBytes();
-        if (result) |bytes| {
-            defer std.testing.allocator.free(bytes);
-            testing.expectEqualSlices(u8, "", bytes);
-        } else {
-            std.debug.panic("expected bytes to not be null", .{});
-        }
+        result = (try framer.readBytes()).?;
+        defer std.testing.allocator.free(result);
+        testing.expectEqualSlices(u8, "", result);
 
-        resetAndWrite(fbs_type, &fbs, "\xff\xff\xff\xff");
-        result = try framer.readBytes();
-        testing.expect(result == null);
+        {
+            resetAndWrite(fbs_type, &fbs, "\xff\xff\xff\xff");
+            testing.expect((try framer.readBytes()) == null);
+        }
 
         // int16 + bytes
         resetAndWrite(fbs_type, &fbs, "\x00\x0A123456789A");
-        result = try framer.readShortBytes();
-        if (result) |bytes| {
-            defer std.testing.allocator.free(bytes);
-            testing.expectEqualSlices(u8, "123456789A", bytes);
-        } else {
-            std.debug.panic("expected bytes to not be null", .{});
-        }
+        result = (try framer.readShortBytes()).?;
+        defer std.testing.allocator.free(result);
+        testing.expectEqualSlices(u8, "123456789A", result);
 
         resetAndWrite(fbs_type, &fbs, "\x00\x00");
-        result = try framer.readShortBytes();
-        if (result) |bytes| {
-            defer std.testing.allocator.free(bytes);
-            testing.expectEqualSlices(u8, "", bytes);
-        } else {
-            std.debug.panic("expected bytes to not be null", .{});
-        }
+        result = (try framer.readShortBytes()).?;
+        defer std.testing.allocator.free(result);
+        testing.expectEqualSlices(u8, "", result);
 
-        resetAndWrite(fbs_type, &fbs, "\xff\xff");
-        result = try framer.readShortBytes();
-        testing.expect(result == null);
+        {
+            resetAndWrite(fbs_type, &fbs, "\xff\xff");
+            testing.expect((try framer.readShortBytes()) == null);
+        }
     }
 }
 
