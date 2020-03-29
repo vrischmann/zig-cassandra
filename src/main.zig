@@ -1,4 +1,5 @@
 const std = @import("std");
+const mem = std.mem;
 const net = std.net;
 const testing = std.testing;
 const ArrayList = std.ArrayList;
@@ -125,7 +126,7 @@ const ErrorCode = packed enum(u32) {
 const ErrorFrame = struct {
     const Self = @This();
 
-    allocator: *std.mem.Allocator,
+    allocator: *mem.Allocator,
 
     error_code: ErrorCode,
     message: []const u8,
@@ -166,7 +167,7 @@ const ErrorFrame = struct {
         }
     }
 
-    pub fn read(allocator: *std.mem.Allocator, comptime FramerType: type, framer: *FramerType) !ErrorFrame {
+    pub fn read(allocator: *mem.Allocator, comptime FramerType: type, framer: *FramerType) !ErrorFrame {
         var frame: ErrorFrame = undefined;
         frame.allocator = allocator;
         frame.error_code = @intToEnum(ErrorCode, try framer.readInt(u32));
@@ -299,7 +300,7 @@ const ErrorFrame = struct {
 const StartupFrame = struct {
     const Self = @This();
 
-    allocator: *std.mem.Allocator,
+    allocator: *mem.Allocator,
 
     cql_version: []const u8,
     compression: ?CompressionAlgorithm,
@@ -308,7 +309,7 @@ const StartupFrame = struct {
         self.allocator.free(self.cql_version);
     }
 
-    pub fn read(allocator: *std.mem.Allocator, comptime FramerType: type, framer: *FramerType) !StartupFrame {
+    pub fn read(allocator: *mem.Allocator, comptime FramerType: type, framer: *FramerType) !StartupFrame {
         const map = try framer.readStringMap();
         defer map.deinit();
 
@@ -322,18 +323,18 @@ const StartupFrame = struct {
 
         // CQL_VERSION is mandatory and the only version supported is 3.0.0 right now.
         if (map.get("CQL_VERSION")) |version| {
-            if (!std.mem.eql(u8, "3.0.0", version.value)) {
+            if (!mem.eql(u8, "3.0.0", version.value)) {
                 return StartupFrameError.InvalidCQLVersion;
             }
-            frame.cql_version = try std.mem.dupe(allocator, u8, version.value);
+            frame.cql_version = try mem.dupe(allocator, u8, version.value);
         } else {
             return StartupFrameError.InvalidCQLVersion;
         }
 
         if (map.get("COMPRESSION")) |compression| {
-            if (std.mem.eql(u8, compression.value, "lz4")) {
+            if (mem.eql(u8, compression.value, "lz4")) {
                 frame.compression = CompressionAlgorithm.LZ4;
-            } else if (std.mem.eql(u8, compression.value, "snappy")) {
+            } else if (mem.eql(u8, compression.value, "snappy")) {
                 frame.compression = CompressionAlgorithm.Snappy;
             } else {
                 return StartupFrameError.InvalidCompression;
@@ -349,7 +350,7 @@ const ReadyFrame = struct {};
 const AuthenticateFrame = struct {
     const Self = @This();
 
-    allocator: *std.mem.Allocator,
+    allocator: *mem.Allocator,
 
     authenticator: []const u8,
 
@@ -357,7 +358,7 @@ const AuthenticateFrame = struct {
         self.allocator.free(self.authenticator);
     }
 
-    pub fn read(allocator: *std.mem.Allocator, comptime FramerType: type, framer: *FramerType) !AuthenticateFrame {
+    pub fn read(allocator: *mem.Allocator, comptime FramerType: type, framer: *FramerType) !AuthenticateFrame {
         return AuthenticateFrame{
             .allocator = allocator,
             .authenticator = try framer.readString(),
@@ -370,7 +371,7 @@ const OptionsFrame = struct {};
 const SupportedFrame = struct {
     const Self = @This();
 
-    allocator: *std.mem.Allocator,
+    allocator: *mem.Allocator,
 
     options: sm.Multimap,
 
