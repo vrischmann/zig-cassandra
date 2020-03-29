@@ -1,5 +1,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
+const mem = std.mem;
 const testing = std.testing;
 
 pub const CQLVersion = enum {
@@ -13,11 +14,11 @@ pub const ProtocolVersion = packed enum(u8) {
 
     pub fn fromCQLString(s: []const u8) !ProtocolVersion {
         // NOTE(vincent): maybe this shouldn't be hardcoded like this but for now it's fine
-        if (std.mem.startsWith(u8, s, "3/")) {
+        if (mem.startsWith(u8, s, "3/")) {
             return ProtocolVersion.V3;
-        } else if (std.mem.startsWith(u8, s, "4/")) {
+        } else if (mem.startsWith(u8, s, "4/")) {
             return ProtocolVersion.V4;
-        } else if (std.mem.startsWith(u8, s, "5/")) {
+        } else if (mem.startsWith(u8, s, "5/")) {
             return ProtocolVersion.V5;
         } else {
             return error.InvalidProtocolVersion;
