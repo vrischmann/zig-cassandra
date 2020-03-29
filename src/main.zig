@@ -314,8 +314,13 @@ pub fn Framer(comptime InStreamType: type) type {
 
             var i: usize = 0;
             while (i < n) : (i += 1) {
+                // NOTE(vincent): the multimap makes a copy of both key and value
+                // so we discard the strings here
                 const k = try self.readString();
+                defer self.allocator.free(k);
+
                 const v = try self.readString();
+                defer self.allocator.free(v);
 
                 _ = try map.put(k, v);
             }
