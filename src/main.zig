@@ -82,6 +82,168 @@ const StartupFrameError = error{
     InvalidCompression,
 };
 
+const UnavailableReplicasError = struct {
+    consistency_level: Consistency,
+    required: u32,
+    alive: u32,
+};
+
+const FunctionFailureError = struct {
+    keyspace: []const u8,
+    function: []const u8,
+    arg_types: std.ArrayList([]const u8),
+};
+
+const WriteError = struct {
+    // TODO(vincent): document this
+    const WriteType = enum {
+        Simple,
+        Batch,
+        UnloggedBatch,
+        Conunter,
+        BatchLog,
+        CAS,
+        View,
+        CDC,
+    };
+
+    const Timeout = struct {
+        consistency_level: Consistency,
+        received: u32,
+        block_for: u32,
+        write_type: WriteType,
+        contentions: ?u16,
+    };
+
+    const Failure = struct {
+        const Reason = struct {
+            endpoint: net.Address,
+            // TODO(vincent): what's this failure code ?!
+            failure_code: u16,
+        };
+
+        consistency_level: Consistency,
+        received: u32,
+        block_for: u32,
+        reason_map: std.ArrayList(Reason),
+    };
+
+    const CASUnknown = struct {
+        consistency_level: Consistency,
+        received: u32,
+        block_for: u32,
+    };
+};
+
+const ReadError = struct {
+    const Timeout = struct {
+        consistency_level: Consistency,
+        received: u32,
+        block_for: u32,
+        data_present: u8,
+    };
+
+    const Failure = struct {
+        const Reason = struct {
+            endpoint: net.Address,
+            // TODO(vincent): what's this failure code ?!
+            failure_code: u16,
+        };
+
+        consistency_level: Consistency,
+        received: u32,
+        block_for: u32,
+        reason_map: std.ArrayList(Reason),
+        data_present: u8,
+    };
+};
+
+const AlreadyExistsError = struct {
+    keyspace: []const u8,
+    table: []const u8,
+};
+
+const UnpreparedError = struct {
+    statement_id: []const u8,
+};
+
+const ErrorCode = packed enum(u32) {
+    ServerError = 0x0000,
+    ProtocolError = 0x000A,
+    AuthError = 0x0100,
+    UnavailableReplicas = 0x1000,
+    CoordinatorOverloaded = 0x1001,
+    CoordinatorIsBootstrapping = 0x1002,
+    TruncateError = 0x1003,
+    WriteTimeout = 0x1100,
+    ReadTimeout = 0x1200,
+    ReadFailure = 0x1300,
+    FunctionFailure = 0x1400,
+    WriteFailure = 0x1500,
+    CDCWriteFailure = 0x1600,
+    CASWriteUnknown = 0x1700,
+    SyntaxError = 0x2000,
+    Unauthorized = 0x2100,
+    InvalidQuery = 0x2200,
+    ConfigError = 0x2300,
+    AlreadyExists = 0x2400,
+    Unprepared = 0x2500,
+};
+
+const ErrorFrame = struct {
+    const Self = @This();
+
+    allocator: *std.mem.Allocator,
+
+    error_code: ErrorCode,
+    message: []const u8,
+
+    unavaiable_replicas_error: ?UnavailableReplicasError,
+    function_failure: ?FunctionFailureError,
+    write_timeout: ?WriteError.Timeout,
+    read_timeout: ?ReadError.Timeout,
+    write_failure: ?WriteError.Failure,
+    read_failure: ?ReadError.Failure,
+    cas_unknown: ?WriteError.CASUnknown,
+    already_exists: ?AlreadyExistsError,
+    unprepared: ?UnpreparedError,
+
+    pub fn deinit(self: *const Self) void {
+        self.allocator.free(self.message);
+
+        if (self.function_failure) |err| {
+            self.allocator.free(err.keyspace);
+            self.allocator.free(err.function);
+            for (err.arg_types.span()) |v| {
+                self.allocator.free(v);
+            }
+            err.arg_types.deinit();
+        }
+        if (self.write_failure) |err| {
+            err.reason_map.deinit();
+        }
+        if (self.read_failure) |err| {
+            err.reason_map.deinit();
+        }
+        if (self.already_exists) |err| {
+            self.allocator.free(err.keyspace);
+            self.allocator.free(err.table);
+        }
+        if (self.unprepared) |err| {
+            self.allocator.free(err.statement_id);
+        }
+    }
+
+    pub fn read(allocator: *std.mem.Allocator, comptime FramerType: type, framer: *FramerType) !ErrorFrame {
+        var frame: ErrorFrame = undefined;
+        frame.allocator = allocator;
+        frame.error_code = @intToEnum(ErrorCode, try framer.readInt(u32));
+        frame.message = try framer.readString();
+
+        return frame;
+    }
+};
+
 const StartupFrame = struct {
     const Self = @This();
 
@@ -749,4 +911,24 @@ test "frame: parse startup frame" {
     var framer = Framer(@TypeOf(in_stream)).init(testing.allocator, in_stream);
     const frame = try StartupFrame.read(testing.allocator, @TypeOf(framer), &framer);
     defer frame.deinit();
+}
+
+test "error frame: invalid query" {
+    const data = "\x84\x00\x00\x02\x00\x00\x00\x00\x5e\x00\x00\x22\x00\x00\x58\x4e\x6f\x20\x6b\x65\x79\x73\x70\x61\x63\x65\x20\x68\x61\x73\x20\x62\x65\x65\x6e\x20\x73\x70\x65\x63\x69\x66\x69\x65\x64\x2e\x20\x55\x53\x45\x20\x61\x20\x6b\x65\x79\x73\x70\x61\x63\x65\x2c\x20\x6f\x72\x20\x65\x78\x70\x6c\x69\x63\x69\x74\x6c\x79\x20\x73\x70\x65\x63\x69\x66\x79\x20\x6b\x65\x79\x73\x70\x61\x63\x65\x2e\x74\x61\x62\x6c\x65\x6e\x61\x6d\x65";
+    var fbs = std.io.fixedBufferStream(data);
+    var in_stream = fbs.inStream();
+
+    const header = try FrameHeader.read(@TypeOf(in_stream), in_stream);
+    testing.expectEqual(ProtocolVersion.V4, header.version);
+    testing.expectEqual(@as(u8, 0), header.flags);
+    testing.expectEqual(@as(u16, 2), header.stream);
+    testing.expectEqual(Opcode.Error, header.opcode);
+    testing.expectEqual(@as(u32, 94), header.body_len);
+    testing.expectEqual(@as(usize, 94), data.len - @sizeOf(FrameHeader));
+
+    var framer = Framer(@TypeOf(in_stream)).init(testing.allocator, in_stream);
+    const frame = try ErrorFrame.read(testing.allocator, @TypeOf(framer), &framer);
+    defer frame.deinit();
+
+    testing.expectEqual(ErrorCode.InvalidQuery, frame.error_code);
 }
