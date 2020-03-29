@@ -98,7 +98,7 @@ pub const Multimap = struct {
         };
     }
 
-    pub fn deinit(self: *Self) void {
+    pub fn deinit(self: *const Self) void {
         var it = self.map.iterator();
         while (it.next()) |entry| {
             self.allocator.free(entry.key);
