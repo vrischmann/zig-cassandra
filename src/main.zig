@@ -414,6 +414,27 @@ const StartupFrame = struct {
     }
 };
 
+const ReadyFrame = struct {};
+
+const AuthenticateFrame = struct {
+    const Self = @This();
+
+    allocator: *std.mem.Allocator,
+
+    authenticator: []const u8,
+
+    pub fn deinit(self: *const Self) void {
+        self.allocator.free(self.authenticator);
+    }
+
+    pub fn read(allocator: *std.mem.Allocator, comptime FramerType: type, framer: *FramerType) !AuthenticateFrame {
+        return AuthenticateFrame{
+            .allocator = allocator,
+            .authenticator = try framer.readString(),
+        };
+    }
+};
+
 pub fn Framer(comptime InStreamType: type) type {
     const BytesType = enum {
         Short,
@@ -1099,4 +1120,24 @@ test "error frame: syntax error" {
 
     testing.expectEqual(ErrorCode.SyntaxError, frame.error_code);
     testing.expectEqualSlices(u8, "line 2:0 mismatched input ';' expecting K_FROM (select*[;])", frame.message);
+}
+
+test "authenticate frame" {
+    const data = "\x84\x00\x00\x00\x03\x00\x00\x00\x31\x00\x2f\x6f\x72\x67\x2e\x61\x70\x61\x63\x68\x65\x2e\x63\x61\x73\x73\x61\x6e\x64\x72\x61\x2e\x61\x75\x74\x68\x2e\x50\x61\x73\x73\x77\x6f\x72\x64\x41\x75\x74\x68\x65\x6e\x74\x69\x63\x61\x74\x6f\x72";
+    var fbs = std.io.fixedBufferStream(data);
+    var in_stream = fbs.inStream();
+
+    const header = try FrameHeader.read(@TypeOf(in_stream), in_stream);
+    testing.expectEqual(ProtocolVersion.V4, header.version);
+    testing.expectEqual(@as(u8, 0), header.flags);
+    testing.expectEqual(@as(i16, 0), header.stream);
+    testing.expectEqual(Opcode.Authenticate, header.opcode);
+    testing.expectEqual(@as(u32, 49), header.body_len);
+    testing.expectEqual(@as(usize, 49), data.len - @sizeOf(FrameHeader));
+
+    var framer = Framer(@TypeOf(in_stream)).init(testing.allocator, in_stream);
+    const frame = try AuthenticateFrame.read(testing.allocator, @TypeOf(framer), &framer);
+    defer frame.deinit();
+
+    testing.expectEqualSlices(u8, "org.apache.cassandra.auth.PasswordAuthenticator", frame.authenticator);
 }
