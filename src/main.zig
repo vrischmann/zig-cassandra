@@ -53,7 +53,7 @@ const Opcode = packed enum(u8) {
 const FrameHeader = packed struct {
     version: ProtocolVersion,
     flags: u8,
-    stream: u16,
+    stream: i16,
     opcode: Opcode,
     body_len: u32,
 
@@ -1025,7 +1025,7 @@ test "frame: parse startup frame" {
     const header = try FrameHeader.read(@TypeOf(in_stream), in_stream);
     testing.expectEqual(ProtocolVersion.V4, header.version);
     testing.expectEqual(@as(u8, 0), header.flags);
-    testing.expectEqual(@as(u16, 0), header.stream);
+    testing.expectEqual(@as(i16, 0), header.stream);
     testing.expectEqual(Opcode.Startup, header.opcode);
     testing.expectEqual(@as(u32, 22), header.body_len);
     testing.expectEqual(@as(usize, 22), data.len - @sizeOf(FrameHeader));
@@ -1043,7 +1043,7 @@ test "error frame: invalid query, no keyspace specified" {
     const header = try FrameHeader.read(@TypeOf(in_stream), in_stream);
     testing.expectEqual(ProtocolVersion.V4, header.version);
     testing.expectEqual(@as(u8, 0), header.flags);
-    testing.expectEqual(@as(u16, 2), header.stream);
+    testing.expectEqual(@as(i16, 2), header.stream);
     testing.expectEqual(Opcode.Error, header.opcode);
     testing.expectEqual(@as(u32, 94), header.body_len);
     testing.expectEqual(@as(usize, 94), data.len - @sizeOf(FrameHeader));
@@ -1064,7 +1064,7 @@ test "error frame: already exists" {
     const header = try FrameHeader.read(@TypeOf(in_stream), in_stream);
     testing.expectEqual(ProtocolVersion.V4, header.version);
     testing.expectEqual(@as(u8, 0), header.flags);
-    testing.expectEqual(@as(u16, 35), header.stream);
+    testing.expectEqual(@as(i16, 35), header.stream);
     testing.expectEqual(Opcode.Error, header.opcode);
     testing.expectEqual(@as(u32, 83), header.body_len);
     testing.expectEqual(@as(usize, 83), data.len - @sizeOf(FrameHeader));
@@ -1088,7 +1088,7 @@ test "error frame: syntax error" {
     const header = try FrameHeader.read(@TypeOf(in_stream), in_stream);
     testing.expectEqual(ProtocolVersion.V4, header.version);
     testing.expectEqual(@as(u8, 0), header.flags);
-    testing.expectEqual(@as(u16, 47), header.stream);
+    testing.expectEqual(@as(i16, 47), header.stream);
     testing.expectEqual(Opcode.Error, header.opcode);
     testing.expectEqual(@as(u32, 65), header.body_len);
     testing.expectEqual(@as(usize, 65), data.len - @sizeOf(FrameHeader));
