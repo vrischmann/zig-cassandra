@@ -37,11 +37,11 @@ pub const Map = struct {
         }
     }
 
-    pub fn count(self: *Self) usize {
+    pub fn count(self: *const Self) usize {
         return self.map.count();
     }
 
-    pub fn iterator(self: *Self) Iterator {
+    pub fn iterator(self: *const Self) Iterator {
         return self.map.iterator();
     }
 
@@ -70,6 +70,8 @@ pub const Multimap = struct {
         value: EntryList,
     };
 
+    // TODO(vincent): probably can remove this since the multimap
+    // is only used in the SupportedFrame and we know the keys beforehand
     const Iterator = struct {
         map_it: MapType.Iterator,
 
@@ -108,11 +110,19 @@ pub const Multimap = struct {
         _ = try self.map.put(key, values);
     }
 
-    pub fn count(self: *Self) usize {
+    pub fn get(self: *const Self, key: []const u8) ?[][]const u8 {
+        if (self.map.get(key)) |entry| {
+            return entry.value.span();
+        } else {
+            return null;
+        }
+    }
+
+    pub fn count(self: *const Self) usize {
         return self.map.count();
     }
 
-    pub fn iterator(self: *Self) Iterator {
+    pub fn iterator(self: *const Self) Iterator {
         return Iterator{
             .map_it = self.map.iterator(),
         };
@@ -185,4 +195,12 @@ test "multimap" {
         testing.expectEqualSlices(u8, "bar", slice[0]);
         testing.expectEqualSlices(u8, "baz", slice[1]);
     }
+
+    const slice = m.get("foo").?;
+    testing.expectEqualSlices(u8, "bar", slice[0]);
+    testing.expectEqualSlices(u8, "baz", slice[1]);
+
+    const slice2 = m.get("fou").?;
+    testing.expectEqualSlices(u8, "bar", slice[0]);
+    testing.expectEqualSlices(u8, "baz", slice[1]);
 }
