@@ -212,15 +212,17 @@ pub fn Framer(comptime InStreamType: type) type {
 
             var i: usize = 0;
             while (i < n) : (i += 1) {
-                // NOTE(vincent): the multimap makes a copy of both key and value
-                // so we discard the strings here
+                // NOTE(vincent): the multimap makes a copy of both key and value so we discard the strings here
                 const k = try self.readString();
                 defer self.allocator.free(k);
 
-                const v = try self.readString();
-                defer self.allocator.free(v);
+                const list = try self.readStringList();
+                defer list.deinit();
+                for (list.span()) |v| {
+                    defer self.allocator.free(v);
 
-                _ = try map.put(k, v);
+                    _ = try map.put(k, v);
+                }
             }
 
             return map;
@@ -506,7 +508,7 @@ test "framer: read string multimap" {
 
     // 1 key, 2 values multimap
 
-    resetAndWrite(fbs_type, &fbs, "\x00\x02\x00\x03foo\x00\x03bar\x00\x03foo\x00\x03baz");
+    resetAndWrite(fbs_type, &fbs, "\x00\x01\x00\x03foo\x00\x02\x00\x03bar\x00\x03baz");
 
     var result = try framer.readStringMultimap();
     defer result.deinit();
