@@ -744,6 +744,7 @@ test "frame: parse startup frame" {
     testing.expectEqual(@as(u16, 0), header.stream);
     testing.expectEqual(Opcode.Startup, header.opcode);
     testing.expectEqual(@as(u32, 22), header.body_len);
+    testing.expectEqual(@as(usize, 22), data.len - @sizeOf(FrameHeader));
 
     var framer = Framer(@TypeOf(in_stream)).init(testing.allocator, in_stream);
     const frame = try StartupFrame.read(testing.allocator, @TypeOf(framer), &framer);
