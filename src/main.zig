@@ -168,6 +168,7 @@ const UnpreparedError = struct {
     statement_id: []const u8,
 };
 
+// TODO(vincent): test all error codes
 const ErrorCode = packed enum(u32) {
     ServerError = 0x0000,
     ProtocolError = 0x000A,
@@ -1077,4 +1078,25 @@ test "error frame: already exists" {
     const already_exists_error = frame.already_exists.?;
     testing.expectEqualSlices(u8, "foobar", already_exists_error.keyspace);
     testing.expectEqualSlices(u8, "hello", already_exists_error.table);
+}
+
+test "error frame: syntax error" {
+    const data = "\x84\x00\x00\x2f\x00\x00\x00\x00\x41\x00\x00\x20\x00\x00\x3b\x6c\x69\x6e\x65\x20\x32\x3a\x30\x20\x6d\x69\x73\x6d\x61\x74\x63\x68\x65\x64\x20\x69\x6e\x70\x75\x74\x20\x27\x3b\x27\x20\x65\x78\x70\x65\x63\x74\x69\x6e\x67\x20\x4b\x5f\x46\x52\x4f\x4d\x20\x28\x73\x65\x6c\x65\x63\x74\x2a\x5b\x3b\x5d\x29";
+    var fbs = std.io.fixedBufferStream(data);
+    var in_stream = fbs.inStream();
+
+    const header = try FrameHeader.read(@TypeOf(in_stream), in_stream);
+    testing.expectEqual(ProtocolVersion.V4, header.version);
+    testing.expectEqual(@as(u8, 0), header.flags);
+    testing.expectEqual(@as(u16, 47), header.stream);
+    testing.expectEqual(Opcode.Error, header.opcode);
+    testing.expectEqual(@as(u32, 65), header.body_len);
+    testing.expectEqual(@as(usize, 65), data.len - @sizeOf(FrameHeader));
+
+    var framer = Framer(@TypeOf(in_stream)).init(testing.allocator, in_stream);
+    const frame = try ErrorFrame.read(testing.allocator, @TypeOf(framer), &framer);
+    defer frame.deinit();
+
+    testing.expectEqual(ErrorCode.SyntaxError, frame.error_code);
+    testing.expectEqualSlices(u8, "line 2:0 mismatched input ';' expecting K_FROM (select*[;])", frame.message);
 }
