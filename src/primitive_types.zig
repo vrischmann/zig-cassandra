@@ -11,8 +11,17 @@ pub const ProtocolVersion = packed enum(u8) {
     V4,
     V5,
 
-    pub fn fromCQLString(s: []const u8) ProtocolVersion {
-        unreachable;
+    pub fn fromCQLString(s: []const u8) !ProtocolVersion {
+        // NOTE(vincent): maybe this shouldn't be hardcoded like this but for now it's fine
+        if (std.mem.startsWith(u8, s, "3/")) {
+            return ProtocolVersion.V3;
+        } else if (std.mem.startsWith(u8, s, "4/")) {
+            return ProtocolVersion.V4;
+        } else if (std.mem.startsWith(u8, s, "5/")) {
+            return ProtocolVersion.V5;
+        } else {
+            return error.InvalidProtocolVersion;
+        }
     }
 
     pub fn deserialize(self: *@This(), deserializer: var) !void {
@@ -94,7 +103,16 @@ pub const Consistency = packed enum(u16) {
     LocalOne = 0x000A,
 };
 
-test "parse protocol version" {
+test "protocol version: fromCQLString" {
+    testing.expectEqual(ProtocolVersion.V3, try ProtocolVersion.fromCQLString("3/v3"));
+    testing.expectEqual(ProtocolVersion.V4, try ProtocolVersion.fromCQLString("4/v4"));
+    testing.expectEqual(ProtocolVersion.V5, try ProtocolVersion.fromCQLString("5/v5"));
+    testing.expectEqual(ProtocolVersion.V5, try ProtocolVersion.fromCQLString("5/v5-beta"));
+
+    testing.expectError(error.InvalidProtocolVersion, ProtocolVersion.fromCQLString("lalal"));
+}
+
+test "protocol version: parse" {
     const testCase = struct {
         exp: ProtocolVersion,
         b: [2]u8,
