@@ -28,18 +28,12 @@ pub const Map = struct {
     }
 
     pub fn put(self: *Self, key: []const u8, value: []const u8) !?KV {
-        const value_dup = try std.mem.dupe(self.allocator, u8, value);
-        errdefer self.allocator.free(value_dup);
-
         if (self.map.get(key)) |kv| {
             self.allocator.free(kv.value);
-            kv.value = value_dup;
+            kv.value = value;
             return kv.*;
         } else {
-            const key_dup = try std.mem.dupe(self.allocator, u8, key);
-            errdefer self.allocator.free(key_dup);
-
-            return try self.map.put(key_dup, value_dup);
+            return try self.map.put(key, value);
         }
     }
 
@@ -110,22 +104,8 @@ pub const Multimap = struct {
         self.map.deinit();
     }
 
-    pub fn put(self: *Self, key: []const u8, value: []const u8) !void {
-        const value_dup = try std.mem.dupe(self.allocator, u8, value);
-        errdefer self.allocator.free(value_dup);
-
-        if (self.map.get(key)) |kv| {
-            _ = try kv.value.append(value_dup);
-        } else {
-            const key_dup = try std.mem.dupe(self.allocator, u8, key);
-            errdefer self.allocator.free(key_dup);
-
-            var list = EntryList.init(self.allocator);
-            errdefer list.deinit();
-
-            _ = try list.append(value_dup);
-            _ = try self.map.put(key_dup, list);
-        }
+    pub fn put(self: *Self, key: []const u8, values: std.ArrayList([]const u8)) !void {
+        _ = try self.map.put(key, values);
     }
 
     pub fn count(self: *Self) usize {
@@ -143,9 +123,20 @@ test "map" {
     var m = Map.init(testing.allocator);
     defer m.deinit();
 
-    _ = try m.put("foo", "bar");
-    _ = try m.put("foo", "heo");
-    _ = try m.put("bar", "baz");
+    {
+        const dupe = std.mem.dupe;
+
+        const k1 = try dupe(testing.allocator, u8, "foo");
+        const k2 = try dupe(testing.allocator, u8, "bar");
+
+        const v1 = try dupe(testing.allocator, u8, "bar");
+        const v2 = try dupe(testing.allocator, u8, "heo");
+        const v3 = try dupe(testing.allocator, u8, "baz");
+
+        _ = try m.put(k1, v1);
+        _ = try m.put(k1, v2);
+        _ = try m.put(k2, v3);
+    }
 
     testing.expectEqual(@as(usize, 2), m.count());
 
@@ -166,10 +157,23 @@ test "multimap" {
     var m = Multimap.init(testing.allocator);
     defer m.deinit();
 
-    _ = try m.put("foo", "bar");
-    _ = try m.put("foo", "baz");
-    _ = try m.put("fou", "bar");
-    _ = try m.put("fou", "baz");
+    const dupe = std.mem.dupe;
+
+    {
+        const k1 = try dupe(testing.allocator, u8, "foo");
+        var v1 = std.ArrayList([]const u8).init(testing.allocator);
+        _ = try v1.append(try dupe(testing.allocator, u8, "bar"));
+        _ = try v1.append(try dupe(testing.allocator, u8, "baz"));
+        _ = try m.put(k1, v1);
+    }
+
+    {
+        const k2 = try dupe(testing.allocator, u8, "fou");
+        var v2 = std.ArrayList([]const u8).init(testing.allocator);
+        _ = try v2.append(try dupe(testing.allocator, u8, "bar"));
+        _ = try v2.append(try dupe(testing.allocator, u8, "baz"));
+        _ = try m.put(k2, v2);
+    }
 
     testing.expectEqual(@as(usize, 2), m.count());
 
