@@ -90,7 +90,7 @@ const StartupFrame = struct {
     cql_version: []const u8,
     compression: ?CompressionAlgorithm,
 
-    pub fn deinit(self: *Self) void {
+    pub fn deinit(self: *const Self) void {
         self.allocator.free(self.cql_version);
     }
 
@@ -747,4 +747,5 @@ test "frame: parse startup frame" {
 
     var framer = Framer(@TypeOf(in_stream)).init(testing.allocator, in_stream);
     const frame = try StartupFrame.read(testing.allocator, @TypeOf(framer), &framer);
+    defer frame.deinit();
 }
