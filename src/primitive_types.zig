@@ -3,10 +3,6 @@ const builtin = @import("builtin");
 const mem = std.mem;
 const testing = std.testing;
 
-pub const CQLVersion = enum {
-    V3_0_0,
-};
-
 pub const ProtocolVersion = packed enum(u8) {
     V3,
     V4,
