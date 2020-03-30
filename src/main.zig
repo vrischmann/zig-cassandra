@@ -374,7 +374,7 @@ const SupportedFrame = struct {
     allocator: *mem.Allocator,
 
     protocol_versions: []ProtocolVersion,
-    cql_versions: [][]const u8,
+    cql_versions: []CQLVersion,
     compression_algorithms: []CompressionAlgorithm,
 
     pub fn deinit(self: *const Self) void {
@@ -385,18 +385,24 @@ const SupportedFrame = struct {
 
     pub fn read(allocator: *mem.Allocator, comptime FramerType: type, framer: *FramerType) !SupportedFrame {
         const options = try framer.readStringMultimap();
+        defer options.deinit();
 
         var frame = SupportedFrame{
             .allocator = allocator,
             .protocol_versions = &[_]ProtocolVersion{},
-            .cql_versions = &[_][]const u8{},
+            .cql_versions = &[_]CQLVersion{},
             .compression_algorithms = &[_]CompressionAlgorithm{},
         };
 
-        // NOTE(vincent): we know that CQL_VERSION is necessary and can only be 3.0.0 for now.
-        // If Cassandra decides to add a new version we will rework this.
         if (options.get("CQL_VERSION")) |values| {
-            frame.cql_versions = values;
+            var list = std.ArrayList(CQLVersion).init(allocator);
+
+            for (values) |value| {
+                const version = try CQLVersion.fromString(value);
+                _ = try list.append(version);
+            }
+
+            frame.cql_versions = list.toOwnedSlice();
         } else {
             return error.NoCQLVersion;
         }
@@ -580,7 +586,7 @@ test "supported frame" {
     defer frame.deinit();
 
     testing.expectEqual(@as(usize, 1), frame.cql_versions.len);
-    testing.expectEqualSlices(u8, "3.4.4", frame.cql_versions[0]);
+    testing.expectEqual(CQLVersion{ .major = 3, .minor = 4, .patch = 4 }, frame.cql_versions[0]);
 
     testing.expectEqual(@as(usize, 3), frame.protocol_versions.len);
     testing.expectEqual(ProtocolVersion.V3, frame.protocol_versions[0]);

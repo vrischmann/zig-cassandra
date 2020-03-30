@@ -3,6 +3,41 @@ const builtin = @import("builtin");
 const mem = std.mem;
 const testing = std.testing;
 
+pub const CQLVersion = struct {
+    major: u16,
+    minor: u16,
+    patch: u16,
+
+    pub fn fromString(s: []const u8) !CQLVersion {
+        var version = CQLVersion{
+            .major = 0,
+            .minor = 0,
+            .patch = 0,
+        };
+
+        var it = mem.separate(s, ".");
+        var pos: usize = 0;
+        while (it.next()) |v| {
+            const n = std.fmt.parseInt(u16, v, 10) catch return error.InvalidCQLVersion;
+
+            switch (pos) {
+                0 => version.major = n,
+                1 => version.minor = n,
+                2 => version.patch = n,
+                else => break,
+            }
+
+            pos += 1;
+        }
+
+        if (version.major < 3) {
+            return error.InvalidCQLVersion;
+        }
+
+        return version;
+    }
+};
+
 pub const ProtocolVersion = packed enum(u8) {
     V3,
     V4,
@@ -109,6 +144,13 @@ pub const Consistency = packed enum(u16) {
     LocalSerial = 0x0009,
     LocalOne = 0x000A,
 };
+
+test "cql version: fromString" {
+    testing.expectEqual(CQLVersion{ .major = 3, .minor = 0, .patch = 0 }, try CQLVersion.fromString("3.0.0"));
+    testing.expectEqual(CQLVersion{ .major = 3, .minor = 4, .patch = 0 }, try CQLVersion.fromString("3.4.0"));
+    testing.expectEqual(CQLVersion{ .major = 3, .minor = 5, .patch = 4 }, try CQLVersion.fromString("3.5.4"));
+    testing.expectError(error.InvalidCQLVersion, CQLVersion.fromString("1.0.0"));
+}
 
 test "protocol version: fromString" {
     testing.expectEqual(ProtocolVersion.V3, try ProtocolVersion.fromString("3/v3"));
