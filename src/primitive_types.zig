@@ -8,7 +8,7 @@ pub const ProtocolVersion = packed enum(u8) {
     V4,
     V5,
 
-    pub fn fromCQLString(s: []const u8) !ProtocolVersion {
+    pub fn fromString(s: []const u8) !ProtocolVersion {
         // NOTE(vincent): maybe this shouldn't be hardcoded like this but for now it's fine
         if (mem.startsWith(u8, s, "3/")) {
             return ProtocolVersion.V3;
@@ -100,13 +100,13 @@ pub const Consistency = packed enum(u16) {
     LocalOne = 0x000A,
 };
 
-test "protocol version: fromCQLString" {
-    testing.expectEqual(ProtocolVersion.V3, try ProtocolVersion.fromCQLString("3/v3"));
-    testing.expectEqual(ProtocolVersion.V4, try ProtocolVersion.fromCQLString("4/v4"));
-    testing.expectEqual(ProtocolVersion.V5, try ProtocolVersion.fromCQLString("5/v5"));
-    testing.expectEqual(ProtocolVersion.V5, try ProtocolVersion.fromCQLString("5/v5-beta"));
+test "protocol version: fromString" {
+    testing.expectEqual(ProtocolVersion.V3, try ProtocolVersion.fromString("3/v3"));
+    testing.expectEqual(ProtocolVersion.V4, try ProtocolVersion.fromString("4/v4"));
+    testing.expectEqual(ProtocolVersion.V5, try ProtocolVersion.fromString("5/v5"));
+    testing.expectEqual(ProtocolVersion.V5, try ProtocolVersion.fromString("5/v5-beta"));
 
-    testing.expectError(error.InvalidProtocolVersion, ProtocolVersion.fromCQLString("lalal"));
+    testing.expectError(error.InvalidProtocolVersion, ProtocolVersion.fromString("lalal"));
 }
 
 test "protocol version: parse" {
