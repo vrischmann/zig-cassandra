@@ -75,6 +75,16 @@ pub const FrameHeader = packed struct {
 pub const CompressionAlgorithm = enum {
     LZ4,
     Snappy,
+
+    pub fn fromString(s: []const u8) !CompressionAlgorithm {
+        if (mem.eql(u8, "lz4", s)) {
+            return CompressionAlgorithm.LZ4;
+        } else if (mem.eql(u8, "snappy", s)) {
+            return CompressionAlgorithm.Snappy;
+        } else {
+            return error.InvalidCompressionAlgorithm;
+        }
+    }
 };
 
 pub const ValueTag = enum {
@@ -152,4 +162,10 @@ test "protocol version: parse" {
             testing.expectEqual(tc.exp, try d.deserialize(ProtocolVersion));
         }
     }
+}
+
+test "compression algorith: fromString" {
+    testing.expectEqual(CompressionAlgorithm.LZ4, try CompressionAlgorithm.fromString("lz4"));
+    testing.expectEqual(CompressionAlgorithm.Snappy, try CompressionAlgorithm.fromString("snappy"));
+    testing.expectError(error.InvalidCompressionAlgorithm, CompressionAlgorithm.fromString("foobar"));
 }
