@@ -373,17 +373,59 @@ const SupportedFrame = struct {
 
     allocator: *mem.Allocator,
 
-    options: sm.Multimap,
+    protocol_versions: []ProtocolVersion,
+    cql_versions: [][]const u8,
+    compression_algorithms: []CompressionAlgorithm,
 
     pub fn deinit(self: *const Self) void {
-        self.options.deinit();
+        self.allocator.free(self.protocol_versions);
+        self.allocator.free(self.cql_versions);
+        self.allocator.free(self.compression_algorithms);
     }
 
-    pub fn read(allocator: *std.mem.Allocator, comptime FramerType: type, framer: *FramerType) !SupportedFrame {
-        return SupportedFrame{
+    pub fn read(allocator: *mem.Allocator, comptime FramerType: type, framer: *FramerType) !SupportedFrame {
+        const options = try framer.readStringMultimap();
+
+        var frame = SupportedFrame{
             .allocator = allocator,
-            .options = try framer.readStringMultimap(),
+            .protocol_versions = &[_]ProtocolVersion{},
+            .cql_versions = &[_][]const u8{},
+            .compression_algorithms = &[_]CompressionAlgorithm{},
         };
+
+        // NOTE(vincent): we know that CQL_VERSION is necessary and can only be 3.0.0 for now.
+        // If Cassandra decides to add a new version we will rework this.
+        if (options.get("CQL_VERSION")) |values| {
+            frame.cql_versions = values;
+        } else {
+            return error.NoCQLVersion;
+        }
+
+        if (options.get("COMPRESSION")) |values| {
+            var list = std.ArrayList(CompressionAlgorithm).init(allocator);
+
+            for (values) |value| {
+                const compression_algorithm = try CompressionAlgorithm.fromString(value);
+                _ = try list.append(compression_algorithm);
+            }
+
+            frame.compression_algorithms = list.toOwnedSlice();
+        }
+
+        if (options.get("PROTOCOL_VERSIONS")) |values| {
+            var list = std.ArrayList(ProtocolVersion).init(allocator);
+
+            for (values) |value| {
+                const version = try ProtocolVersion.fromString(value);
+                _ = try list.append(version);
+            }
+
+            frame.protocol_versions = list.toOwnedSlice();
+        } else {
+            return error.NoProtocolVersions;
+        }
+
+        return frame;
     }
 };
 
@@ -536,4 +578,16 @@ test "supported frame" {
     var framer = Framer(@TypeOf(in_stream)).init(testing.allocator, in_stream);
     const frame = try SupportedFrame.read(testing.allocator, @TypeOf(framer), &framer);
     defer frame.deinit();
+
+    testing.expectEqual(@as(usize, 1), frame.cql_versions.len);
+    testing.expectEqualSlices(u8, "3.4.4", frame.cql_versions[0]);
+
+    testing.expectEqual(@as(usize, 3), frame.protocol_versions.len);
+    testing.expectEqual(ProtocolVersion.V3, frame.protocol_versions[0]);
+    testing.expectEqual(ProtocolVersion.V4, frame.protocol_versions[1]);
+    testing.expectEqual(ProtocolVersion.V5, frame.protocol_versions[2]);
+
+    testing.expectEqual(@as(usize, 2), frame.compression_algorithms.len);
+    testing.expectEqual(CompressionAlgorithm.Snappy, frame.compression_algorithms[0]);
+    testing.expectEqual(CompressionAlgorithm.LZ4, frame.compression_algorithms[1]);
 }
