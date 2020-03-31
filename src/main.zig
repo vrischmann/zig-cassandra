@@ -99,6 +99,225 @@ const UnpreparedError = struct {
     statement_id: []const u8,
 };
 
+// Below are request frames only (ie client -> server).
+
+/// STARTUP is sent to a node to initialize a connection.
+///
+/// Described in the protocol spec at §4.1.1.
+const StartupFrame = struct {
+    const Self = @This();
+
+    allocator: *mem.Allocator,
+
+    cql_version: []const u8,
+    compression: ?CompressionAlgorithm,
+
+    pub fn deinit(self: *const Self) void {
+        self.allocator.free(self.cql_version);
+    }
+
+    pub fn read(allocator: *mem.Allocator, comptime FramerType: type, framer: *FramerType) !StartupFrame {
+        const map = try framer.readStringMap();
+        defer map.deinit();
+
+        var frame = Self{
+            .allocator = allocator,
+            .cql_version = undefined,
+            .compression = null,
+        };
+
+        // TODO(vincent): maybe avoid copying the strings ?
+
+        // CQL_VERSION is mandatory and the only version supported is 3.0.0 right now.
+        if (map.get("CQL_VERSION")) |version| {
+            if (!mem.eql(u8, "3.0.0", version.value)) {
+                return StartupFrameError.InvalidCQLVersion;
+            }
+            frame.cql_version = try mem.dupe(allocator, u8, version.value);
+        } else {
+            return StartupFrameError.InvalidCQLVersion;
+        }
+
+        if (map.get("COMPRESSION")) |compression| {
+            if (mem.eql(u8, compression.value, "lz4")) {
+                frame.compression = CompressionAlgorithm.LZ4;
+            } else if (mem.eql(u8, compression.value, "snappy")) {
+                frame.compression = CompressionAlgorithm.Snappy;
+            } else {
+                return StartupFrameError.InvalidCompression;
+            }
+        }
+
+        return frame;
+    }
+};
+
+/// AUTH_RESPONSE is sent to a node to answser a authentication challenge.
+///
+/// Described in the protocol spec at §4.1.2.
+const AuthResponseFrame = struct {};
+
+/// OPTIONS is sent to a node to ask which STARTUP options are supported.
+///
+/// Described in the protocol spec at §4.1.3.
+const OptionsFrame = struct {};
+
+/// QUERY is sent to ask the node to perform a CQL query.
+///
+/// Described in the protocol spec at §4.1.4
+const QueryFrame = struct {
+    const Self = @This();
+
+    allocator: *mem.Allocator,
+
+    const NamedValue = struct {
+        name: []const u8,
+        value: ?Value,
+    };
+
+    const FlagWithValues: u32 = 0x0001;
+    const FlagSkipMetadata: u32 = 0x0002;
+    const FlagWithPageSize: u32 = 0x0004;
+    const FlagWithPagingState: u32 = 0x0008;
+    const FlagWithSerialConsistency: u32 = 0x0010;
+    const FlagWithDefaultTimestamp: u32 = 0x0020;
+    const FlagWithNamedValues: u32 = 0x0040;
+    const FlagWithKeyspace: u32 = 0x0080;
+    const FlagWithNowInSeconds: u32 = 0x100;
+
+    query: []const u8,
+    consistency_level: Consistency,
+
+    values: ?[]?Value,
+    named_values: ?[]NamedValue,
+    page_size: ?u32,
+    paging_state: ?[]const u8, // NOTE(vincent): not a string
+    serial_consistency_level: ?Consistency,
+    timestamp: ?u64,
+    keyspace: ?[]const u8,
+    now_in_seconds: ?u32,
+
+    pub fn deinit(self: *const Self) void {
+        self.allocator.free(self.query);
+
+        if (self.values) |values| {
+            for (values) |outer_value| {
+                if (outer_value) |not_null_value| {
+                    switch (not_null_value) {
+                        Value.Set => |inner_value| self.allocator.free(inner_value),
+                        Value.NotSet => continue,
+                    }
+                }
+            }
+            self.allocator.free(values);
+        }
+
+        if (self.named_values) |values| {
+            for (values) |outer_value| {
+                self.allocator.free(outer_value.name);
+                if (outer_value.value) |not_null_value| {
+                    switch (not_null_value) {
+                        Value.Set => |v| self.allocator.free(v),
+                        Value.NotSet => continue,
+                    }
+                }
+            }
+            self.allocator.free(values);
+        }
+
+        if (self.paging_state) |ps| {
+            self.allocator.free(ps);
+        }
+
+        if (self.keyspace) |keyspace| {
+            self.allocator.free(keyspace);
+        }
+    }
+
+    pub fn read(allocator: *mem.Allocator, comptime FramerType: type, framer: *FramerType) !QueryFrame {
+        var frame: Self = undefined;
+        frame.allocator = allocator;
+        frame.query = try framer.readLongString();
+        frame.consistency_level = try framer.readConsistency();
+
+        // The remaining data in the frame depends on the flags
+
+        // The size of the flags bitmask depends on the protocol version.
+        var flags: u32 = 0;
+        if (framer.header.version == ProtocolVersion.V5) {
+            flags = try framer.readInt(u32);
+        } else {
+            flags = try framer.readInt(u8);
+        }
+
+        // TODO(vincent): some flags are only valid with protocol version 5
+
+        if (flags & FlagWithValues == FlagWithValues) {
+            const n = try framer.readInt(u16);
+
+            if (flags & FlagWithNamedValues == FlagWithNamedValues) {
+                var list = std.ArrayList(NamedValue).init(allocator);
+                errdefer list.deinit();
+
+                var i: usize = 0;
+                while (i < @as(usize, n)) : (i += 1) {
+                    const nm = NamedValue{
+                        .name = try framer.readString(),
+                        .value = try framer.readValue(),
+                    };
+                    _ = try list.append(nm);
+                }
+
+                frame.named_values = list.toOwnedSlice();
+            } else {
+                var list = std.ArrayList(?Value).init(allocator);
+                errdefer list.deinit();
+
+                var i: usize = 0;
+                while (i < @as(usize, n)) : (i += 1) {
+                    const value = try framer.readValue();
+                    _ = try list.append(value);
+                }
+
+                frame.values = list.toOwnedSlice();
+            }
+        }
+        if (flags & FlagSkipMetadata == FlagSkipMetadata) {
+            // Nothing to do
+        }
+        if (flags & FlagWithPageSize == FlagWithPageSize) {
+            frame.page_size = try framer.readInt(u32);
+        }
+        if (flags & FlagWithPagingState == FlagWithPagingState) {
+            frame.paging_state = try framer.readBytes();
+        }
+        if (flags & FlagWithSerialConsistency == FlagWithSerialConsistency) {
+            const consistency_level = try framer.readConsistency();
+            if (consistency_level != .Serial and consistency_level != .LocalSerial) {
+                return error.InvalidSerialConsistency;
+            }
+            frame.serial_consistency_level = consistency_level;
+        }
+        if (flags & FlagWithDefaultTimestamp == FlagWithDefaultTimestamp) {
+            const timestamp = try framer.readInt(u64);
+            if (timestamp < 0) {
+                return error.InvalidNegativeTimestamp;
+            }
+            frame.timestamp = timestamp;
+        }
+        if (flags & FlagWithKeyspace == FlagWithKeyspace) {
+            frame.keyspace = try framer.readString();
+        }
+        if (flags & FlagWithNowInSeconds == FlagWithNowInSeconds) {
+            frame.now_in_seconds = try framer.readInt(u32);
+        }
+
+        return frame;
+    }
+};
+
+// Below are response frames only (ie server -> client).
+
 // TODO(vincent): test all error codes
 const ErrorCode = packed enum(u32) {
     ServerError = 0x0000,
@@ -123,6 +342,9 @@ const ErrorCode = packed enum(u32) {
     Unprepared = 0x2500,
 };
 
+/// ERROR is sent by a node if there's an error processing a request.
+///
+/// Described in the protocol spec at §4.2.1.
 const ErrorFrame = struct {
     const Self = @This();
 
@@ -168,7 +390,7 @@ const ErrorFrame = struct {
     }
 
     pub fn read(allocator: *mem.Allocator, comptime FramerType: type, framer: *FramerType) !ErrorFrame {
-        var frame: ErrorFrame = undefined;
+        var frame: Self = undefined;
         frame.allocator = allocator;
         frame.error_code = @intToEnum(ErrorCode, try framer.readInt(u32));
         frame.message = try framer.readString();
@@ -297,56 +519,14 @@ const ErrorFrame = struct {
     }
 };
 
-const StartupFrame = struct {
-    const Self = @This();
-
-    allocator: *mem.Allocator,
-
-    cql_version: []const u8,
-    compression: ?CompressionAlgorithm,
-
-    pub fn deinit(self: *const Self) void {
-        self.allocator.free(self.cql_version);
-    }
-
-    pub fn read(allocator: *mem.Allocator, comptime FramerType: type, framer: *FramerType) !StartupFrame {
-        const map = try framer.readStringMap();
-        defer map.deinit();
-
-        var frame = Self{
-            .allocator = allocator,
-            .cql_version = undefined,
-            .compression = null,
-        };
-
-        // TODO(vincent): maybe avoid copying the strings ?
-
-        // CQL_VERSION is mandatory and the only version supported is 3.0.0 right now.
-        if (map.get("CQL_VERSION")) |version| {
-            if (!mem.eql(u8, "3.0.0", version.value)) {
-                return StartupFrameError.InvalidCQLVersion;
-            }
-            frame.cql_version = try mem.dupe(allocator, u8, version.value);
-        } else {
-            return StartupFrameError.InvalidCQLVersion;
-        }
-
-        if (map.get("COMPRESSION")) |compression| {
-            if (mem.eql(u8, compression.value, "lz4")) {
-                frame.compression = CompressionAlgorithm.LZ4;
-            } else if (mem.eql(u8, compression.value, "snappy")) {
-                frame.compression = CompressionAlgorithm.Snappy;
-            } else {
-                return StartupFrameError.InvalidCompression;
-            }
-        }
-
-        return frame;
-    }
-};
-
+/// READY is sent by a node to indicate it is ready to process queries.
+///
+/// Described in the protocol spec at §4.2.2.
 const ReadyFrame = struct {};
 
+/// AUTHENTICATE is sent by a node in response to a STARTUP frame if authentication is required.
+///
+/// Described in the protocol spec at §4.2.3.
 const AuthenticateFrame = struct {
     const Self = @This();
 
@@ -366,8 +546,9 @@ const AuthenticateFrame = struct {
     }
 };
 
-const OptionsFrame = struct {};
-
+/// SUPPORTED is sent by a node in response to a OPTIONS frame.
+///
+/// Described in the protocol spec at §4.2.4.
 const SupportedFrame = struct {
     const Self = @This();
 
@@ -596,4 +777,34 @@ test "supported frame" {
     testing.expectEqual(@as(usize, 2), frame.compression_algorithms.len);
     testing.expectEqual(CompressionAlgorithm.Snappy, frame.compression_algorithms[0]);
     testing.expectEqual(CompressionAlgorithm.LZ4, frame.compression_algorithms[1]);
+}
+
+test "query frame" {
+    const data = "\x04\x00\x00\x08\x07\x00\x00\x00\x30\x00\x00\x00\x1b\x53\x45\x4c\x45\x43\x54\x20\x2a\x20\x46\x52\x4f\x4d\x20\x66\x6f\x6f\x62\x61\x72\x2e\x75\x73\x65\x72\x20\x3b\x00\x01\x34\x00\x00\x00\x64\x00\x08\x00\x05\xa2\x2c\xf0\x57\x3e\x3f";
+    var fbs = std.io.fixedBufferStream(data);
+    var in_stream = fbs.inStream();
+
+    var framer = Framer(@TypeOf(in_stream)).init(testing.allocator, in_stream);
+    _ = try framer.readHeader();
+
+    testing.expectEqual(ProtocolVersion.V4, framer.header.version);
+    testing.expectEqual(@as(u8, 0), framer.header.flags);
+    testing.expectEqual(@as(i16, 8), framer.header.stream);
+    testing.expectEqual(Opcode.Query, framer.header.opcode);
+    testing.expectEqual(@as(u32, 48), framer.header.body_len);
+    testing.expectEqual(@as(usize, 48), data.len - @sizeOf(FrameHeader));
+
+    const frame = try QueryFrame.read(testing.allocator, @TypeOf(framer), &framer);
+    defer frame.deinit();
+
+    testing.expectEqualSlices(u8, "SELECT * FROM foobar.user ;", frame.query);
+    testing.expectEqual(Consistency.One, frame.consistency_level);
+    testing.expect(frame.values == null);
+    testing.expect(frame.named_values == null);
+    testing.expectEqual(@as(u32, 100), frame.page_size.?);
+    testing.expect(frame.paging_state == null);
+    testing.expectEqual(Consistency.Serial, frame.serial_consistency_level.?);
+    testing.expectEqual(@as(u64, 1585688778063423), frame.timestamp.?);
+    testing.expect(frame.keyspace == null);
+    testing.expect(frame.now_in_seconds == null);
 }
