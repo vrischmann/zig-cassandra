@@ -622,15 +622,16 @@ test "frame: parse startup frame" {
     var fbs = std.io.fixedBufferStream(data);
     var in_stream = fbs.inStream();
 
-    const header = try FrameHeader.read(@TypeOf(in_stream), in_stream);
-    testing.expectEqual(ProtocolVersion.V4, header.version);
-    testing.expectEqual(@as(u8, 0), header.flags);
-    testing.expectEqual(@as(i16, 0), header.stream);
-    testing.expectEqual(Opcode.Startup, header.opcode);
-    testing.expectEqual(@as(u32, 22), header.body_len);
+    var framer = Framer(@TypeOf(in_stream)).init(testing.allocator, in_stream);
+    _ = try framer.readHeader();
+
+    testing.expectEqual(ProtocolVersion.V4, framer.header.version);
+    testing.expectEqual(@as(u8, 0), framer.header.flags);
+    testing.expectEqual(@as(i16, 0), framer.header.stream);
+    testing.expectEqual(Opcode.Startup, framer.header.opcode);
+    testing.expectEqual(@as(u32, 22), framer.header.body_len);
     testing.expectEqual(@as(usize, 22), data.len - @sizeOf(FrameHeader));
 
-    var framer = Framer(@TypeOf(in_stream)).init(testing.allocator, in_stream);
     const frame = try StartupFrame.read(testing.allocator, @TypeOf(framer), &framer);
     defer frame.deinit();
 }
@@ -640,15 +641,16 @@ test "error frame: invalid query, no keyspace specified" {
     var fbs = std.io.fixedBufferStream(data);
     var in_stream = fbs.inStream();
 
-    const header = try FrameHeader.read(@TypeOf(in_stream), in_stream);
-    testing.expectEqual(ProtocolVersion.V4, header.version);
-    testing.expectEqual(@as(u8, 0), header.flags);
-    testing.expectEqual(@as(i16, 2), header.stream);
-    testing.expectEqual(Opcode.Error, header.opcode);
-    testing.expectEqual(@as(u32, 94), header.body_len);
+    var framer = Framer(@TypeOf(in_stream)).init(testing.allocator, in_stream);
+    _ = try framer.readHeader();
+
+    testing.expectEqual(ProtocolVersion.V4, framer.header.version);
+    testing.expectEqual(@as(u8, 0), framer.header.flags);
+    testing.expectEqual(@as(i16, 2), framer.header.stream);
+    testing.expectEqual(Opcode.Error, framer.header.opcode);
+    testing.expectEqual(@as(u32, 94), framer.header.body_len);
     testing.expectEqual(@as(usize, 94), data.len - @sizeOf(FrameHeader));
 
-    var framer = Framer(@TypeOf(in_stream)).init(testing.allocator, in_stream);
     const frame = try ErrorFrame.read(testing.allocator, @TypeOf(framer), &framer);
     defer frame.deinit();
 
@@ -661,15 +663,16 @@ test "error frame: already exists" {
     var fbs = std.io.fixedBufferStream(data);
     var in_stream = fbs.inStream();
 
-    const header = try FrameHeader.read(@TypeOf(in_stream), in_stream);
-    testing.expectEqual(ProtocolVersion.V4, header.version);
-    testing.expectEqual(@as(u8, 0), header.flags);
-    testing.expectEqual(@as(i16, 35), header.stream);
-    testing.expectEqual(Opcode.Error, header.opcode);
-    testing.expectEqual(@as(u32, 83), header.body_len);
+    var framer = Framer(@TypeOf(in_stream)).init(testing.allocator, in_stream);
+    _ = try framer.readHeader();
+
+    testing.expectEqual(ProtocolVersion.V4, framer.header.version);
+    testing.expectEqual(@as(u8, 0), framer.header.flags);
+    testing.expectEqual(@as(i16, 35), framer.header.stream);
+    testing.expectEqual(Opcode.Error, framer.header.opcode);
+    testing.expectEqual(@as(u32, 83), framer.header.body_len);
     testing.expectEqual(@as(usize, 83), data.len - @sizeOf(FrameHeader));
 
-    var framer = Framer(@TypeOf(in_stream)).init(testing.allocator, in_stream);
     const frame = try ErrorFrame.read(testing.allocator, @TypeOf(framer), &framer);
     defer frame.deinit();
 
@@ -685,15 +688,16 @@ test "error frame: syntax error" {
     var fbs = std.io.fixedBufferStream(data);
     var in_stream = fbs.inStream();
 
-    const header = try FrameHeader.read(@TypeOf(in_stream), in_stream);
-    testing.expectEqual(ProtocolVersion.V4, header.version);
-    testing.expectEqual(@as(u8, 0), header.flags);
-    testing.expectEqual(@as(i16, 47), header.stream);
-    testing.expectEqual(Opcode.Error, header.opcode);
-    testing.expectEqual(@as(u32, 65), header.body_len);
+    var framer = Framer(@TypeOf(in_stream)).init(testing.allocator, in_stream);
+    _ = try framer.readHeader();
+
+    testing.expectEqual(ProtocolVersion.V4, framer.header.version);
+    testing.expectEqual(@as(u8, 0), framer.header.flags);
+    testing.expectEqual(@as(i16, 47), framer.header.stream);
+    testing.expectEqual(Opcode.Error, framer.header.opcode);
+    testing.expectEqual(@as(u32, 65), framer.header.body_len);
     testing.expectEqual(@as(usize, 65), data.len - @sizeOf(FrameHeader));
 
-    var framer = Framer(@TypeOf(in_stream)).init(testing.allocator, in_stream);
     const frame = try ErrorFrame.read(testing.allocator, @TypeOf(framer), &framer);
     defer frame.deinit();
 
@@ -706,12 +710,14 @@ test "ready frame" {
     var fbs = std.io.fixedBufferStream(data);
     var in_stream = fbs.inStream();
 
-    const header = try FrameHeader.read(@TypeOf(in_stream), in_stream);
-    testing.expectEqual(ProtocolVersion.V4, header.version);
-    testing.expectEqual(@as(u8, 0), header.flags);
-    testing.expectEqual(@as(i16, 2), header.stream);
-    testing.expectEqual(Opcode.Ready, header.opcode);
-    testing.expectEqual(@as(u32, 0), header.body_len);
+    var framer = Framer(@TypeOf(in_stream)).init(testing.allocator, in_stream);
+    _ = try framer.readHeader();
+
+    testing.expectEqual(ProtocolVersion.V4, framer.header.version);
+    testing.expectEqual(@as(u8, 0), framer.header.flags);
+    testing.expectEqual(@as(i16, 2), framer.header.stream);
+    testing.expectEqual(Opcode.Ready, framer.header.opcode);
+    testing.expectEqual(@as(u32, 0), framer.header.body_len);
     testing.expectEqual(@as(usize, 0), data.len - @sizeOf(FrameHeader));
 }
 
@@ -720,15 +726,16 @@ test "authenticate frame" {
     var fbs = std.io.fixedBufferStream(data);
     var in_stream = fbs.inStream();
 
-    const header = try FrameHeader.read(@TypeOf(in_stream), in_stream);
-    testing.expectEqual(ProtocolVersion.V4, header.version);
-    testing.expectEqual(@as(u8, 0), header.flags);
-    testing.expectEqual(@as(i16, 0), header.stream);
-    testing.expectEqual(Opcode.Authenticate, header.opcode);
-    testing.expectEqual(@as(u32, 49), header.body_len);
+    var framer = Framer(@TypeOf(in_stream)).init(testing.allocator, in_stream);
+    _ = try framer.readHeader();
+
+    testing.expectEqual(ProtocolVersion.V4, framer.header.version);
+    testing.expectEqual(@as(u8, 0), framer.header.flags);
+    testing.expectEqual(@as(i16, 0), framer.header.stream);
+    testing.expectEqual(Opcode.Authenticate, framer.header.opcode);
+    testing.expectEqual(@as(u32, 49), framer.header.body_len);
     testing.expectEqual(@as(usize, 49), data.len - @sizeOf(FrameHeader));
 
-    var framer = Framer(@TypeOf(in_stream)).init(testing.allocator, in_stream);
     const frame = try AuthenticateFrame.read(testing.allocator, @TypeOf(framer), &framer);
     defer frame.deinit();
 
@@ -740,12 +747,14 @@ test "options frame" {
     var fbs = std.io.fixedBufferStream(data);
     var in_stream = fbs.inStream();
 
-    const header = try FrameHeader.read(@TypeOf(in_stream), in_stream);
-    testing.expectEqual(ProtocolVersion.V4, header.version);
-    testing.expectEqual(@as(u8, 0), header.flags);
-    testing.expectEqual(@as(i16, 5), header.stream);
-    testing.expectEqual(Opcode.Options, header.opcode);
-    testing.expectEqual(@as(u32, 0), header.body_len);
+    var framer = Framer(@TypeOf(in_stream)).init(testing.allocator, in_stream);
+    _ = try framer.readHeader();
+
+    testing.expectEqual(ProtocolVersion.V4, framer.header.version);
+    testing.expectEqual(@as(u8, 0), framer.header.flags);
+    testing.expectEqual(@as(i16, 5), framer.header.stream);
+    testing.expectEqual(Opcode.Options, framer.header.opcode);
+    testing.expectEqual(@as(u32, 0), framer.header.body_len);
     testing.expectEqual(@as(usize, 0), data.len - @sizeOf(FrameHeader));
 }
 
@@ -754,15 +763,16 @@ test "supported frame" {
     var fbs = std.io.fixedBufferStream(data);
     var in_stream = fbs.inStream();
 
-    const header = try FrameHeader.read(@TypeOf(in_stream), in_stream);
-    testing.expectEqual(ProtocolVersion.V4, header.version);
-    testing.expectEqual(@as(u8, 0), header.flags);
-    testing.expectEqual(@as(i16, 9), header.stream);
-    testing.expectEqual(Opcode.Supported, header.opcode);
-    testing.expectEqual(@as(u32, 96), header.body_len);
+    var framer = Framer(@TypeOf(in_stream)).init(testing.allocator, in_stream);
+    _ = try framer.readHeader();
+
+    testing.expectEqual(ProtocolVersion.V4, framer.header.version);
+    testing.expectEqual(@as(u8, 0), framer.header.flags);
+    testing.expectEqual(@as(i16, 9), framer.header.stream);
+    testing.expectEqual(Opcode.Supported, framer.header.opcode);
+    testing.expectEqual(@as(u32, 96), framer.header.body_len);
     testing.expectEqual(@as(usize, 96), data.len - @sizeOf(FrameHeader));
 
-    var framer = Framer(@TypeOf(in_stream)).init(testing.allocator, in_stream);
     const frame = try SupportedFrame.read(testing.allocator, @TypeOf(framer), &framer);
     defer frame.deinit();
 
