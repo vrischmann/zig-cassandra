@@ -19,14 +19,21 @@ pub fn Framer(comptime InStreamType: type) type {
         allocator: *std.mem.Allocator,
         in_stream: InStreamType,
 
+        header: FrameHeader,
+
         pub fn init(allocator: *std.mem.Allocator, in: InStreamType) Self {
             return Self{
                 .allocator = allocator,
                 .in_stream = in,
+                .header = undefined,
             };
         }
 
         pub fn deinit(self: *Self) void {}
+
+        pub fn readHeader(self: *Self) !void {
+            self.header = try FrameHeader.read(InStreamType, self.in_stream);
+        }
 
         /// Read either a short, a int or a long from the stream.
         pub fn readInt(self: *Self, comptime T: type) !T {
