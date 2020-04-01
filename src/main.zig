@@ -309,7 +309,7 @@ const QueryParameters = struct {
     }
 };
 
-/// QUERY is sent to ask the node to perform a CQL query.
+/// QUERY is sent to perform a CQL query.
 ///
 /// Described in the protocol spec at §4.1.4
 const QueryFrame = struct {
@@ -334,7 +334,7 @@ const QueryFrame = struct {
     }
 };
 
-/// PREPARE is sent to ask the node to prepared a CQL query for later execution (through EXECUTE).
+/// PREPARE is sent to prepare a CQL query for later execution (through EXECUTE).
 ///
 /// Described in the protocol spec at §4.1.5
 const PrepareFrame = struct {
@@ -372,7 +372,7 @@ const PrepareFrame = struct {
     }
 };
 
-/// EXECUTE is sent to ask the node to execute a prepared query.
+/// EXECUTE is sent to execute a prepared query.
 ///
 /// Described in the protocol spec at §4.1.6
 const ExecuteFrame = struct {
@@ -405,6 +405,16 @@ const ExecuteFrame = struct {
         return frame;
     }
 };
+
+/// BATCH is sent to execute a list of queries (prepared or not) as a batch.
+///
+/// Described in the protocol spec at §4.1.7
+const BatchFrame = struct {};
+
+/// REGISTER is sent to register this connection to receive some types of events.
+///
+/// Described in the protocol spec at §4.1.8
+const RegisterFrame = struct {};
 
 // Below are response frames only (ie server -> client).
 
