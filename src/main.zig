@@ -316,6 +316,44 @@ const QueryFrame = struct {
     }
 };
 
+/// PREPARE is sent to ask the node to prepared a CQL query for later execution (through EXECUTE).
+///
+/// Described in the protocol spec at §4.1.5
+const PrepareFrame = struct {
+    const Self = @This();
+
+    allocator: *mem.Allocator,
+
+    query: []const u8,
+    keyspace: ?[]const u8,
+
+    pub fn deinit(self: *const Self) void {
+        self.allocator.free(self.query);
+    }
+
+    const FlagWithKeyspace = 0x01;
+
+    pub fn read(allocator: *mem.Allocator, comptime FramerType: type, framer: *FramerType) !PrepareFrame {
+        var frame = PrepareFrame{
+            .allocator = allocator,
+            .query = undefined,
+            .keyspace = null,
+        };
+        frame.query = try framer.readLongString();
+
+        if (framer.header.version != ProtocolVersion.V5) {
+            return frame;
+        }
+
+        const flags = try framer.readInt(u32);
+        if (flags & FlagWithKeyspace == FlagWithKeyspace) {
+            frame.keyspace = try framer.readString();
+        }
+
+        return frame;
+    }
+};
+
 // Below are response frames only (ie server -> client).
 
 // TODO(vincent): test all error codes
@@ -616,7 +654,7 @@ const SupportedFrame = struct {
     }
 };
 
-test "frame: parse startup frame" {
+test "startup frame" {
     // from cqlsh exported via Wireshark
     const data = "\x04\x00\x00\x00\x01\x00\x00\x00\x16\x00\x01\x00\x0b\x43\x51\x4c\x5f\x56\x45\x52\x53\x49\x4f\x4e\x00\x05\x33\x2e\x30\x2e\x30";
     var fbs = std.io.fixedBufferStream(data);
@@ -634,6 +672,54 @@ test "frame: parse startup frame" {
 
     const frame = try StartupFrame.read(testing.allocator, @TypeOf(framer), &framer);
     defer frame.deinit();
+}
+
+test "auth response frame" {}
+
+test "options frame" {
+    const data = "\x04\x00\x00\x05\x05\x00\x00\x00\x00";
+    var fbs = std.io.fixedBufferStream(data);
+    var in_stream = fbs.inStream();
+
+    var framer = Framer(@TypeOf(in_stream)).init(testing.allocator, in_stream);
+    _ = try framer.readHeader();
+
+    testing.expectEqual(ProtocolVersion.V4, framer.header.version);
+    testing.expectEqual(@as(u8, 0), framer.header.flags);
+    testing.expectEqual(@as(i16, 5), framer.header.stream);
+    testing.expectEqual(Opcode.Options, framer.header.opcode);
+    testing.expectEqual(@as(u32, 0), framer.header.body_len);
+    testing.expectEqual(@as(usize, 0), data.len - @sizeOf(FrameHeader));
+}
+
+test "query frame: no values, no paging state" {
+    const data = "\x04\x00\x00\x08\x07\x00\x00\x00\x30\x00\x00\x00\x1b\x53\x45\x4c\x45\x43\x54\x20\x2a\x20\x46\x52\x4f\x4d\x20\x66\x6f\x6f\x62\x61\x72\x2e\x75\x73\x65\x72\x20\x3b\x00\x01\x34\x00\x00\x00\x64\x00\x08\x00\x05\xa2\x2c\xf0\x57\x3e\x3f";
+    var fbs = std.io.fixedBufferStream(data);
+    var in_stream = fbs.inStream();
+
+    var framer = Framer(@TypeOf(in_stream)).init(testing.allocator, in_stream);
+    _ = try framer.readHeader();
+
+    testing.expectEqual(ProtocolVersion.V4, framer.header.version);
+    testing.expectEqual(@as(u8, 0), framer.header.flags);
+    testing.expectEqual(@as(i16, 8), framer.header.stream);
+    testing.expectEqual(Opcode.Query, framer.header.opcode);
+    testing.expectEqual(@as(u32, 48), framer.header.body_len);
+    testing.expectEqual(@as(usize, 48), data.len - @sizeOf(FrameHeader));
+
+    const frame = try QueryFrame.read(testing.allocator, @TypeOf(framer), &framer);
+    defer frame.deinit();
+
+    testing.expectEqualSlices(u8, "SELECT * FROM foobar.user ;", frame.query);
+    testing.expectEqual(Consistency.One, frame.consistency_level);
+    testing.expect(frame.values == null);
+    testing.expect(frame.named_values == null);
+    testing.expectEqual(@as(u32, 100), frame.page_size.?);
+    testing.expect(frame.paging_state == null);
+    testing.expectEqual(Consistency.Serial, frame.serial_consistency_level.?);
+    testing.expectEqual(@as(u64, 1585688778063423), frame.timestamp.?);
+    testing.expect(frame.keyspace == null);
+    testing.expect(frame.now_in_seconds == null);
 }
 
 test "error frame: invalid query, no keyspace specified" {
@@ -742,22 +828,6 @@ test "authenticate frame" {
     testing.expectEqualSlices(u8, "org.apache.cassandra.auth.PasswordAuthenticator", frame.authenticator);
 }
 
-test "options frame" {
-    const data = "\x04\x00\x00\x05\x05\x00\x00\x00\x00";
-    var fbs = std.io.fixedBufferStream(data);
-    var in_stream = fbs.inStream();
-
-    var framer = Framer(@TypeOf(in_stream)).init(testing.allocator, in_stream);
-    _ = try framer.readHeader();
-
-    testing.expectEqual(ProtocolVersion.V4, framer.header.version);
-    testing.expectEqual(@as(u8, 0), framer.header.flags);
-    testing.expectEqual(@as(i16, 5), framer.header.stream);
-    testing.expectEqual(Opcode.Options, framer.header.opcode);
-    testing.expectEqual(@as(u32, 0), framer.header.body_len);
-    testing.expectEqual(@as(usize, 0), data.len - @sizeOf(FrameHeader));
-}
-
 test "supported frame" {
     const data = "\x84\x00\x00\x09\x06\x00\x00\x00\x60\x00\x03\x00\x11\x50\x52\x4f\x54\x4f\x43\x4f\x4c\x5f\x56\x45\x52\x53\x49\x4f\x4e\x53\x00\x03\x00\x04\x33\x2f\x76\x33\x00\x04\x34\x2f\x76\x34\x00\x09\x35\x2f\x76\x35\x2d\x62\x65\x74\x61\x00\x0b\x43\x4f\x4d\x50\x52\x45\x53\x53\x49\x4f\x4e\x00\x02\x00\x06\x73\x6e\x61\x70\x70\x79\x00\x03\x6c\x7a\x34\x00\x0b\x43\x51\x4c\x5f\x56\x45\x52\x53\x49\x4f\x4e\x00\x01\x00\x05\x33\x2e\x34\x2e\x34";
     var fbs = std.io.fixedBufferStream(data);
@@ -789,8 +859,9 @@ test "supported frame" {
     testing.expectEqual(CompressionAlgorithm.LZ4, frame.compression_algorithms[1]);
 }
 
-test "query frame" {
-    const data = "\x04\x00\x00\x08\x07\x00\x00\x00\x30\x00\x00\x00\x1b\x53\x45\x4c\x45\x43\x54\x20\x2a\x20\x46\x52\x4f\x4d\x20\x66\x6f\x6f\x62\x61\x72\x2e\x75\x73\x65\x72\x20\x3b\x00\x01\x34\x00\x00\x00\x64\x00\x08\x00\x05\xa2\x2c\xf0\x57\x3e\x3f";
+test "prepare frame" {
+    const data = "\x04\x00\x00\xc0\x09\x00\x00\x00\x32\x00\x00\x00\x2e\x53\x45\x4c\x45\x43\x54\x20\x61\x67\x65\x2c\x20\x6e\x61\x6d\x65\x20\x66\x72\x6f\x6d\x20\x66\x6f\x6f\x62\x61\x72\x2e\x75\x73\x65\x72\x20\x77\x68\x65\x72\x65\x20\x69\x64\x20\x3d\x20\x3f";
+
     var fbs = std.io.fixedBufferStream(data);
     var in_stream = fbs.inStream();
 
@@ -799,22 +870,14 @@ test "query frame" {
 
     testing.expectEqual(ProtocolVersion.V4, framer.header.version);
     testing.expectEqual(@as(u8, 0), framer.header.flags);
-    testing.expectEqual(@as(i16, 8), framer.header.stream);
-    testing.expectEqual(Opcode.Query, framer.header.opcode);
-    testing.expectEqual(@as(u32, 48), framer.header.body_len);
-    testing.expectEqual(@as(usize, 48), data.len - @sizeOf(FrameHeader));
+    testing.expectEqual(@as(i16, 192), framer.header.stream);
+    testing.expectEqual(Opcode.Prepare, framer.header.opcode);
+    testing.expectEqual(@as(u32, 50), framer.header.body_len);
+    testing.expectEqual(@as(usize, 50), data.len - @sizeOf(FrameHeader));
 
-    const frame = try QueryFrame.read(testing.allocator, @TypeOf(framer), &framer);
+    const frame = try PrepareFrame.read(testing.allocator, @TypeOf(framer), &framer);
     defer frame.deinit();
 
-    testing.expectEqualSlices(u8, "SELECT * FROM foobar.user ;", frame.query);
-    testing.expectEqual(Consistency.One, frame.consistency_level);
-    testing.expect(frame.values == null);
-    testing.expect(frame.named_values == null);
-    testing.expectEqual(@as(u32, 100), frame.page_size.?);
-    testing.expect(frame.paging_state == null);
-    testing.expectEqual(Consistency.Serial, frame.serial_consistency_level.?);
-    testing.expectEqual(@as(u64, 1585688778063423), frame.timestamp.?);
+    testing.expectEqualSlices(u8, "SELECT age, name from foobar.user where id = ?", frame.query);
     testing.expect(frame.keyspace == null);
-    testing.expect(frame.now_in_seconds == null);
 }
