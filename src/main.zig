@@ -243,8 +243,6 @@ const QueryParameters = struct {
             flags = try framer.readInt(u8);
         }
 
-        // TODO(vincent): some flags are only valid with protocol version 5
-
         if (flags & FlagWithValues == FlagWithValues) {
             const n = try framer.readInt(u16);
 
@@ -298,6 +296,12 @@ const QueryParameters = struct {
             }
             params.timestamp = timestamp;
         }
+
+        if (framer.header.version != ProtocolVersion.V5) {
+            return params;
+        }
+
+        // The following flags are only valid with protocol v5
         if (flags & FlagWithKeyspace == FlagWithKeyspace) {
             params.keyspace = try framer.readString();
         }
