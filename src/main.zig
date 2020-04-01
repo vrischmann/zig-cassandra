@@ -382,28 +382,25 @@ const ExecuteFrame = struct {
 
     query_id: []const u8,
     result_metadata_id: ?[]const u8,
-
-    // TODO(vincent): query_parameters
+    query_parameters: QueryParameters,
 
     pub fn deinit(self: *const Self) void {
         self.allocator.free(self.query_id);
         if (self.result_metadata_id) |id| {
             self.allocator.free(id);
         }
+        self.query_parameters.deinit();
     }
 
     pub fn read(allocator: *mem.Allocator, comptime FramerType: type, framer: *FramerType) !ExecuteFrame {
-        var frame = ExecuteFrame{
-            .allocator = allocator,
-            .query_id = (try framer.readShortBytes()) orelse &[_]u8{},
-            .result_metadata_id = null,
-        };
+        var frame: ExecuteFrame = undefined;
+        frame.allocator = allocator;
 
+        frame.query_id = (try framer.readShortBytes()) orelse &[_]u8{};
         if (framer.header.version == ProtocolVersion.V5) {
             frame.result_metadata_id = try framer.readShortBytes();
         }
-
-        // TODO(vincent): query_parameters
+        frame.query_parameters = try QueryParameters.read(allocator, FramerType, framer);
 
         return frame;
     }
@@ -958,5 +955,16 @@ test "execute frame" {
     const exp_query_id = "\x97\x97\x95\x6d\xfe\xb2\x4c\x99\x86\x8e\xd3\x84\xff\x6f\xd9\x4c";
     testing.expectEqualSlices(u8, exp_query_id, frame.query_id);
 
-    // TODO(vincent): rest
+    testing.expectEqual(Consistency.Quorum, frame.query_parameters.consistency_level);
+
+    const values = frame.query_parameters.values.?;
+    testing.expectEqual(@as(usize, 1), values.len);
+
+    testing.expect(frame.query_parameters.named_values == null);
+    testing.expectEqual(@as(u32, 5000), frame.query_parameters.page_size.?);
+    testing.expect(frame.query_parameters.paging_state == null);
+    testing.expect(frame.query_parameters.serial_consistency_level == null);
+    testing.expectEqual(@as(u64, 1585776216966732), frame.query_parameters.timestamp.?);
+    testing.expect(frame.query_parameters.keyspace == null);
+    testing.expect(frame.query_parameters.now_in_seconds == null);
 }
