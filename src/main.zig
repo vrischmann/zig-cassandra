@@ -162,10 +162,7 @@ const AuthResponseFrame = struct {};
 /// Described in the protocol spec at §4.1.3.
 const OptionsFrame = struct {};
 
-/// QUERY is sent to ask the node to perform a CQL query.
-///
-/// Described in the protocol spec at §4.1.4
-const QueryFrame = struct {
+const QueryParameters = struct {
     const Self = @This();
 
     allocator: *mem.Allocator,
@@ -175,19 +172,7 @@ const QueryFrame = struct {
         value: ?Value,
     };
 
-    const FlagWithValues: u32 = 0x0001;
-    const FlagSkipMetadata: u32 = 0x0002;
-    const FlagWithPageSize: u32 = 0x0004;
-    const FlagWithPagingState: u32 = 0x0008;
-    const FlagWithSerialConsistency: u32 = 0x0010;
-    const FlagWithDefaultTimestamp: u32 = 0x0020;
-    const FlagWithNamedValues: u32 = 0x0040;
-    const FlagWithKeyspace: u32 = 0x0080;
-    const FlagWithNowInSeconds: u32 = 0x100;
-
-    query: []const u8,
     consistency_level: Consistency,
-
     values: ?[]?Value,
     named_values: ?[]NamedValue,
     page_size: ?u32,
@@ -198,8 +183,6 @@ const QueryFrame = struct {
     now_in_seconds: ?u32,
 
     pub fn deinit(self: *const Self) void {
-        self.allocator.free(self.query);
-
         if (self.values) |values| {
             for (values) |outer_value| {
                 if (outer_value) |not_null_value| {
@@ -234,11 +217,21 @@ const QueryFrame = struct {
         }
     }
 
-    pub fn read(allocator: *mem.Allocator, comptime FramerType: type, framer: *FramerType) !QueryFrame {
-        var frame: Self = undefined;
-        frame.allocator = allocator;
-        frame.query = try framer.readLongString();
-        frame.consistency_level = try framer.readConsistency();
+    const FlagWithValues: u32 = 0x0001;
+    const FlagSkipMetadata: u32 = 0x0002;
+    const FlagWithPageSize: u32 = 0x0004;
+    const FlagWithPagingState: u32 = 0x0008;
+    const FlagWithSerialConsistency: u32 = 0x0010;
+    const FlagWithDefaultTimestamp: u32 = 0x0020;
+    const FlagWithNamedValues: u32 = 0x0040;
+    const FlagWithKeyspace: u32 = 0x0080;
+    const FlagWithNowInSeconds: u32 = 0x100;
+
+    pub fn read(allocator: *mem.Allocator, comptime FramerType: type, framer: *FramerType) !QueryParameters {
+        var params: QueryParameters = undefined;
+        params.allocator = allocator;
+
+        params.consistency_level = try framer.readConsistency();
 
         // The remaining data in the frame depends on the flags
 
@@ -268,7 +261,7 @@ const QueryFrame = struct {
                     _ = try list.append(nm);
                 }
 
-                frame.named_values = list.toOwnedSlice();
+                params.named_values = list.toOwnedSlice();
             } else {
                 var list = std.ArrayList(?Value).init(allocator);
                 errdefer list.deinit();
@@ -279,40 +272,65 @@ const QueryFrame = struct {
                     _ = try list.append(value);
                 }
 
-                frame.values = list.toOwnedSlice();
+                params.values = list.toOwnedSlice();
             }
         }
         if (flags & FlagSkipMetadata == FlagSkipMetadata) {
             // Nothing to do
         }
         if (flags & FlagWithPageSize == FlagWithPageSize) {
-            frame.page_size = try framer.readInt(u32);
+            params.page_size = try framer.readInt(u32);
         }
         if (flags & FlagWithPagingState == FlagWithPagingState) {
-            frame.paging_state = try framer.readBytes();
+            params.paging_state = try framer.readBytes();
         }
         if (flags & FlagWithSerialConsistency == FlagWithSerialConsistency) {
             const consistency_level = try framer.readConsistency();
             if (consistency_level != .Serial and consistency_level != .LocalSerial) {
                 return error.InvalidSerialConsistency;
             }
-            frame.serial_consistency_level = consistency_level;
+            params.serial_consistency_level = consistency_level;
         }
         if (flags & FlagWithDefaultTimestamp == FlagWithDefaultTimestamp) {
             const timestamp = try framer.readInt(u64);
             if (timestamp < 0) {
                 return error.InvalidNegativeTimestamp;
             }
-            frame.timestamp = timestamp;
+            params.timestamp = timestamp;
         }
         if (flags & FlagWithKeyspace == FlagWithKeyspace) {
-            frame.keyspace = try framer.readString();
+            params.keyspace = try framer.readString();
         }
         if (flags & FlagWithNowInSeconds == FlagWithNowInSeconds) {
-            frame.now_in_seconds = try framer.readInt(u32);
+            params.now_in_seconds = try framer.readInt(u32);
         }
 
-        return frame;
+        return params;
+    }
+};
+
+/// QUERY is sent to ask the node to perform a CQL query.
+///
+/// Described in the protocol spec at §4.1.4
+const QueryFrame = struct {
+    const Self = @This();
+
+    allocator: *mem.Allocator,
+
+    query: []const u8,
+    query_parameters: QueryParameters,
+
+    pub fn deinit(self: *const Self) void {
+        self.allocator.free(self.query);
+        self.query_parameters.deinit();
+    }
+
+    pub fn read(allocator: *mem.Allocator, comptime FramerType: type, framer: *FramerType) !QueryFrame {
+        return QueryFrame{
+            .allocator = allocator,
+            .query = try framer.readLongString(),
+            .query_parameters = try QueryParameters.read(allocator, FramerType, framer),
+        };
     }
 };
 
@@ -349,6 +367,43 @@ const PrepareFrame = struct {
         if (flags & FlagWithKeyspace == FlagWithKeyspace) {
             frame.keyspace = try framer.readString();
         }
+
+        return frame;
+    }
+};
+
+/// EXECUTE is sent to ask the node to execute a prepared query.
+///
+/// Described in the protocol spec at §4.1.6
+const ExecuteFrame = struct {
+    const Self = @This();
+
+    allocator: *mem.Allocator,
+
+    query_id: []const u8,
+    result_metadata_id: ?[]const u8,
+
+    // TODO(vincent): query_parameters
+
+    pub fn deinit(self: *const Self) void {
+        self.allocator.free(self.query_id);
+        if (self.result_metadata_id) |id| {
+            self.allocator.free(id);
+        }
+    }
+
+    pub fn read(allocator: *mem.Allocator, comptime FramerType: type, framer: *FramerType) !ExecuteFrame {
+        var frame = ExecuteFrame{
+            .allocator = allocator,
+            .query_id = (try framer.readShortBytes()) orelse &[_]u8{},
+            .result_metadata_id = null,
+        };
+
+        if (framer.header.version == ProtocolVersion.V5) {
+            frame.result_metadata_id = try framer.readShortBytes();
+        }
+
+        // TODO(vincent): query_parameters
 
         return frame;
     }
@@ -711,15 +766,15 @@ test "query frame: no values, no paging state" {
     defer frame.deinit();
 
     testing.expectEqualSlices(u8, "SELECT * FROM foobar.user ;", frame.query);
-    testing.expectEqual(Consistency.One, frame.consistency_level);
-    testing.expect(frame.values == null);
-    testing.expect(frame.named_values == null);
-    testing.expectEqual(@as(u32, 100), frame.page_size.?);
-    testing.expect(frame.paging_state == null);
-    testing.expectEqual(Consistency.Serial, frame.serial_consistency_level.?);
-    testing.expectEqual(@as(u64, 1585688778063423), frame.timestamp.?);
-    testing.expect(frame.keyspace == null);
-    testing.expect(frame.now_in_seconds == null);
+    testing.expectEqual(Consistency.One, frame.query_parameters.consistency_level);
+    testing.expect(frame.query_parameters.values == null);
+    testing.expect(frame.query_parameters.named_values == null);
+    testing.expectEqual(@as(u32, 100), frame.query_parameters.page_size.?);
+    testing.expect(frame.query_parameters.paging_state == null);
+    testing.expectEqual(Consistency.Serial, frame.query_parameters.serial_consistency_level.?);
+    testing.expectEqual(@as(u64, 1585688778063423), frame.query_parameters.timestamp.?);
+    testing.expect(frame.query_parameters.keyspace == null);
+    testing.expect(frame.query_parameters.now_in_seconds == null);
 }
 
 test "error frame: invalid query, no keyspace specified" {
@@ -880,4 +935,28 @@ test "prepare frame" {
 
     testing.expectEqualSlices(u8, "SELECT age, name from foobar.user where id = ?", frame.query);
     testing.expect(frame.keyspace == null);
+}
+
+test "execute frame" {
+    const data = "\x04\x00\x01\x00\x0a\x00\x00\x00\x37\x00\x10\x97\x97\x95\x6d\xfe\xb2\x4c\x99\x86\x8e\xd3\x84\xff\x6f\xd9\x4c\x00\x04\x27\x00\x01\x00\x00\x00\x10\xeb\x11\xc9\x1e\xd8\xcc\x48\x4d\xaf\x55\xe9\x9f\x5c\xd9\xec\x4a\x00\x00\x13\x88\x00\x05\xa2\x41\x4c\x1b\x06\x4c";
+    var fbs = std.io.fixedBufferStream(data);
+    var in_stream = fbs.inStream();
+
+    var framer = Framer(@TypeOf(in_stream)).init(testing.allocator, in_stream);
+    _ = try framer.readHeader();
+
+    testing.expectEqual(ProtocolVersion.V4, framer.header.version);
+    testing.expectEqual(@as(u8, 0), framer.header.flags);
+    testing.expectEqual(@as(i16, 256), framer.header.stream);
+    testing.expectEqual(Opcode.Execute, framer.header.opcode);
+    testing.expectEqual(@as(u32, 55), framer.header.body_len);
+    testing.expectEqual(@as(usize, 55), data.len - @sizeOf(FrameHeader));
+
+    const frame = try ExecuteFrame.read(testing.allocator, @TypeOf(framer), &framer);
+    defer frame.deinit();
+
+    const exp_query_id = "\x97\x97\x95\x6d\xfe\xb2\x4c\x99\x86\x8e\xd3\x84\xff\x6f\xd9\x4c";
+    testing.expectEqualSlices(u8, exp_query_id, frame.query_id);
+
+    // TODO(vincent): rest
 }
