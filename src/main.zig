@@ -969,6 +969,8 @@ test "execute frame" {
 
     const values = frame.query_parameters.values.?;
     testing.expectEqual(@as(usize, 1), values.len);
+    const value = values[0].?.Set;
+    testing.expectEqualSlices(u8, "\xeb\x11\xc9\x1e\xd8\xcc\x48\x4d\xaf\x55\xe9\x9f\x5c\xd9\xec\x4a", values[0].?.Set);
 
     testing.expect(frame.query_parameters.named_values == null);
     testing.expectEqual(@as(u32, 5000), frame.query_parameters.page_size.?);
