@@ -101,8 +101,13 @@ pub const FrameHeader = packed struct {
     opcode: Opcode,
     body_len: u32,
 
+    pub fn write(self: @This(), comptime OutStreamType: type, out: OutStreamType) !void {
+        var serializer = std.io.serializer(builtin.Endian.Big, std.io.Packing.Bit, out);
+        _ = try serializer.serialize(self);
+    }
+
     pub fn read(comptime InStreamType: type, in: InStreamType) !FrameHeader {
-        var deserializer = std.io.deserializer(builtin.Endian.Big, std.io.Packing.Byte, in);
+        var deserializer = std.io.deserializer(builtin.Endian.Big, std.io.Packing.Bit, in);
         return deserializer.deserialize(FrameHeader);
     }
 };
@@ -210,4 +215,26 @@ test "compression algorith: fromString" {
     testing.expectEqual(CompressionAlgorithm.LZ4, try CompressionAlgorithm.fromString("lz4"));
     testing.expectEqual(CompressionAlgorithm.Snappy, try CompressionAlgorithm.fromString("snappy"));
     testing.expectError(error.InvalidCompressionAlgorithm, CompressionAlgorithm.fromString("foobar"));
+}
+
+test "frame header: read and write" {
+    const exp = "\x04\x00\x00\xd7\x05\x00\x00\x00\x00";
+    var fbs = std.io.fixedBufferStream(exp);
+
+    // deserialize the header
+
+    var header = try FrameHeader.read(@TypeOf(fbs.inStream()), fbs.inStream());
+    testing.expectEqual(ProtocolVersion.V4, header.version);
+    testing.expectEqual(@as(u8, 0), header.flags);
+    testing.expectEqual(@as(i16, 215), header.stream);
+    testing.expectEqual(Opcode.Options, header.opcode);
+    testing.expectEqual(@as(u32, 0), header.body_len);
+    testing.expectEqual(@as(usize, 0), exp.len - @sizeOf(FrameHeader));
+
+    // reserialize it
+
+    var new_buf: [32]u8 = undefined;
+    var new_fbs = std.io.fixedBufferStream(&new_buf);
+
+    _ = try header.write(@TypeOf(new_fbs.outStream()), new_fbs.outStream());
 }
