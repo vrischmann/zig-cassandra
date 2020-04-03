@@ -150,6 +150,12 @@ pub const Consistency = packed enum(u16) {
     LocalOne = 0x000A,
 };
 
+pub const BatchType = packed enum(u8) {
+    Logged = 0,
+    Unlogged = 1,
+    Counter = 2,
+};
+
 test "cql version: fromString" {
     testing.expectEqual(CQLVersion{ .major = 3, .minor = 0, .patch = 0 }, try CQLVersion.fromString("3.0.0"));
     testing.expectEqual(CQLVersion{ .major = 3, .minor = 4, .patch = 0 }, try CQLVersion.fromString("3.4.0"));
