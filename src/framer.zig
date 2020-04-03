@@ -125,7 +125,7 @@ pub fn Framer(comptime InStreamType: type) type {
 
         /// Read a value from the stream.
         /// A value can be null.
-        pub fn readValue(self: *Self) !?Value {
+        pub fn readValue(self: *Self) !Value {
             const len = try self.readInt(i32);
 
             if (len >= 0) {
@@ -134,7 +134,7 @@ pub fn Framer(comptime InStreamType: type) type {
 
                 return Value{ .Set = result };
             } else if (len == -1) {
-                return null;
+                return Value.Null;
             } else if (len == -2) {
                 return Value.NotSet;
             } else {
@@ -361,38 +361,24 @@ test "framer: read value" {
     var framer = Framer(@TypeOf(in_stream)).init(testing.allocator, in_stream);
 
     // Normal value
-    resetAndWrite(fbs_type, &fbs, "\x00\x00\x00\x02\xFE\xFF");
+    resetAndWrite(fbs_type, &fbs, "\x00\x00\x00\x02\x61\x62");
 
     var value = try framer.readValue();
-    if (value) |v| {
-        testing.expect(v == .Set);
-
-        const bytes = v.Set;
-        defer std.testing.allocator.free(bytes);
-        testing.expectEqualSlices(u8, "\xFE\xFF", bytes);
-    } else {
-        std.debug.panic("expected bytes to not be null", .{});
-    }
+    defer std.testing.allocator.free(value.Set);
+    testing.expect(value == .Set);
+    testing.expectEqualSlices(u8, "\x61\x62", value.Set);
 
     // Null value
 
     resetAndWrite(fbs_type, &fbs, "\xff\xff\xff\xff");
-
     value = try framer.readValue();
-    if (value) |v| {
-        std.debug.panic("expected bytes to be null", .{});
-    }
+    testing.expect(value == .Null);
 
     // "Not set" value
 
     resetAndWrite(fbs_type, &fbs, "\xff\xff\xff\xfe");
-
     value = try framer.readValue();
-    if (value) |v| {
-        testing.expect(v == .NotSet);
-    } else {
-        std.debug.panic("expected bytes to not be null", .{});
-    }
+    testing.expect(value == .NotSet);
 }
 
 test "framer: read inet and inetaddr" {

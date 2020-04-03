@@ -130,10 +130,19 @@ pub const CompressionAlgorithm = enum {
 pub const ValueTag = enum {
     Set,
     NotSet,
+    Null,
 };
 pub const Value = union(ValueTag) {
     Set: []u8,
     NotSet: void,
+    Null: void,
+
+    pub fn deinit(self: @This(), allocator: *mem.Allocator) void {
+        switch (self) {
+            Value.Set => |inner_value| allocator.free(inner_value),
+            Value.NotSet, Value.Null => return,
+        }
+    }
 };
 
 pub const Consistency = packed enum(u16) {
