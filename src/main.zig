@@ -1,12 +1,12 @@
 const std = @import("std");
 const mem = std.mem;
 const net = std.net;
-const testing = std.testing;
 const ArrayList = std.ArrayList;
 
 const Framer = @import("framer.zig").Framer;
 const sm = @import("string_map.zig");
 usingnamespace @import("primitive_types.zig");
+const testing = @import("testing.zig");
 
 const StartupFrameError = error{
     InvalidCQLVersion,
@@ -913,7 +913,7 @@ test "query frame: no values, no paging state" {
     const frame = try QueryFrame.read(testing.allocator, @TypeOf(framer), &framer);
     defer frame.deinit();
 
-    testing.expectEqualSlices(u8, "SELECT * FROM foobar.user ;", frame.query);
+    testing.expectString("SELECT * FROM foobar.user ;", frame.query);
     testing.expectEqual(Consistency.One, frame.query_parameters.consistency_level);
     testing.expect(frame.query_parameters.values == null);
     testing.expectEqual(@as(u32, 100), frame.query_parameters.page_size.?);
@@ -938,7 +938,7 @@ test "error frame: invalid query, no keyspace specified" {
     defer frame.deinit();
 
     testing.expectEqual(ErrorCode.InvalidQuery, frame.error_code);
-    testing.expectEqualSlices(u8, "No keyspace has been specified. USE a keyspace, or explicitly specify keyspace.tablename", frame.message);
+    testing.expectString("No keyspace has been specified. USE a keyspace, or explicitly specify keyspace.tablename", frame.message);
 }
 
 test "error frame: already exists" {
@@ -955,10 +955,10 @@ test "error frame: already exists" {
     defer frame.deinit();
 
     testing.expectEqual(ErrorCode.AlreadyExists, frame.error_code);
-    testing.expectEqualSlices(u8, "Cannot add already existing table \"hello\" to keyspace \"foobar\"", frame.message);
+    testing.expectString("Cannot add already existing table \"hello\" to keyspace \"foobar\"", frame.message);
     const already_exists_error = frame.already_exists.?;
-    testing.expectEqualSlices(u8, "foobar", already_exists_error.keyspace);
-    testing.expectEqualSlices(u8, "hello", already_exists_error.table);
+    testing.expectString("foobar", already_exists_error.keyspace);
+    testing.expectString("hello", already_exists_error.table);
 }
 
 test "error frame: syntax error" {
@@ -975,7 +975,7 @@ test "error frame: syntax error" {
     defer frame.deinit();
 
     testing.expectEqual(ErrorCode.SyntaxError, frame.error_code);
-    testing.expectEqualSlices(u8, "line 2:0 mismatched input ';' expecting K_FROM (select*[;])", frame.message);
+    testing.expectString("line 2:0 mismatched input ';' expecting K_FROM (select*[;])", frame.message);
 }
 
 test "ready frame" {
@@ -1002,7 +1002,7 @@ test "authenticate frame" {
     const frame = try AuthenticateFrame.read(testing.allocator, @TypeOf(framer), &framer);
     defer frame.deinit();
 
-    testing.expectEqualSlices(u8, "org.apache.cassandra.auth.PasswordAuthenticator", frame.authenticator);
+    testing.expectString("org.apache.cassandra.auth.PasswordAuthenticator", frame.authenticator);
 }
 
 test "supported frame" {
@@ -1045,7 +1045,7 @@ test "prepare frame" {
     const frame = try PrepareFrame.read(testing.allocator, @TypeOf(framer), &framer);
     defer frame.deinit();
 
-    testing.expectEqualSlices(u8, "SELECT age, name from foobar.user where id = ?", frame.query);
+    testing.expectString("SELECT age, name from foobar.user where id = ?", frame.query);
     testing.expect(frame.keyspace == null);
 }
 

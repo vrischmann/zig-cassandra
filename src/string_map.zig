@@ -1,5 +1,6 @@
 const std = @import("std");
-const testing = std.testing;
+
+const testing = @import("testing.zig");
 
 pub const Map = struct {
     const Self = @This();
@@ -150,17 +151,8 @@ test "map" {
 
     testing.expectEqual(@as(usize, 2), m.count());
 
-    if (m.get("foo")) |entry| {
-        testing.expectEqualSlices(u8, "heo", entry.value);
-    } else {
-        std.debug.panic("expected map entry \"foo\" to exist", .{});
-    }
-
-    if (m.get("bar")) |entry| {
-        testing.expectEqualSlices(u8, "baz", entry.value);
-    } else {
-        std.debug.panic("expected map entry \"bar\" to exist", .{});
-    }
+    testing.expectString("heo", m.get("foo").?.value);
+    testing.expectString("baz", m.get("bar").?.value);
 }
 
 test "multimap" {
@@ -192,15 +184,15 @@ test "multimap" {
         testing.expect(std.mem.eql(u8, "foo", entry.key) or std.mem.eql(u8, "fou", entry.key));
 
         const slice = entry.value.span();
-        testing.expectEqualSlices(u8, "bar", slice[0]);
-        testing.expectEqualSlices(u8, "baz", slice[1]);
+        testing.expectString("bar", slice[0]);
+        testing.expectString("baz", slice[1]);
     }
 
     const slice = m.get("foo").?;
-    testing.expectEqualSlices(u8, "bar", slice[0]);
-    testing.expectEqualSlices(u8, "baz", slice[1]);
+    testing.expectString("bar", slice[0]);
+    testing.expectString("baz", slice[1]);
 
     const slice2 = m.get("fou").?;
-    testing.expectEqualSlices(u8, "bar", slice[0]);
-    testing.expectEqualSlices(u8, "baz", slice[1]);
+    testing.expectString("bar", slice[0]);
+    testing.expectString("baz", slice[1]);
 }

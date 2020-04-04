@@ -262,7 +262,7 @@ test "framer: read strings and bytes" {
         var result = try framer.readString();
         defer std.testing.allocator.free(result);
 
-        testing.expectEqualSlices(u8, "foobar", result);
+        testing.expectString("foobar", result);
 
         // long string
 
@@ -270,7 +270,7 @@ test "framer: read strings and bytes" {
         result = try framer.readLongString();
         defer std.testing.allocator.free(result);
 
-        testing.expectEqualSlices(u8, "foobar", result);
+        testing.expectString("foobar", result);
     }
 
     // int32 + bytes
@@ -278,12 +278,12 @@ test "framer: read strings and bytes" {
         resetAndWrite(fbs_type, &fbs, "\x00\x00\x00\x0A123456789A");
         var result = (try framer.readBytes()).?;
         defer std.testing.allocator.free(result);
-        testing.expectEqualSlices(u8, "123456789A", result);
+        testing.expectString("123456789A", result);
 
         resetAndWrite(fbs_type, &fbs, "\x00\x00\x00\x00");
         var result2 = (try framer.readBytes()).?;
         defer std.testing.allocator.free(result2);
-        testing.expectEqualSlices(u8, "", result2);
+        testing.expectString("", result2);
 
         resetAndWrite(fbs_type, &fbs, "\xff\xff\xff\xff");
         testing.expect((try framer.readBytes()) == null);
@@ -294,12 +294,12 @@ test "framer: read strings and bytes" {
         resetAndWrite(fbs_type, &fbs, "\x00\x0A123456789A");
         var result = (try framer.readShortBytes()).?;
         defer std.testing.allocator.free(result);
-        testing.expectEqualSlices(u8, "123456789A", result);
+        testing.expectString("123456789A", result);
 
         resetAndWrite(fbs_type, &fbs, "\x00\x00");
         var result2 = (try framer.readShortBytes()).?;
         defer std.testing.allocator.free(result2);
-        testing.expectEqualSlices(u8, "", result2);
+        testing.expectString("", result2);
 
         resetAndWrite(fbs_type, &fbs, "\xff\xff");
         testing.expect((try framer.readShortBytes()) == null);
@@ -345,11 +345,11 @@ test "framer: read string list" {
 
     var tmp = result[0];
     defer std.testing.allocator.free(tmp);
-    testing.expectEqualSlices(u8, "foo", tmp);
+    testing.expectString("foo", tmp);
 
     tmp = result[1];
     defer std.testing.allocator.free(tmp);
-    testing.expectEqualSlices(u8, "bar", tmp);
+    testing.expectString("bar", tmp);
 }
 
 test "framer: read value" {
@@ -366,7 +366,7 @@ test "framer: read value" {
     var value = try framer.readValue();
     defer std.testing.allocator.free(value.Set);
     testing.expect(value == .Set);
-    testing.expectString("\x61\x62", value.Set);
+    testing.expectString("ab", value.Set);
 
     // Null value
 
@@ -475,7 +475,7 @@ test "framer: read stringmap" {
     var it = result.iterator();
     while (it.next()) |entry| {
         testing.expect(std.mem.eql(u8, "foo", entry.key) or std.mem.eql(u8, "bar", entry.key));
-        testing.expectEqualSlices(u8, "baz", entry.value);
+        testing.expectString("baz", entry.value);
     }
 }
 
@@ -502,8 +502,8 @@ test "framer: read string multimap" {
         const slice = entry.value.span();
 
         testing.expectEqual(@as(usize, 2), slice.len);
-        testing.expectEqualSlices(u8, "bar", slice[0]);
-        testing.expectEqualSlices(u8, "baz", slice[1]);
+        testing.expectString("bar", slice[0]);
+        testing.expectString("baz", slice[1]);
     } else {
         std.debug.panic("expected bytes to not be null", .{});
     }
