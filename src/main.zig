@@ -8,97 +8,6 @@ const sm = @import("string_map.zig");
 usingnamespace @import("primitive_types.zig");
 const testing = @import("testing.zig");
 
-const StartupFrameError = error{
-    InvalidCQLVersion,
-    InvalidCompression,
-};
-
-const UnavailableReplicasError = struct {
-    consistency_level: Consistency,
-    required: u32,
-    alive: u32,
-};
-
-const FunctionFailureError = struct {
-    keyspace: []const u8,
-    function: []const u8,
-    arg_types: std.ArrayList([]const u8),
-};
-
-const WriteError = struct {
-    // TODO(vincent): document this
-    const WriteType = enum {
-        SIMPLE,
-        BATCH,
-        UNLOGGED_BATCH,
-        COUNTER,
-        BATCH_LOG,
-        CAS,
-        VIEW,
-        CDC,
-    };
-
-    const Timeout = struct {
-        consistency_level: Consistency,
-        received: u32,
-        block_for: u32,
-        write_type: WriteType,
-        contentions: ?u16,
-    };
-
-    const Failure = struct {
-        const Reason = struct {
-            endpoint: net.Address,
-            // TODO(vincent): what's this failure code ?!
-            failure_code: u16,
-        };
-
-        consistency_level: Consistency,
-        received: u32,
-        block_for: u32,
-        reason_map: std.ArrayList(Reason),
-        write_type: WriteType,
-    };
-
-    const CASUnknown = struct {
-        consistency_level: Consistency,
-        received: u32,
-        block_for: u32,
-    };
-};
-
-const ReadError = struct {
-    const Timeout = struct {
-        consistency_level: Consistency,
-        received: u32,
-        block_for: u32,
-        data_present: u8,
-    };
-
-    const Failure = struct {
-        const Reason = struct {
-            endpoint: net.Address,
-            // TODO(vincent): what's this failure code ?!
-            failure_code: u16,
-        };
-
-        consistency_level: Consistency,
-        received: u32,
-        block_for: u32,
-        reason_map: std.ArrayList(Reason),
-        data_present: u8,
-    };
-};
-
-const AlreadyExistsError = struct {
-    keyspace: []const u8,
-    table: []const u8,
-};
-
-const UnpreparedError = struct {
-    statement_id: []const u8,
-};
-
 // Below are request frames only (ie client -> server).
 
 /// STARTUP is sent to a node to initialize a connection.
@@ -128,11 +37,11 @@ const StartupFrame = struct {
         // CQL_VERSION is mandatory and the only version supported is 3.0.0 right now.
         if (map.get("CQL_VERSION")) |version| {
             if (!mem.eql(u8, "3.0.0", version.value)) {
-                return StartupFrameError.InvalidCQLVersion;
+                return error.InvalidCQLVersion;
             }
             frame.cql_version = try mem.dupe(allocator, u8, version.value);
         } else {
-            return StartupFrameError.InvalidCQLVersion;
+            return error.InvalidCQLVersion;
         }
 
         if (map.get("COMPRESSION")) |compression| {
@@ -141,7 +50,7 @@ const StartupFrame = struct {
             } else if (mem.eql(u8, compression.value, "snappy")) {
                 frame.compression = CompressionAlgorithm.Snappy;
             } else {
-                return StartupFrameError.InvalidCompression;
+                return error.InvalidCompression;
             }
         }
 
@@ -609,6 +518,92 @@ const ErrorCode = packed enum(u32) {
     Unprepared = 0x2500,
 };
 
+const UnavailableReplicasError = struct {
+    consistency_level: Consistency,
+    required: u32,
+    alive: u32,
+};
+
+const FunctionFailureError = struct {
+    keyspace: []const u8,
+    function: []const u8,
+    arg_types: [][]const u8,
+};
+
+const WriteError = struct {
+    // TODO(vincent): document this
+    const WriteType = enum {
+        SIMPLE,
+        BATCH,
+        UNLOGGED_BATCH,
+        COUNTER,
+        BATCH_LOG,
+        CAS,
+        VIEW,
+        CDC,
+    };
+
+    const Timeout = struct {
+        consistency_level: Consistency,
+        received: u32,
+        block_for: u32,
+        write_type: WriteType,
+        contentions: ?u16,
+    };
+
+    const Failure = struct {
+        const Reason = struct {
+            endpoint: net.Address,
+            // TODO(vincent): what's this failure code ?!
+            failure_code: u16,
+        };
+
+        consistency_level: Consistency,
+        received: u32,
+        block_for: u32,
+        reason_map: []Reason,
+        write_type: WriteType,
+    };
+
+    const CASUnknown = struct {
+        consistency_level: Consistency,
+        received: u32,
+        block_for: u32,
+    };
+};
+
+const ReadError = struct {
+    const Timeout = struct {
+        consistency_level: Consistency,
+        received: u32,
+        block_for: u32,
+        data_present: u8,
+    };
+
+    const Failure = struct {
+        const Reason = struct {
+            endpoint: net.Address,
+            // TODO(vincent): what's this failure code ?!
+            failure_code: u16,
+        };
+
+        consistency_level: Consistency,
+        received: u32,
+        block_for: u32,
+        reason_map: []Reason,
+        data_present: u8,
+    };
+};
+
+const AlreadyExistsError = struct {
+    keyspace: []const u8,
+    table: []const u8,
+};
+
+const UnpreparedError = struct {
+    statement_id: []const u8,
+};
+
 /// ERROR is sent by a node if there's an error processing a request.
 ///
 /// Described in the protocol spec at §4.2.1.
@@ -636,16 +631,16 @@ const ErrorFrame = struct {
         if (self.function_failure) |err| {
             self.allocator.free(err.keyspace);
             self.allocator.free(err.function);
-            for (err.arg_types.span()) |v| {
+            for (err.arg_types) |v| {
                 self.allocator.free(v);
             }
-            err.arg_types.deinit();
+            self.allocator.free(err.arg_types);
         }
         if (self.write_failure) |err| {
-            err.reason_map.deinit();
+            self.allocator.free(err.reason_map);
         }
         if (self.read_failure) |err| {
-            err.reason_map.deinit();
+            self.allocator.free(err.reason_map);
         }
         if (self.already_exists) |err| {
             self.allocator.free(err.keyspace);
@@ -675,7 +670,7 @@ const ErrorFrame = struct {
                 frame.function_failure = FunctionFailureError{
                     .keyspace = try framer.readString(),
                     .function = try framer.readString(),
-                    .arg_types = try framer.readStringList(),
+                    .arg_types = (try framer.readStringList()).toOwnedSlice(),
                 };
             },
             .WriteTimeout => {
@@ -712,9 +707,14 @@ const ErrorFrame = struct {
                     .consistency_level = try framer.readConsistency(),
                     .received = try framer.readInt(u32),
                     .block_for = try framer.readInt(u32),
-                    .reason_map = std.ArrayList(WriteError.Failure.Reason).init(allocator),
+                    .reason_map = undefined,
                     .write_type = undefined,
                 };
+
+                // Read reason map
+
+                var reason_map = std.ArrayList(WriteError.Failure.Reason).init(allocator);
+                errdefer reason_map.deinit();
 
                 const n = try framer.readInt(u32);
                 var i: usize = 0;
@@ -723,8 +723,11 @@ const ErrorFrame = struct {
                         .endpoint = try framer.readInetaddr(),
                         .failure_code = try framer.readInt(u16),
                     };
-                    _ = try write_failure.reason_map.append(reason);
+                    _ = try reason_map.append(reason);
                 }
+                write_failure.reason_map = reason_map.toOwnedSlice();
+
+                // Read the rest
 
                 if (std.meta.stringToEnum(WriteError.WriteType, try framer.readString())) |write_type| {
                     write_failure.write_type = write_type;
@@ -739,9 +742,14 @@ const ErrorFrame = struct {
                     .consistency_level = try framer.readConsistency(),
                     .received = try framer.readInt(u32),
                     .block_for = try framer.readInt(u32),
-                    .reason_map = std.ArrayList(ReadError.Failure.Reason).init(allocator),
+                    .reason_map = undefined,
                     .data_present = undefined,
                 };
+
+                // Read reason map
+
+                var reason_map = std.ArrayList(ReadError.Failure.Reason).init(allocator);
+                errdefer reason_map.deinit();
 
                 const n = try framer.readInt(u32);
                 var i: usize = 0;
@@ -750,8 +758,11 @@ const ErrorFrame = struct {
                         .endpoint = try framer.readInetaddr(),
                         .failure_code = try framer.readInt(u16),
                     };
-                    _ = try read_failure.reason_map.append(reason);
+                    _ = try reason_map.append(reason);
                 }
+                read_failure.reason_map = reason_map.toOwnedSlice();
+
+                // Read the rest
 
                 read_failure.data_present = try framer.readByte();
 
