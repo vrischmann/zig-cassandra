@@ -352,3 +352,12 @@ test "schema change options" {
     }
     options.arguments = arguments;
 }
+
+pub fn checkHeader(opcode: Opcode, data_len: usize, header: FrameHeader) void {
+    // We can only use v4 for now
+    testing.expectEqual(ProtocolVersion.V4, header.version);
+    // Don't care about the flags here
+    // Don't care about the stream
+    testing.expectEqual(opcode, header.opcode);
+    testing.expectEqual(@as(usize, header.body_len), data_len - @sizeOf(FrameHeader));
+}
