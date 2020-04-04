@@ -332,7 +332,7 @@ const BatchQuery = struct {
     query_string: ?[]const u8,
     query_id: ?[]const u8,
 
-    values: ?Values,
+    values: Values,
 
     pub fn deinit(self: *const Self) void {
         if (self.query_string) |query| {
@@ -341,9 +341,7 @@ const BatchQuery = struct {
         if (self.query_id) |id| {
             self.allocator.free(id);
         }
-        if (self.values) |values| {
-            values.deinit(self.allocator);
-        }
+        self.values.deinit(self.allocator);
     }
 
     pub fn read(allocator: *mem.Allocator, comptime FramerType: type, framer: *FramerType) !BatchQuery {
@@ -425,6 +423,10 @@ const BatchFrame = struct {
         }
 
         frame.queries = queries.toOwnedSlice();
+
+        // Read the rest of the frame
+
+        frame.consistency_level = try framer.readConsistency();
 
         // The size of the flags bitmask depends on the protocol version.
         var flags: u32 = 0;
@@ -1146,6 +1148,21 @@ test "batch frame: query type string" {
     defer frame.deinit();
 
     testing.expectEqual(BatchType.Logged, frame.batch_type);
+
+    testing.expectEqual(@as(usize, 3), frame.queries.len);
+    for (frame.queries) |query| {
+        const exp = "INSERT INTO foobar.user(id, name) values(uuid(), 'vincent')";
+        testing.expectString(exp, query.query_string.?);
+        testing.expect(query.query_id == null);
+        testing.expect(query.values == .Normal);
+        testing.expectEqual(@as(usize, 0), query.values.Normal.len);
+    }
+
+    testing.expectEqual(Consistency.Any, frame.consistency_level);
+    testing.expect(frame.serial_consistency_level == null);
+    testing.expect(frame.timestamp == null);
+    testing.expect(frame.keyspace == null);
+    testing.expect(frame.now_in_seconds == null);
 }
 
 test "batch frame: query type prepared" {
@@ -1162,6 +1179,37 @@ test "batch frame: query type prepared" {
     defer frame.deinit();
 
     testing.expectEqual(BatchType.Logged, frame.batch_type);
+
+    const expUUIDs = &[_][]const u8{
+        "\x3a\x9a\xab\x41\x68\x24\x4a\xef\x9d\xf5\x72\xc7\x84\xab\xa2\x57",
+        "\xed\x54\xb0\x6d\xcc\xb2\x43\x51\x96\x51\x74\x5e\xee\xae\xd2\xfe",
+        "\x79\xdf\x8a\x28\x5a\x60\x47\x19\x9b\x42\x84\xea\x69\x10\x1a\xe6",
+    };
+
+    testing.expectEqual(@as(usize, 3), frame.queries.len);
+    var i: usize = 0;
+    for (frame.queries) |query| {
+        testing.expect(query.query_string == null);
+        const exp_query_id = "\x88\xb7\xd6\x81\x8b\x2d\x8d\x97\xfc\x41\xc1\x34\x7b\x27\xde\x65";
+        testing.expectEqualSlices(u8, exp_query_id, query.query_id.?);
+
+        testing.expect(query.values == .Normal);
+        testing.expectEqual(@as(usize, 2), query.values.Normal.len);
+
+        const value1 = query.values.Normal[0];
+        testing.expectEqualSlices(u8, expUUIDs[i], value1.Set);
+
+        const value2 = query.values.Normal[1];
+        testing.expectString("Vincent", value2.Set);
+
+        i += 1;
+    }
+
+    testing.expectEqual(Consistency.Any, frame.consistency_level);
+    testing.expect(frame.serial_consistency_level == null);
+    testing.expect(frame.timestamp == null);
+    testing.expect(frame.keyspace == null);
+    testing.expect(frame.now_in_seconds == null);
 }
 
 test "register frame" {
