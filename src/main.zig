@@ -962,12 +962,33 @@ const EventFrame = struct {};
 /// AUTH_CHALLENGE is a server authentication challenge.
 ///
 /// Described in the protocol spec at §4.2.7.
-const AuthChallenge = struct {};
+const AuthChallengeFrame = struct {
+    const Self = @This();
+
+    allocator: *mem.Allocator,
+
+    token: []const u8,
+
+    pub fn deinit(self: *const Self) void {
+        self.allocator.free(self.token);
+    }
+
+    pub fn read(allocator: *mem.Allocator, comptime FramerType: type, framer: *FramerType) !AuthChallengeFrame {
+        var frame = AuthChallengeFrame{
+            .allocator = allocator,
+            .token = undefined,
+        };
+
+        frame.token = try framer.readBytes();
+
+        return frame;
+    }
+};
 
 /// AUTH_SUCCESS indicates the success of the authentication phase.
 ///
 /// Described in the protocol spec at §4.2.7.
-const AuthSuccess = struct {};
+const AuthSuccessFrame = struct {};
 
 fn checkHeader(opcode: Opcode, data_len: usize, header: FrameHeader) void {
     // We can only use v4 for now
@@ -1279,4 +1300,8 @@ test "register frame" {
     testing.expectString("TOPOLOGY_CHANGE", frame.event_types[0]);
     testing.expectString("STATUS_CHANGE", frame.event_types[1]);
     testing.expectString("SCHEMA_CHANGE", frame.event_types[2]);
+}
+
+test "auth challenge frame" {
+    // TODO(vincent): how do I get one of these frame ?
 }
