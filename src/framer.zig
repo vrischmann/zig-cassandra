@@ -1,11 +1,11 @@
 const std = @import("std");
 const os = std.os;
 const net = std.net;
-const testing = std.testing;
 const ArrayList = std.ArrayList;
 
 const sm = @import("string_map.zig");
 usingnamespace @import("primitive_types.zig");
+const testing = @import("testing.zig");
 
 pub fn Framer(comptime InStreamType: type) type {
     const BytesType = enum {
@@ -366,19 +366,19 @@ test "framer: read value" {
     var value = try framer.readValue();
     defer std.testing.allocator.free(value.Set);
     testing.expect(value == .Set);
-    testing.expectEqualSlices(u8, "\x61\x62", value.Set);
+    testing.expectString("\x61\x62", value.Set);
 
     // Null value
 
     resetAndWrite(fbs_type, &fbs, "\xff\xff\xff\xff");
-    value = try framer.readValue();
-    testing.expect(value == .Null);
+    var value2 = try framer.readValue();
+    testing.expect(value2 == .Null);
 
     // "Not set" value
 
     resetAndWrite(fbs_type, &fbs, "\xff\xff\xff\xfe");
-    value = try framer.readValue();
-    testing.expect(value == .NotSet);
+    var value3 = try framer.readValue();
+    testing.expect(value3 == .NotSet);
 }
 
 test "framer: read inet and inetaddr" {
