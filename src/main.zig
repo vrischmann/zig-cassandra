@@ -962,7 +962,14 @@ const EventFrame = struct {
 
     event: Event,
 
-    pub fn deinit(self: *const Self) void {}
+    pub fn deinit(self: *const Self) void {
+        switch (self.event) {
+            .TOPOLOGY_CHANGE, .STATUS_CHANGE => return,
+            .SCHEMA_CHANGE => |ev| {
+                ev.deinit();
+            },
+        }
+    }
 
     pub fn read(allocator: *mem.Allocator, comptime FramerType: type, framer: *FramerType) !Self {
         var frame = Self{
@@ -970,97 +977,82 @@ const EventFrame = struct {
             .event = undefined,
         };
 
-        const event_type = try framer.readString();
-        defer allocator.free(event_type);
+        const event_type_string = try framer.readString();
+        defer allocator.free(event_type_string);
 
-        if (mem.eql(u8, "TOPOLOGY_CHANGE", event_type)) {
-            var event = Event{
-                .TopologyChange = .{
+        const event_type = meta.stringToEnum(EventType, event_type_string) orelse return error.InvalidEventType;
+
+        switch (event_type) {
+            .TOPOLOGY_CHANGE => {
+                var change = TopologyChange{
                     .change_type = undefined,
                     .node_address = undefined,
-                },
-            };
+                };
 
-            const change_type = try framer.readString();
-            defer allocator.free(change_type);
+                const change_type_string = try framer.readString();
+                defer allocator.free(change_type_string);
 
-            if (mem.eql(u8, "NEW_NODE", change_type)) {
-                event.TopologyChange.change_type = .NewNode;
-            } else if (mem.eql(u8, "REMOVED_NODE", change_type)) {
-                event.TopologyChange.change_type = .RemovedNode;
-            }
+                change.change_type = meta.stringToEnum(TopologyChangeType, change_type_string) orelse return error.InvalidTopologyChangeType;
+                change.node_address = try framer.readInet();
 
-            event.TopologyChange.node_address = try framer.readInet();
+                frame.event = Event{ .TOPOLOGY_CHANGE = change };
 
-            frame.event = event;
-
-            return frame;
-        }
-
-        if (mem.eql(u8, "STATUS_CHANGE", event_type)) {
-            var event = Event{
-                .StatusChange = .{
+                return frame;
+            },
+            .STATUS_CHANGE => {
+                var change = StatusChange{
                     .change_type = undefined,
                     .node_address = undefined,
-                },
-            };
+                };
 
-            const change_type = try framer.readString();
-            defer allocator.free(change_type);
+                const change_type_string = try framer.readString();
+                defer allocator.free(change_type_string);
 
-            if (mem.eql(u8, "UP", change_type)) {
-                event.StatusChange.change_type = .Up;
-            } else if (mem.eql(u8, "DOWN", change_type)) {
-                event.StatusChange.change_type = .Down;
-            }
+                change.change_type = meta.stringToEnum(StatusChangeType, change_type_string) orelse return error.InvalidStatusChangeType;
+                change.node_address = try framer.readInet();
 
-            event.StatusChange.node_address = try framer.readInet();
+                frame.event = Event{ .STATUS_CHANGE = change };
 
-            frame.event = event;
-
-            return frame;
-        }
-
-        if (mem.eql(u8, "SCHEMA_CHANGE", event_type)) {
-            var event = Event{
-                .SchemaChange = .{
+                return frame;
+            },
+            .SCHEMA_CHANGE => {
+                var change = SchemaChange{
                     .change_type = undefined,
                     .target = undefined,
                     .options = undefined,
-                },
-            };
+                };
 
-            const change_type = try framer.readString();
-            defer allocator.free(change_type);
-            event.SchemaChange.change_type = std.meta.stringToEnum(SchemaChangeType, change_type) orelse return error.InvalidSchemaChangeType;
+                const change_type_string = try framer.readString();
+                defer allocator.free(change_type_string);
 
-            const target = try framer.readString();
-            defer allocator.free(target);
-            event.SchemaChange.target = std.meta.stringToEnum(SchemaChangeTarget, target) orelse return error.InvalidSchemaChangeTarget;
+                const target_string = try framer.readString();
+                defer allocator.free(target_string);
 
-            event.SchemaChange.options = SchemaChangeOptions.init(allocator);
+                change.change_type = meta.stringToEnum(SchemaChangeType, change_type_string) orelse return error.InvalidSchemaChangeType;
+                change.target = meta.stringToEnum(SchemaChangeTarget, target_string) orelse return error.InvalidSchemaChangeTarget;
 
-            switch (event.SchemaChange.target) {
-                .KEYSPACE => {
-                    event.SchemaChange.options.keyspace = try framer.readString();
-                },
-                .TABLE, .TYPE => {
-                    event.SchemaChange.options.keyspace = try framer.readString();
-                    event.SchemaChange.options.object_name = try framer.readString();
-                },
-                .FUNCTION, .AGGREGATE => {
-                    event.SchemaChange.options.keyspace = try framer.readString();
-                    event.SchemaChange.options.object_name = try framer.readString();
-                    event.SchemaChange.options.arguments = (try framer.readStringList()).toOwnedSlice();
-                },
-            }
+                change.options = SchemaChangeOptions.init(allocator);
 
-            frame.event = event;
+                switch (change.target) {
+                    .KEYSPACE => {
+                        change.options.keyspace = try framer.readString();
+                    },
+                    .TABLE, .TYPE => {
+                        change.options.keyspace = try framer.readString();
+                        change.options.object_name = try framer.readString();
+                    },
+                    .FUNCTION, .AGGREGATE => {
+                        change.options.keyspace = try framer.readString();
+                        change.options.object_name = try framer.readString();
+                        change.options.arguments = (try framer.readStringList()).toOwnedSlice();
+                    },
+                }
 
-            return frame;
+                frame.event = Event{ .SCHEMA_CHANGE = change };
+
+                return frame;
+            },
         }
-
-        return error.InvalidEventType;
     }
 };
 
@@ -1092,7 +1084,7 @@ const AuthChallengeFrame = struct {
 
 /// AUTH_SUCCESS indicates the success of the authentication phase.
 ///
-/// Described in the protocol spec at §4.2.7.
+/// Described in the protocol spec at §4.2.8.
 const AuthSuccessFrame = struct {
     const Self = @This();
 
@@ -1428,8 +1420,8 @@ test "register frame" {
     testing.expectString("SCHEMA_CHANGE", frame.event_types[2]);
 }
 
-test "event frame" {
-    const data = "";
+test "event frame: topology change" {
+    const data = "\x84\x00\xff\xff\x0c\x00\x00\x00\x24\x00\x0f\x54\x4f\x50\x4f\x4c\x4f\x47\x59\x5f\x43\x48\x41\x4e\x47\x45\x00\x08\x4e\x45\x57\x5f\x4e\x4f\x44\x45\x04\x7f\x00\x00\x04\x00\x00\x23\x52";
     var fbs = std.io.fixedBufferStream(data);
     var in_stream = fbs.inStream();
 
@@ -1440,6 +1432,55 @@ test "event frame" {
 
     const frame = try EventFrame.read(testing.allocator, @TypeOf(framer), &framer);
     defer frame.deinit();
+
+    testing.expect(frame.event == .TOPOLOGY_CHANGE);
+
+    const topology_change = frame.event.TOPOLOGY_CHANGE;
+    testing.expectEqual(TopologyChangeType.NEW_NODE, topology_change.change_type);
+
+    const localhost = net.Address.initIp4([4]u8{ 0x7f, 0x00, 0x00, 0x04 }, 9042);
+    testing.expect(net.Address.eql(localhost, topology_change.node_address));
+}
+
+test "event frame: status change" {
+    const data = "\x84\x00\xff\xff\x0c\x00\x00\x00\x1e\x00\x0d\x53\x54\x41\x54\x55\x53\x5f\x43\x48\x41\x4e\x47\x45\x00\x04\x44\x4f\x57\x4e\x04\x7f\x00\x00\x01\x00\x00\x23\x52";
+    var fbs = std.io.fixedBufferStream(data);
+    var in_stream = fbs.inStream();
+
+    var framer = Framer(@TypeOf(in_stream)).init(testing.allocator, in_stream);
+    _ = try framer.readHeader();
+
+    checkHeader(Opcode.Event, data.len, framer.header);
+
+    const frame = try EventFrame.read(testing.allocator, @TypeOf(framer), &framer);
+    defer frame.deinit();
+
+    testing.expect(frame.event == .STATUS_CHANGE);
+
+    const status_change = frame.event.STATUS_CHANGE;
+    testing.expectEqual(StatusChangeType.DOWN, status_change.change_type);
+
+    const localhost = net.Address.initIp4([4]u8{ 0x7f, 0x00, 0x00, 0x01 }, 9042);
+    testing.expect(net.Address.eql(localhost, status_change.node_address));
+}
+
+test "event frame: schema change" {
+    const data = "\x84\x00\xff\xff\x0c\x00\x00\x00\x2a\x00\x0d\x53\x43\x48\x45\x4d\x41\x5f\x43\x48\x41\x4e\x47\x45\x00\x07\x43\x52\x45\x41\x54\x45\x44\x00\x08\x4b\x45\x59\x53\x50\x41\x43\x45\x00\x06\x62\x61\x72\x62\x61\x7a";
+    var fbs = std.io.fixedBufferStream(data);
+    var in_stream = fbs.inStream();
+
+    var framer = Framer(@TypeOf(in_stream)).init(testing.allocator, in_stream);
+    _ = try framer.readHeader();
+
+    checkHeader(Opcode.Event, data.len, framer.header);
+
+    const frame = try EventFrame.read(testing.allocator, @TypeOf(framer), &framer);
+    defer frame.deinit();
+
+    testing.expect(frame.event == .SCHEMA_CHANGE);
+
+    const schema_change = frame.event.SCHEMA_CHANGE;
+    testing.expectEqual(SchemaChangeType.CREATED, schema_change.change_type);
 }
 
 test "auth challenge frame" {
