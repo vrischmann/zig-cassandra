@@ -167,13 +167,13 @@ pub const BatchType = packed enum(u8) {
 };
 
 pub const TopologyChangeType = enum {
-    NewNode,
-    RemovedNode,
+    NEW_NODE,
+    REMOVED_NODE,
 };
 
 pub const StatusChangeType = enum {
-    Up,
-    Down,
+    UP,
+    DOWN,
 };
 
 pub const SchemaChangeType = enum {
@@ -211,37 +211,43 @@ pub const SchemaChangeOptions = struct {
     pub fn init(allocator: *mem.Allocator) SchemaChangeOptions {
         return SchemaChangeOptions{
             .allocator = allocator,
-            .keyspace = undefined,
-            .object_name = undefined,
+            .keyspace = &[_]u8{},
+            .object_name = &[_]u8{},
             .arguments = null,
         };
     }
 };
 
+pub const TopologyChange = struct {
+    change_type: TopologyChangeType,
+    node_address: net.Address,
+};
+
+pub const StatusChange = struct {
+    change_type: StatusChangeType,
+    node_address: net.Address,
+};
+
+pub const SchemaChange = struct {
+    change_type: SchemaChangeType,
+    target: SchemaChangeTarget,
+    options: SchemaChangeOptions,
+
+    pub fn deinit(self: *const @This()) void {
+        self.options.deinit();
+    }
+};
+
 pub const EventType = enum {
-    TopologyChange,
-    StatusChange,
-    SchemaChange,
+    TOPOLOGY_CHANGE,
+    STATUS_CHANGE,
+    SCHEMA_CHANGE,
 };
 
 pub const Event = union(EventType) {
-    TopologyChange: struct {
-        change_type: TopologyChangeType,
-        node_address: net.Address,
-    },
-    StatusChange: struct {
-        change_type: StatusChangeType,
-        node_address: net.Address,
-    },
-    SchemaChange: struct {
-        change_type: SchemaChangeType,
-        target: SchemaChangeTarget,
-        options: SchemaChangeOptions,
-
-        pub fn deinit(self: *const @This()) void {
-            self.options.deinit();
-        }
-    },
+    TOPOLOGY_CHANGE: TopologyChange,
+    STATUS_CHANGE: StatusChange,
+    SCHEMA_CHANGE: SchemaChange,
 };
 
 test "cql version: fromString" {
