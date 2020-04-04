@@ -1482,6 +1482,11 @@ test "event frame: schema change" {
     const schema_change = frame.event.SCHEMA_CHANGE;
     testing.expectEqual(SchemaChangeType.CREATED, schema_change.type);
     testing.expectEqual(SchemaChangeTarget.KEYSPACE, schema_change.target);
+
+    const options = schema_change.options;
+    testing.expectString("barbaz", options.keyspace);
+    testing.expectString("", options.object_name);
+    testing.expect(options.arguments == null);
 }
 
 test "auth challenge frame" {
