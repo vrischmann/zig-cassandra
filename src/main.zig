@@ -7,206 +7,10 @@ const ArrayList = std.ArrayList;
 const Framer = @import("framer.zig").Framer;
 const sm = @import("string_map.zig");
 usingnamespace @import("primitive_types.zig");
+usingnamespace @import("query_parameters.zig");
 const testing = @import("testing.zig");
 
 // Below are request frames only (ie client -> server).
-
-const NamedValue = struct {
-    name: []const u8,
-    value: Value,
-};
-
-const ValuesType = enum {
-    Normal,
-    Named,
-};
-
-const Values = union(ValuesType) {
-    Normal: []Value,
-    Named: []NamedValue,
-
-    pub fn deinit(self: @This(), allocator: *mem.Allocator) void {
-        switch (self) {
-            .Normal => |nv| {
-                for (nv) |v| {
-                    v.deinit(allocator);
-                }
-                allocator.free(nv);
-            },
-            .Named => |nv| {
-                for (nv) |v| {
-                    allocator.free(v.name);
-                    v.value.deinit(allocator);
-                }
-                allocator.free(nv);
-            },
-            else => unreachable,
-        }
-    }
-};
-
-const QueryParameters = struct {
-    const Self = @This();
-
-    allocator: *mem.Allocator,
-
-    consistency_level: Consistency,
-    values: ?Values,
-    page_size: ?u32,
-    paging_state: ?[]const u8, // NOTE(vincent): not a string
-    serial_consistency_level: ?Consistency,
-    timestamp: ?u64,
-    keyspace: ?[]const u8,
-    now_in_seconds: ?u32,
-
-    pub fn deinit(self: *const Self) void {
-        if (self.values) |values| {
-            values.deinit(self.allocator);
-        }
-
-        if (self.paging_state) |ps| {
-            self.allocator.free(ps);
-        }
-
-        if (self.keyspace) |keyspace| {
-            self.allocator.free(keyspace);
-        }
-    }
-
-    const FlagWithValues: u32 = 0x0001;
-    const FlagSkipMetadata: u32 = 0x0002;
-    const FlagWithPageSize: u32 = 0x0004;
-    const FlagWithPagingState: u32 = 0x0008;
-    const FlagWithSerialConsistency: u32 = 0x0010;
-    const FlagWithDefaultTimestamp: u32 = 0x0020;
-    const FlagWithNamedValues: u32 = 0x0040;
-    const FlagWithKeyspace: u32 = 0x0080;
-    const FlagWithNowInSeconds: u32 = 0x100;
-
-    pub fn read(allocator: *mem.Allocator, comptime FramerType: type, framer: *FramerType) !QueryParameters {
-        var params = QueryParameters{
-            .allocator = allocator,
-            .consistency_level = undefined,
-            .values = null,
-            .page_size = null,
-            .paging_state = null,
-            .serial_consistency_level = null,
-            .timestamp = null,
-            .keyspace = null,
-            .now_in_seconds = null,
-        };
-
-        params.consistency_level = try framer.readConsistency();
-
-        // The remaining data in the frame depends on the flags
-
-        // The size of the flags bitmask depends on the protocol version.
-        var flags: u32 = 0;
-        if (framer.header.version == ProtocolVersion.V5) {
-            flags = try framer.readInt(u32);
-        } else {
-            flags = try framer.readInt(u8);
-        }
-
-        if (flags & FlagWithValues == FlagWithValues) {
-            const n = try framer.readInt(u16);
-
-            if (flags & FlagWithNamedValues == FlagWithNamedValues) {
-                var list = std.ArrayList(NamedValue).init(allocator);
-                errdefer list.deinit();
-
-                var i: usize = 0;
-                while (i < @as(usize, n)) : (i += 1) {
-                    const nm = NamedValue{
-                        .name = try framer.readString(),
-                        .value = try framer.readValue(),
-                    };
-                    _ = try list.append(nm);
-                }
-
-                params.values = Values{ .Named = list.toOwnedSlice() };
-            } else {
-                var list = std.ArrayList(Value).init(allocator);
-                errdefer list.deinit();
-
-                var i: usize = 0;
-                while (i < @as(usize, n)) : (i += 1) {
-                    const value = try framer.readValue();
-                    _ = try list.append(value);
-                }
-
-                params.values = Values{ .Normal = list.toOwnedSlice() };
-            }
-        }
-        if (flags & FlagSkipMetadata == FlagSkipMetadata) {
-            // Nothing to do
-        }
-        if (flags & FlagWithPageSize == FlagWithPageSize) {
-            params.page_size = try framer.readInt(u32);
-        }
-        if (flags & FlagWithPagingState == FlagWithPagingState) {
-            params.paging_state = try framer.readBytes();
-        }
-        if (flags & FlagWithSerialConsistency == FlagWithSerialConsistency) {
-            const consistency_level = try framer.readConsistency();
-            if (consistency_level != .Serial and consistency_level != .LocalSerial) {
-                return error.InvalidSerialConsistency;
-            }
-            params.serial_consistency_level = consistency_level;
-        }
-        if (flags & FlagWithDefaultTimestamp == FlagWithDefaultTimestamp) {
-            const timestamp = try framer.readInt(u64);
-            if (timestamp < 0) {
-                return error.InvalidNegativeTimestamp;
-            }
-            params.timestamp = timestamp;
-        }
-
-        if (framer.header.version != ProtocolVersion.V5) {
-            return params;
-        }
-
-        // The following flags are only valid with protocol v5
-        if (flags & FlagWithKeyspace == FlagWithKeyspace) {
-            params.keyspace = try framer.readString();
-        }
-        if (flags & FlagWithNowInSeconds == FlagWithNowInSeconds) {
-            params.now_in_seconds = try framer.readInt(u32);
-        }
-
-        return params;
-    }
-};
-
-/// QUERY is sent to perform a CQL query.
-///
-/// Described in the protocol spec at §4.1.4
-const QueryFrame = struct {
-    const Self = @This();
-
-    allocator: *mem.Allocator,
-
-    query: []const u8,
-    query_parameters: QueryParameters,
-
-    pub fn deinit(self: *const Self) void {
-        self.allocator.free(self.query);
-        self.query_parameters.deinit();
-    }
-
-    pub fn read(allocator: *mem.Allocator, comptime FramerType: type, framer: *FramerType) !Self {
-        var frame = Self{
-            .allocator = allocator,
-            .query = undefined,
-            .query_parameters = undefined,
-        };
-
-        frame.query = try framer.readLongString();
-        frame.query_parameters = try QueryParameters.read(allocator, FramerType, framer);
-
-        return frame;
-    }
-};
 
 /// PREPARE is sent to prepare a CQL query for later execution (through EXECUTE).
 ///
@@ -943,30 +747,6 @@ const AuthSuccessFrame = struct {
     }
 };
 
-test "query frame: no values, no paging state" {
-    const data = "\x04\x00\x00\x08\x07\x00\x00\x00\x30\x00\x00\x00\x1b\x53\x45\x4c\x45\x43\x54\x20\x2a\x20\x46\x52\x4f\x4d\x20\x66\x6f\x6f\x62\x61\x72\x2e\x75\x73\x65\x72\x20\x3b\x00\x01\x34\x00\x00\x00\x64\x00\x08\x00\x05\xa2\x2c\xf0\x57\x3e\x3f";
-    var fbs = std.io.fixedBufferStream(data);
-    var in_stream = fbs.inStream();
-
-    var framer = Framer(@TypeOf(in_stream)).init(testing.allocator, in_stream);
-    _ = try framer.readHeader();
-
-    checkHeader(Opcode.Query, data.len, framer.header);
-
-    const frame = try QueryFrame.read(testing.allocator, @TypeOf(framer), &framer);
-    defer frame.deinit();
-
-    testing.expectEqualString("SELECT * FROM foobar.user ;", frame.query);
-    testing.expectEqual(Consistency.One, frame.query_parameters.consistency_level);
-    testing.expect(frame.query_parameters.values == null);
-    testing.expectEqual(@as(u32, 100), frame.query_parameters.page_size.?);
-    testing.expect(frame.query_parameters.paging_state == null);
-    testing.expectEqual(Consistency.Serial, frame.query_parameters.serial_consistency_level.?);
-    testing.expectEqual(@as(u64, 1585688778063423), frame.query_parameters.timestamp.?);
-    testing.expect(frame.query_parameters.keyspace == null);
-    testing.expect(frame.query_parameters.now_in_seconds == null);
-}
-
 test "error frame: invalid query, no keyspace specified" {
     const data = "\x84\x00\x00\x02\x00\x00\x00\x00\x5e\x00\x00\x22\x00\x00\x58\x4e\x6f\x20\x6b\x65\x79\x73\x70\x61\x63\x65\x20\x68\x61\x73\x20\x62\x65\x65\x6e\x20\x73\x70\x65\x63\x69\x66\x69\x65\x64\x2e\x20\x55\x53\x45\x20\x61\x20\x6b\x65\x79\x73\x70\x61\x63\x65\x2c\x20\x6f\x72\x20\x65\x78\x70\x6c\x69\x63\x69\x74\x6c\x79\x20\x73\x70\x65\x63\x69\x66\x79\x20\x6b\x65\x79\x73\x70\x61\x63\x65\x2e\x74\x61\x62\x6c\x65\x6e\x61\x6d\x65";
     var fbs = std.io.fixedBufferStream(data);
@@ -1226,7 +1006,7 @@ test "" {
     _ = @import("frames/startup.zig");
     _ = @import("frames/auth_response.zig");
     _ = @import("frames/options.zig");
-    // _ = @import("frames/query.zig");
+    _ = @import("frames/query.zig");
     // _ = @import("frames/prepare.zig");
     // _ = @import("frames/execute.zig");
     // _ = @import("frames/batch.zig");
