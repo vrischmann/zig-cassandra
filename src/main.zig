@@ -11,11 +11,6 @@ const testing = @import("testing.zig");
 
 // Below are request frames only (ie client -> server).
 
-/// AUTH_RESPONSE is sent to a node to answser a authentication challenge.
-///
-/// Described in the protocol spec at §4.1.2.
-const AuthResponseFrame = struct {};
-
 /// OPTIONS is sent to a node to ask which STARTUP options are supported.
 ///
 /// Described in the protocol spec at §4.1.3.
@@ -953,8 +948,6 @@ const AuthSuccessFrame = struct {
     }
 };
 
-test "auth response frame" {}
-
 test "options frame" {
     const data = "\x04\x00\x00\x05\x05\x00\x00\x00\x00";
     var fbs = std.io.fixedBufferStream(data);
@@ -1247,7 +1240,7 @@ test "auth challenge frame" {
 
 test "" {
     _ = @import("frames/startup.zig");
-    // _ = @import("frames/auth_response.zig");
+    _ = @import("frames/auth_response.zig");
     // _ = @import("frames/options.zig");
     // _ = @import("frames/query.zig");
     // _ = @import("frames/prepare.zig");
