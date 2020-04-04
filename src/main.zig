@@ -26,8 +26,11 @@ const StartupFrame = struct {
     }
 
     pub fn read(allocator: *mem.Allocator, comptime FramerType: type, framer: *FramerType) !StartupFrame {
-        var frame: Self = undefined;
-        frame.allocator = allocator;
+        var frame = Self{
+            .allocator = allocator,
+            .cql_version = undefined,
+            .compression = null,
+        };
 
         // TODO(vincent): maybe avoid copying the strings ?
 
@@ -141,8 +144,17 @@ const QueryParameters = struct {
     const FlagWithNowInSeconds: u32 = 0x100;
 
     pub fn read(allocator: *mem.Allocator, comptime FramerType: type, framer: *FramerType) !QueryParameters {
-        var params: QueryParameters = undefined;
-        params.allocator = allocator;
+        var params = QueryParameters{
+            .allocator = allocator,
+            .consistency_level = undefined,
+            .values = null,
+            .page_size = null,
+            .paging_state = null,
+            .serial_consistency_level = null,
+            .timestamp = null,
+            .keyspace = null,
+            .now_in_seconds = null,
+        };
 
         params.consistency_level = try framer.readConsistency();
 
@@ -243,8 +255,11 @@ const QueryFrame = struct {
     }
 
     pub fn read(allocator: *mem.Allocator, comptime FramerType: type, framer: *FramerType) !QueryFrame {
-        var frame: Self = undefined;
-        frame.allocator = allocator;
+        var frame = Self{
+            .allocator = allocator,
+            .query = undefined,
+            .query_parameters = undefined,
+        };
 
         frame.query = try framer.readLongString();
         frame.query_parameters = try QueryParameters.read(allocator, FramerType, framer);
@@ -271,8 +286,11 @@ const PrepareFrame = struct {
     const FlagWithKeyspace = 0x01;
 
     pub fn read(allocator: *mem.Allocator, comptime FramerType: type, framer: *FramerType) !PrepareFrame {
-        var frame: Self = undefined;
-        frame.allocator = allocator;
+        var frame = Self{
+            .allocator = allocator,
+            .query = undefined,
+            .keyspace = null,
+        };
 
         frame.query = try framer.readLongString();
 
@@ -310,8 +328,12 @@ const ExecuteFrame = struct {
     }
 
     pub fn read(allocator: *mem.Allocator, comptime FramerType: type, framer: *FramerType) !ExecuteFrame {
-        var frame: Self = undefined;
-        frame.allocator = allocator;
+        var frame = Self{
+            .allocator = allocator,
+            .query_id = undefined,
+            .result_metadata_id = null,
+            .query_parameters = undefined,
+        };
 
         frame.query_id = (try framer.readShortBytes()) orelse &[_]u8{};
         if (framer.header.version == ProtocolVersion.V5) {
@@ -345,8 +367,12 @@ const BatchQuery = struct {
     }
 
     pub fn read(allocator: *mem.Allocator, comptime FramerType: type, framer: *FramerType) !BatchQuery {
-        var query: Self = undefined;
-        query.allocator = allocator;
+        var query = Self{
+            .allocator = allocator,
+            .query_string = null,
+            .query_id = null,
+            .values = undefined,
+        };
 
         const kind = try framer.readByte();
         switch (kind) {
@@ -404,8 +430,16 @@ const BatchFrame = struct {
     }
 
     pub fn read(allocator: *mem.Allocator, comptime FramerType: type, framer: *FramerType) !BatchFrame {
-        var frame: Self = undefined;
-        frame.allocator = allocator;
+        var frame = Self{
+            .allocator = allocator,
+            .batch_type = undefined,
+            .queries = undefined,
+            .consistency_level = undefined,
+            .serial_consistency_level = null,
+            .timestamp = null,
+            .keyspace = null,
+            .now_in_seconds = null,
+        };
 
         frame.batch_type = @intToEnum(BatchType, try framer.readByte());
         frame.queries = &[_]BatchQuery{};
@@ -485,8 +519,10 @@ const RegisterFrame = struct {
     }
 
     pub fn read(allocator: *mem.Allocator, comptime FramerType: type, framer: *FramerType) !RegisterFrame {
-        var frame: Self = undefined;
-        frame.allocator = allocator;
+        var frame = Self{
+            .allocator = allocator,
+            .event_types = undefined,
+        };
 
         frame.event_types = (try framer.readStringList()).toOwnedSlice();
 
@@ -654,8 +690,20 @@ const ErrorFrame = struct {
     }
 
     pub fn read(allocator: *mem.Allocator, comptime FramerType: type, framer: *FramerType) !ErrorFrame {
-        var frame: Self = undefined;
-        frame.allocator = allocator;
+        var frame = Self{
+            .allocator = allocator,
+            .error_code = undefined,
+            .message = undefined,
+            .unavaiable_replicas = null,
+            .function_failure = null,
+            .write_timeout = null,
+            .read_timeout = null,
+            .write_failure = null,
+            .read_failure = null,
+            .cas_write_unknown = null,
+            .already_exists = null,
+            .unprepared = null,
+        };
 
         frame.error_code = @intToEnum(ErrorCode, try framer.readInt(u32));
         frame.message = try framer.readString();
@@ -820,8 +868,10 @@ const AuthenticateFrame = struct {
     }
 
     pub fn read(allocator: *mem.Allocator, comptime FramerType: type, framer: *FramerType) !AuthenticateFrame {
-        var frame: Self = undefined;
-        frame.allocator = allocator;
+        var frame = Self{
+            .allocator = allocator,
+            .authenticator = undefined,
+        };
 
         frame.authenticator = try framer.readString();
 
@@ -848,12 +898,12 @@ const SupportedFrame = struct {
     }
 
     pub fn read(allocator: *mem.Allocator, comptime FramerType: type, framer: *FramerType) !SupportedFrame {
-        var frame: Self = undefined;
-        frame.allocator = allocator;
-
-        frame.protocol_versions = &[_]ProtocolVersion{};
-        frame.cql_versions = &[_]CQLVersion{};
-        frame.compression_algorithms = &[_]CompressionAlgorithm{};
+        var frame = Self{
+            .allocator = allocator,
+            .protocol_versions = &[_]ProtocolVersion{},
+            .cql_versions = &[_]CQLVersion{},
+            .compression_algorithms = &[_]CompressionAlgorithm{},
+        };
 
         const options = try framer.readStringMultimap();
         defer options.deinit();
