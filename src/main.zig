@@ -25,7 +25,7 @@ const StartupFrame = struct {
         self.allocator.free(self.cql_version);
     }
 
-    pub fn read(allocator: *mem.Allocator, comptime FramerType: type, framer: *FramerType) !StartupFrame {
+    pub fn read(allocator: *mem.Allocator, comptime FramerType: type, framer: *FramerType) !Self {
         var frame = Self{
             .allocator = allocator,
             .cql_version = undefined,
@@ -254,7 +254,7 @@ const QueryFrame = struct {
         self.query_parameters.deinit();
     }
 
-    pub fn read(allocator: *mem.Allocator, comptime FramerType: type, framer: *FramerType) !QueryFrame {
+    pub fn read(allocator: *mem.Allocator, comptime FramerType: type, framer: *FramerType) !Self {
         var frame = Self{
             .allocator = allocator,
             .query = undefined,
@@ -285,7 +285,7 @@ const PrepareFrame = struct {
 
     const FlagWithKeyspace = 0x01;
 
-    pub fn read(allocator: *mem.Allocator, comptime FramerType: type, framer: *FramerType) !PrepareFrame {
+    pub fn read(allocator: *mem.Allocator, comptime FramerType: type, framer: *FramerType) !Self {
         var frame = Self{
             .allocator = allocator,
             .query = undefined,
@@ -327,7 +327,7 @@ const ExecuteFrame = struct {
         self.query_parameters.deinit();
     }
 
-    pub fn read(allocator: *mem.Allocator, comptime FramerType: type, framer: *FramerType) !ExecuteFrame {
+    pub fn read(allocator: *mem.Allocator, comptime FramerType: type, framer: *FramerType) !Self {
         var frame = Self{
             .allocator = allocator,
             .query_id = undefined,
@@ -429,7 +429,7 @@ const BatchFrame = struct {
         }
     }
 
-    pub fn read(allocator: *mem.Allocator, comptime FramerType: type, framer: *FramerType) !BatchFrame {
+    pub fn read(allocator: *mem.Allocator, comptime FramerType: type, framer: *FramerType) !Self {
         var frame = Self{
             .allocator = allocator,
             .batch_type = undefined,
@@ -518,7 +518,7 @@ const RegisterFrame = struct {
         self.allocator.free(self.event_types);
     }
 
-    pub fn read(allocator: *mem.Allocator, comptime FramerType: type, framer: *FramerType) !RegisterFrame {
+    pub fn read(allocator: *mem.Allocator, comptime FramerType: type, framer: *FramerType) !Self {
         var frame = Self{
             .allocator = allocator,
             .event_types = undefined,
@@ -689,7 +689,7 @@ const ErrorFrame = struct {
         }
     }
 
-    pub fn read(allocator: *mem.Allocator, comptime FramerType: type, framer: *FramerType) !ErrorFrame {
+    pub fn read(allocator: *mem.Allocator, comptime FramerType: type, framer: *FramerType) !Self {
         var frame = Self{
             .allocator = allocator,
             .error_code = undefined,
@@ -867,7 +867,7 @@ const AuthenticateFrame = struct {
         self.allocator.free(self.authenticator);
     }
 
-    pub fn read(allocator: *mem.Allocator, comptime FramerType: type, framer: *FramerType) !AuthenticateFrame {
+    pub fn read(allocator: *mem.Allocator, comptime FramerType: type, framer: *FramerType) !Self {
         var frame = Self{
             .allocator = allocator,
             .authenticator = undefined,
@@ -897,7 +897,7 @@ const SupportedFrame = struct {
         self.allocator.free(self.compression_algorithms);
     }
 
-    pub fn read(allocator: *mem.Allocator, comptime FramerType: type, framer: *FramerType) !SupportedFrame {
+    pub fn read(allocator: *mem.Allocator, comptime FramerType: type, framer: *FramerType) !Self {
         var frame = Self{
             .allocator = allocator,
             .protocol_versions = &[_]ProtocolVersion{},
@@ -973,7 +973,7 @@ const AuthChallengeFrame = struct {
         self.allocator.free(self.token);
     }
 
-    pub fn read(allocator: *mem.Allocator, comptime FramerType: type, framer: *FramerType) !AuthChallengeFrame {
+    pub fn read(allocator: *mem.Allocator, comptime FramerType: type, framer: *FramerType) !Self {
         var frame = AuthChallengeFrame{
             .allocator = allocator,
             .token = undefined,
