@@ -10,11 +10,6 @@ usingnamespace @import("primitive_types.zig");
 usingnamespace @import("query_parameters.zig");
 const testing = @import("testing.zig");
 
-/// READY is sent by a node to indicate it is ready to process queries.
-///
-/// Described in the protocol spec at §4.2.2.
-const ReadyFrame = struct {};
-
 /// AUTHENTICATE is sent by a node in response to a STARTUP frame if authentication is required.
 ///
 /// Described in the protocol spec at §4.2.3.
@@ -168,17 +163,6 @@ const AuthSuccessFrame = struct {
     }
 };
 
-test "ready frame" {
-    const data = "\x84\x00\x00\x02\x02\x00\x00\x00\x00";
-    var fbs = std.io.fixedBufferStream(data);
-    var in_stream = fbs.inStream();
-
-    var framer = Framer(@TypeOf(in_stream)).init(testing.allocator, in_stream);
-    _ = try framer.readHeader();
-
-    checkHeader(Opcode.Ready, data.len, framer.header);
-}
-
 test "authenticate frame" {
     const data = "\x84\x00\x00\x00\x03\x00\x00\x00\x31\x00\x2f\x6f\x72\x67\x2e\x61\x70\x61\x63\x68\x65\x2e\x63\x61\x73\x73\x61\x6e\x64\x72\x61\x2e\x61\x75\x74\x68\x2e\x50\x61\x73\x73\x77\x6f\x72\x64\x41\x75\x74\x68\x65\x6e\x74\x69\x63\x61\x74\x6f\x72";
     var fbs = std.io.fixedBufferStream(data);
@@ -235,7 +219,7 @@ test "" {
     _ = @import("frames/batch.zig");
     _ = @import("frames/register.zig");
     _ = @import("frames/error.zig");
-    // _ = @import("frames/ready.zig");
+    _ = @import("frames/ready.zig");
     // _ = @import("frames/authenticate.zig");
     // _ = @import("frames/supported.zig");
     // _ = @import("frames/result.zig");
