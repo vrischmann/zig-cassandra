@@ -146,6 +146,40 @@ pub const Value = union(ValueTag) {
     }
 };
 
+pub const NamedValue = struct {
+    name: []const u8,
+    value: Value,
+};
+
+pub const ValuesType = enum {
+    Normal,
+    Named,
+};
+
+pub const Values = union(ValuesType) {
+    Normal: []Value,
+    Named: []NamedValue,
+
+    pub fn deinit(self: @This(), allocator: *mem.Allocator) void {
+        switch (self) {
+            .Normal => |nv| {
+                for (nv) |v| {
+                    v.deinit(allocator);
+                }
+                allocator.free(nv);
+            },
+            .Named => |nv| {
+                for (nv) |v| {
+                    allocator.free(v.name);
+                    v.value.deinit(allocator);
+                }
+                allocator.free(nv);
+            },
+            else => unreachable,
+        }
+    }
+};
+
 pub const Consistency = packed enum(u16) {
     Any = 0x0000,
     One = 0x0001,

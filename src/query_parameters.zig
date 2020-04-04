@@ -8,40 +8,6 @@ const Framer = @import("framer.zig").Framer;
 const sm = @import("string_map.zig");
 usingnamespace @import("primitive_types.zig");
 
-pub const NamedValue = struct {
-    name: []const u8,
-    value: Value,
-};
-
-pub const ValuesType = enum {
-    Normal,
-    Named,
-};
-
-pub const Values = union(ValuesType) {
-    Normal: []Value,
-    Named: []NamedValue,
-
-    pub fn deinit(self: @This(), allocator: *mem.Allocator) void {
-        switch (self) {
-            .Normal => |nv| {
-                for (nv) |v| {
-                    v.deinit(allocator);
-                }
-                allocator.free(nv);
-            },
-            .Named => |nv| {
-                for (nv) |v| {
-                    allocator.free(v.name);
-                    v.value.deinit(allocator);
-                }
-                allocator.free(nv);
-            },
-            else => unreachable,
-        }
-    }
-};
-
 pub const QueryParameters = struct {
     const Self = @This();
 
