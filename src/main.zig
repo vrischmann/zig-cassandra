@@ -1,5 +1,6 @@
 const std = @import("std");
 const mem = std.mem;
+const meta = std.meta;
 const net = std.net;
 const ArrayList = std.ArrayList;
 
@@ -732,12 +733,10 @@ const ErrorFrame = struct {
                     .contentions = null,
                 };
 
-                if (std.meta.stringToEnum(WriteError.WriteType, try framer.readString())) |write_type| {
-                    write_timeout.write_type = write_type;
-                } else {
-                    return error.InvalidWriteType;
-                }
+                const write_type_string = try framer.readString();
+                defer allocator.free(write_type_string);
 
+                write_timeout.write_type = meta.stringToEnum(WriteError.WriteType, write_type_string) orelse return error.InvalidWriteType;
                 if (write_timeout.write_type == .CAS) {
                     write_timeout.contentions = try framer.readInt(u16);
                 }
@@ -779,11 +778,10 @@ const ErrorFrame = struct {
 
                 // Read the rest
 
-                if (std.meta.stringToEnum(WriteError.WriteType, try framer.readString())) |write_type| {
-                    write_failure.write_type = write_type;
-                } else {
-                    return error.InvalidWriteType;
-                }
+                const write_type_string = try framer.readString();
+                defer allocator.free(write_type_string);
+
+                write_failure.write_type = meta.stringToEnum(WriteError.WriteType, write_type_string) orelse return error.InvalidWriteType;
 
                 frame.write_failure = write_failure;
             },
