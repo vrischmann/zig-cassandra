@@ -200,10 +200,12 @@ pub const SchemaChangeOptions = struct {
     pub fn deinit(self: *const @This()) void {
         self.allocator.free(self.keyspace);
         self.allocator.free(self.object_name);
-        for (self.arguments) |arg| {
-            self.allocator.free(arg);
+        if (self.arguments) |args| {
+            for (args) |arg| {
+                self.allocator.free(arg);
+            }
+            self.allocator.free(args);
         }
-        self.allocator.free(self.arguments);
     }
 
     pub fn init(allocator: *mem.Allocator) SchemaChangeOptions {
@@ -329,4 +331,18 @@ test "frame header: read and write" {
     var new_fbs = std.io.fixedBufferStream(&new_buf);
 
     _ = try header.write(@TypeOf(new_fbs.outStream()), new_fbs.outStream());
+}
+
+test "schema change options" {
+    var options = SchemaChangeOptions.init(testing.allocator);
+    defer options.deinit();
+
+    options.keyspace = try mem.dupe(testing.allocator, u8, "foobar");
+    options.object_name = try mem.dupe(testing.allocator, u8, "barbaz");
+    var arguments = try testing.allocator.alloc([]const u8, 4);
+    var i: usize = 0;
+    while (i < arguments.len) : (i += 1) {
+        arguments[i] = try mem.dupe(testing.allocator, u8, "hello");
+    }
+    options.arguments = arguments;
 }
