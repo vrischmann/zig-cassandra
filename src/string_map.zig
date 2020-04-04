@@ -151,8 +151,8 @@ test "map" {
 
     testing.expectEqual(@as(usize, 2), m.count());
 
-    testing.expectString("heo", m.get("foo").?.value);
-    testing.expectString("baz", m.get("bar").?.value);
+    testing.expectEqualString("heo", m.get("foo").?.value);
+    testing.expectEqualString("baz", m.get("bar").?.value);
 }
 
 test "multimap" {
@@ -184,15 +184,15 @@ test "multimap" {
         testing.expect(std.mem.eql(u8, "foo", entry.key) or std.mem.eql(u8, "fou", entry.key));
 
         const slice = entry.value.span();
-        testing.expectString("bar", slice[0]);
-        testing.expectString("baz", slice[1]);
+        testing.expectEqualString("bar", slice[0]);
+        testing.expectEqualString("baz", slice[1]);
     }
 
     const slice = m.get("foo").?;
-    testing.expectString("bar", slice[0]);
-    testing.expectString("baz", slice[1]);
+    testing.expectEqualString("bar", slice[0]);
+    testing.expectEqualString("baz", slice[1]);
 
     const slice2 = m.get("fou").?;
-    testing.expectString("bar", slice[0]);
-    testing.expectString("baz", slice[1]);
+    testing.expectEqualString("bar", slice[0]);
+    testing.expectEqualString("baz", slice[1]);
 }

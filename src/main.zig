@@ -1158,7 +1158,7 @@ test "query frame: no values, no paging state" {
     const frame = try QueryFrame.read(testing.allocator, @TypeOf(framer), &framer);
     defer frame.deinit();
 
-    testing.expectString("SELECT * FROM foobar.user ;", frame.query);
+    testing.expectEqualString("SELECT * FROM foobar.user ;", frame.query);
     testing.expectEqual(Consistency.One, frame.query_parameters.consistency_level);
     testing.expect(frame.query_parameters.values == null);
     testing.expectEqual(@as(u32, 100), frame.query_parameters.page_size.?);
@@ -1183,7 +1183,7 @@ test "error frame: invalid query, no keyspace specified" {
     defer frame.deinit();
 
     testing.expectEqual(ErrorCode.InvalidQuery, frame.error_code);
-    testing.expectString("No keyspace has been specified. USE a keyspace, or explicitly specify keyspace.tablename", frame.message);
+    testing.expectEqualString("No keyspace has been specified. USE a keyspace, or explicitly specify keyspace.tablename", frame.message);
 }
 
 test "error frame: already exists" {
@@ -1200,10 +1200,10 @@ test "error frame: already exists" {
     defer frame.deinit();
 
     testing.expectEqual(ErrorCode.AlreadyExists, frame.error_code);
-    testing.expectString("Cannot add already existing table \"hello\" to keyspace \"foobar\"", frame.message);
+    testing.expectEqualString("Cannot add already existing table \"hello\" to keyspace \"foobar\"", frame.message);
     const already_exists_error = frame.already_exists.?;
-    testing.expectString("foobar", already_exists_error.keyspace);
-    testing.expectString("hello", already_exists_error.table);
+    testing.expectEqualString("foobar", already_exists_error.keyspace);
+    testing.expectEqualString("hello", already_exists_error.table);
 }
 
 test "error frame: syntax error" {
@@ -1220,7 +1220,7 @@ test "error frame: syntax error" {
     defer frame.deinit();
 
     testing.expectEqual(ErrorCode.SyntaxError, frame.error_code);
-    testing.expectString("line 2:0 mismatched input ';' expecting K_FROM (select*[;])", frame.message);
+    testing.expectEqualString("line 2:0 mismatched input ';' expecting K_FROM (select*[;])", frame.message);
 }
 
 test "ready frame" {
@@ -1247,7 +1247,7 @@ test "authenticate frame" {
     const frame = try AuthenticateFrame.read(testing.allocator, @TypeOf(framer), &framer);
     defer frame.deinit();
 
-    testing.expectString("org.apache.cassandra.auth.PasswordAuthenticator", frame.authenticator);
+    testing.expectEqualString("org.apache.cassandra.auth.PasswordAuthenticator", frame.authenticator);
 }
 
 test "supported frame" {
@@ -1290,7 +1290,7 @@ test "prepare frame" {
     const frame = try PrepareFrame.read(testing.allocator, @TypeOf(framer), &framer);
     defer frame.deinit();
 
-    testing.expectString("SELECT age, name from foobar.user where id = ?", frame.query);
+    testing.expectEqualString("SELECT age, name from foobar.user where id = ?", frame.query);
     testing.expect(frame.keyspace == null);
 }
 
@@ -1341,7 +1341,7 @@ test "batch frame: query type string" {
     testing.expectEqual(@as(usize, 3), frame.queries.len);
     for (frame.queries) |query| {
         const exp = "INSERT INTO foobar.user(id, name) values(uuid(), 'vincent')";
-        testing.expectString(exp, query.query_string.?);
+        testing.expectEqualString(exp, query.query_string.?);
         testing.expect(query.query_id == null);
         testing.expect(query.values == .Normal);
         testing.expectEqual(@as(usize, 0), query.values.Normal.len);
@@ -1389,7 +1389,7 @@ test "batch frame: query type prepared" {
         testing.expectEqualSlices(u8, expUUIDs[i], value1.Set);
 
         const value2 = query.values.Normal[1];
-        testing.expectString("Vincent", value2.Set);
+        testing.expectEqualString("Vincent", value2.Set);
 
         i += 1;
     }
@@ -1415,9 +1415,9 @@ test "register frame" {
     defer frame.deinit();
 
     testing.expectEqual(@as(usize, 3), frame.event_types.len);
-    testing.expectString("TOPOLOGY_CHANGE", frame.event_types[0]);
-    testing.expectString("STATUS_CHANGE", frame.event_types[1]);
-    testing.expectString("SCHEMA_CHANGE", frame.event_types[2]);
+    testing.expectEqualString("TOPOLOGY_CHANGE", frame.event_types[0]);
+    testing.expectEqualString("STATUS_CHANGE", frame.event_types[1]);
+    testing.expectEqualString("SCHEMA_CHANGE", frame.event_types[2]);
 }
 
 test "event frame: topology change" {
@@ -1484,8 +1484,8 @@ test "event frame: schema change/keyspace" {
     testing.expectEqual(SchemaChangeTarget.KEYSPACE, schema_change.target);
 
     const options = schema_change.options;
-    testing.expectString("barbaz", options.keyspace);
-    testing.expectString("", options.object_name);
+    testing.expectEqualString("barbaz", options.keyspace);
+    testing.expectEqualString("", options.object_name);
     testing.expect(options.arguments == null);
 }
 
@@ -1509,8 +1509,8 @@ test "event frame: schema change/table" {
     testing.expectEqual(SchemaChangeTarget.TABLE, schema_change.target);
 
     const options = schema_change.options;
-    testing.expectString("foobar", options.keyspace);
-    testing.expectString("salut", options.object_name);
+    testing.expectEqualString("foobar", options.keyspace);
+    testing.expectEqualString("salut", options.object_name);
     testing.expect(options.arguments == null);
 }
 
@@ -1534,11 +1534,11 @@ test "event frame: schema change/function" {
     testing.expectEqual(SchemaChangeTarget.FUNCTION, schema_change.target);
 
     const options = schema_change.options;
-    testing.expectString("foobar", options.keyspace);
-    testing.expectString("some_function", options.object_name);
+    testing.expectEqualString("foobar", options.keyspace);
+    testing.expectEqualString("some_function", options.object_name);
     const arguments = options.arguments.?;
     testing.expectEqual(@as(usize, 1), arguments.len);
-    testing.expectString("int", arguments[0]);
+    testing.expectEqualString("int", arguments[0]);
 }
 
 test "auth challenge frame" {
