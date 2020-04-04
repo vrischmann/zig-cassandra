@@ -974,7 +974,7 @@ const AuthChallengeFrame = struct {
     }
 
     pub fn read(allocator: *mem.Allocator, comptime FramerType: type, framer: *FramerType) !Self {
-        var frame = AuthChallengeFrame{
+        var frame = Self{
             .allocator = allocator,
             .token = undefined,
         };
@@ -988,7 +988,28 @@ const AuthChallengeFrame = struct {
 /// AUTH_SUCCESS indicates the success of the authentication phase.
 ///
 /// Described in the protocol spec at §4.2.7.
-const AuthSuccessFrame = struct {};
+const AuthSuccessFrame = struct {
+    const Self = @This();
+
+    allocator: *mem.Allocator,
+
+    token: []const u8,
+
+    pub fn deinit(self: *const Self) void {
+        self.allocator.free(self.token);
+    }
+
+    pub fn read(allocator: *mem.Allocator, comptime FramerType: type, framer: *FramerType) !Self {
+        var frame = Self{
+            .allocator = allocator,
+            .token = undefined,
+        };
+
+        frame.token = try framer.readBytes();
+
+        return frame;
+    }
+};
 
 fn checkHeader(opcode: Opcode, data_len: usize, header: FrameHeader) void {
     // We can only use v4 for now
