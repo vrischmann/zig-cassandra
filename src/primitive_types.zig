@@ -219,17 +219,17 @@ pub const SchemaChangeOptions = struct {
 };
 
 pub const TopologyChange = struct {
-    change_type: TopologyChangeType,
+    type: TopologyChangeType,
     node_address: net.Address,
 };
 
 pub const StatusChange = struct {
-    change_type: StatusChangeType,
+    type: StatusChangeType,
     node_address: net.Address,
 };
 
 pub const SchemaChange = struct {
-    change_type: SchemaChangeType,
+    type: SchemaChangeType,
     target: SchemaChangeTarget,
     options: SchemaChangeOptions,
 

@@ -985,14 +985,14 @@ const EventFrame = struct {
         switch (event_type) {
             .TOPOLOGY_CHANGE => {
                 var change = TopologyChange{
-                    .change_type = undefined,
+                    .type = undefined,
                     .node_address = undefined,
                 };
 
-                const change_type_string = try framer.readString();
-                defer allocator.free(change_type_string);
+                const type_string = try framer.readString();
+                defer allocator.free(type_string);
 
-                change.change_type = meta.stringToEnum(TopologyChangeType, change_type_string) orelse return error.InvalidTopologyChangeType;
+                change.type = meta.stringToEnum(TopologyChangeType, type_string) orelse return error.InvalidTopologyChangeType;
                 change.node_address = try framer.readInet();
 
                 frame.event = Event{ .TOPOLOGY_CHANGE = change };
@@ -1001,14 +1001,14 @@ const EventFrame = struct {
             },
             .STATUS_CHANGE => {
                 var change = StatusChange{
-                    .change_type = undefined,
+                    .type = undefined,
                     .node_address = undefined,
                 };
 
-                const change_type_string = try framer.readString();
-                defer allocator.free(change_type_string);
+                const type_string = try framer.readString();
+                defer allocator.free(type_string);
 
-                change.change_type = meta.stringToEnum(StatusChangeType, change_type_string) orelse return error.InvalidStatusChangeType;
+                change.type = meta.stringToEnum(StatusChangeType, type_string) orelse return error.InvalidStatusChangeType;
                 change.node_address = try framer.readInet();
 
                 frame.event = Event{ .STATUS_CHANGE = change };
@@ -1017,18 +1017,18 @@ const EventFrame = struct {
             },
             .SCHEMA_CHANGE => {
                 var change = SchemaChange{
-                    .change_type = undefined,
+                    .type = undefined,
                     .target = undefined,
                     .options = undefined,
                 };
 
-                const change_type_string = try framer.readString();
-                defer allocator.free(change_type_string);
+                const type_string = try framer.readString();
+                defer allocator.free(type_string);
 
                 const target_string = try framer.readString();
                 defer allocator.free(target_string);
 
-                change.change_type = meta.stringToEnum(SchemaChangeType, change_type_string) orelse return error.InvalidSchemaChangeType;
+                change.type = meta.stringToEnum(SchemaChangeType, type_string) orelse return error.InvalidSchemaChangeType;
                 change.target = meta.stringToEnum(SchemaChangeTarget, target_string) orelse return error.InvalidSchemaChangeTarget;
 
                 change.options = SchemaChangeOptions.init(allocator);
@@ -1436,7 +1436,7 @@ test "event frame: topology change" {
     testing.expect(frame.event == .TOPOLOGY_CHANGE);
 
     const topology_change = frame.event.TOPOLOGY_CHANGE;
-    testing.expectEqual(TopologyChangeType.NEW_NODE, topology_change.change_type);
+    testing.expectEqual(TopologyChangeType.NEW_NODE, topology_change.type);
 
     const localhost = net.Address.initIp4([4]u8{ 0x7f, 0x00, 0x00, 0x04 }, 9042);
     testing.expect(net.Address.eql(localhost, topology_change.node_address));
@@ -1458,7 +1458,7 @@ test "event frame: status change" {
     testing.expect(frame.event == .STATUS_CHANGE);
 
     const status_change = frame.event.STATUS_CHANGE;
-    testing.expectEqual(StatusChangeType.DOWN, status_change.change_type);
+    testing.expectEqual(StatusChangeType.DOWN, status_change.type);
 
     const localhost = net.Address.initIp4([4]u8{ 0x7f, 0x00, 0x00, 0x01 }, 9042);
     testing.expect(net.Address.eql(localhost, status_change.node_address));
@@ -1480,7 +1480,8 @@ test "event frame: schema change" {
     testing.expect(frame.event == .SCHEMA_CHANGE);
 
     const schema_change = frame.event.SCHEMA_CHANGE;
-    testing.expectEqual(SchemaChangeType.CREATED, schema_change.change_type);
+    testing.expectEqual(SchemaChangeType.CREATED, schema_change.type);
+    testing.expectEqual(SchemaChangeTarget.KEYSPACE, schema_change.target);
 }
 
 test "auth challenge frame" {
