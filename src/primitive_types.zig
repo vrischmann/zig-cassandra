@@ -1,6 +1,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const mem = std.mem;
+const net = std.net;
 const testing = std.testing;
 
 pub const CQLVersion = struct {
@@ -163,6 +164,82 @@ pub const BatchType = packed enum(u8) {
     Logged = 0,
     Unlogged = 1,
     Counter = 2,
+};
+
+pub const TopologyChangeType = enum {
+    NewNode,
+    RemovedNode,
+};
+
+pub const StatusChangeType = enum {
+    Up,
+    Down,
+};
+
+pub const SchemaChangeType = enum {
+    CREATED,
+    UPDATED,
+    DROPPED,
+};
+
+pub const SchemaChangeTarget = enum {
+    KEYSPACE,
+    TABLE,
+    TYPE,
+    FUNCTION,
+    AGGREGATE,
+};
+
+pub const SchemaChangeOptions = struct {
+    allocator: *mem.Allocator,
+
+    keyspace: []const u8,
+    object_name: []const u8,
+    arguments: ?[][]const u8,
+
+    pub fn deinit(self: *const @This()) void {
+        self.allocator.free(self.keyspace);
+        self.allocator.free(self.object_name);
+        for (self.arguments) |arg| {
+            self.allocator.free(arg);
+        }
+        self.allocator.free(self.arguments);
+    }
+
+    pub fn init(allocator: *mem.Allocator) SchemaChangeOptions {
+        return SchemaChangeOptions{
+            .allocator = allocator,
+            .keyspace = undefined,
+            .object_name = undefined,
+            .arguments = null,
+        };
+    }
+};
+
+pub const EventType = enum {
+    TopologyChange,
+    StatusChange,
+    SchemaChange,
+};
+
+pub const Event = union(EventType) {
+    TopologyChange: struct {
+        change_type: TopologyChangeType,
+        node_address: net.Address,
+    },
+    StatusChange: struct {
+        change_type: StatusChangeType,
+        node_address: net.Address,
+    },
+    SchemaChange: struct {
+        change_type: SchemaChangeType,
+        target: SchemaChangeTarget,
+        options: SchemaChangeOptions,
+
+        pub fn deinit(self: *const @This()) void {
+            self.options.deinit();
+        }
+    },
 };
 
 test "cql version: fromString" {
