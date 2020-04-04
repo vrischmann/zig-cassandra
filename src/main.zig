@@ -11,11 +11,6 @@ const testing = @import("testing.zig");
 
 // Below are request frames only (ie client -> server).
 
-/// OPTIONS is sent to a node to ask which STARTUP options are supported.
-///
-/// Described in the protocol spec at §4.1.3.
-const OptionsFrame = struct {};
-
 const NamedValue = struct {
     name: []const u8,
     value: Value,
@@ -948,17 +943,6 @@ const AuthSuccessFrame = struct {
     }
 };
 
-test "options frame" {
-    const data = "\x04\x00\x00\x05\x05\x00\x00\x00\x00";
-    var fbs = std.io.fixedBufferStream(data);
-    var in_stream = fbs.inStream();
-
-    var framer = Framer(@TypeOf(in_stream)).init(testing.allocator, in_stream);
-    _ = try framer.readHeader();
-
-    checkHeader(Opcode.Options, data.len, framer.header);
-}
-
 test "query frame: no values, no paging state" {
     const data = "\x04\x00\x00\x08\x07\x00\x00\x00\x30\x00\x00\x00\x1b\x53\x45\x4c\x45\x43\x54\x20\x2a\x20\x46\x52\x4f\x4d\x20\x66\x6f\x6f\x62\x61\x72\x2e\x75\x73\x65\x72\x20\x3b\x00\x01\x34\x00\x00\x00\x64\x00\x08\x00\x05\xa2\x2c\xf0\x57\x3e\x3f";
     var fbs = std.io.fixedBufferStream(data);
@@ -1241,7 +1225,7 @@ test "auth challenge frame" {
 test "" {
     _ = @import("frames/startup.zig");
     _ = @import("frames/auth_response.zig");
-    // _ = @import("frames/options.zig");
+    _ = @import("frames/options.zig");
     // _ = @import("frames/query.zig");
     // _ = @import("frames/prepare.zig");
     // _ = @import("frames/execute.zig");
