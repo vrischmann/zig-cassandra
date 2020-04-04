@@ -897,6 +897,26 @@ const SupportedFrame = struct {
     }
 };
 
+/// RESULT is the result to a query (QUERY, PREPARE, EXECUTE or BATCH messages).
+///
+/// Described in the protocol spec at §4.2.5.
+const ResultFrame = struct {};
+
+/// EVENT is an event pushed by the server.
+///
+/// Described in the protocol spec at §4.2.6.
+const EventFrame = struct {};
+
+/// AUTH_CHALLENGE is a server authentication challenge.
+///
+/// Described in the protocol spec at §4.2.7.
+const AuthChallenge = struct {};
+
+/// AUTH_SUCCESS indicates the success of the authentication phase.
+///
+/// Described in the protocol spec at §4.2.7.
+const AuthSuccess = struct {};
+
 fn checkHeader(opcode: Opcode, data_len: usize, header: FrameHeader) void {
     // We can only use v4 for now
     testing.expectEqual(ProtocolVersion.V4, header.version);
