@@ -191,6 +191,19 @@ const Rows = struct {
 
         rows.rows_metadata = try RowsMetadata.read(allocator, FramerType, framer);
 
+        const rows_count = @as(usize, try framer.readInt(u32));
+
+        // Iterate over rows
+        var i: usize = 0;
+        while (i < rows_count) : (i += 1) {
+            // Read a single row
+            var j: usize = 0;
+            while (j < rows.rows_metadata.column_specs.len) : (j += 1) {
+                const column_data = try framer.readBytes();
+                // TODO(vincent): decode this using the column spec
+            }
+        }
+
         return rows;
     }
 };
