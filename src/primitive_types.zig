@@ -1,6 +1,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const mem = std.mem;
+const meta = std.meta;
 const net = std.net;
 const testing = std.testing;
 
@@ -263,12 +264,50 @@ pub const StatusChange = struct {
 };
 
 pub const SchemaChange = struct {
+    const Self = @This();
+
     type: SchemaChangeType,
     target: SchemaChangeTarget,
     options: SchemaChangeOptions,
 
-    pub fn deinit(self: *const @This()) void {
+    pub fn deinit(self: *const Self) void {
         self.options.deinit();
+    }
+
+    pub fn read(allocator: *mem.Allocator, comptime FramerType: type, framer: *FramerType) !Self {
+        var change = Self{
+            .type = undefined,
+            .target = undefined,
+            .options = undefined,
+        };
+
+        const type_string = try framer.readString();
+        defer allocator.free(type_string);
+
+        const target_string = try framer.readString();
+        defer allocator.free(target_string);
+
+        change.type = meta.stringToEnum(SchemaChangeType, type_string) orelse return error.InvalidSchemaChangeType;
+        change.target = meta.stringToEnum(SchemaChangeTarget, target_string) orelse return error.InvalidSchemaChangeTarget;
+
+        change.options = SchemaChangeOptions.init(allocator);
+
+        switch (change.target) {
+            .KEYSPACE => {
+                change.options.keyspace = try framer.readString();
+            },
+            .TABLE, .TYPE => {
+                change.options.keyspace = try framer.readString();
+                change.options.object_name = try framer.readString();
+            },
+            .FUNCTION, .AGGREGATE => {
+                change.options.keyspace = try framer.readString();
+                change.options.object_name = try framer.readString();
+                change.options.arguments = (try framer.readStringList()).toOwnedSlice();
+            },
+        }
+
+        return change;
     }
 };
 

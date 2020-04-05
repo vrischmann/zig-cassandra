@@ -71,39 +71,7 @@ const EventFrame = struct {
                 return frame;
             },
             .SCHEMA_CHANGE => {
-                var change = SchemaChange{
-                    .type = undefined,
-                    .target = undefined,
-                    .options = undefined,
-                };
-
-                const type_string = try framer.readString();
-                defer allocator.free(type_string);
-
-                const target_string = try framer.readString();
-                defer allocator.free(target_string);
-
-                change.type = meta.stringToEnum(SchemaChangeType, type_string) orelse return error.InvalidSchemaChangeType;
-                change.target = meta.stringToEnum(SchemaChangeTarget, target_string) orelse return error.InvalidSchemaChangeTarget;
-
-                change.options = SchemaChangeOptions.init(allocator);
-
-                switch (change.target) {
-                    .KEYSPACE => {
-                        change.options.keyspace = try framer.readString();
-                    },
-                    .TABLE, .TYPE => {
-                        change.options.keyspace = try framer.readString();
-                        change.options.object_name = try framer.readString();
-                    },
-                    .FUNCTION, .AGGREGATE => {
-                        change.options.keyspace = try framer.readString();
-                        change.options.object_name = try framer.readString();
-                        change.options.arguments = (try framer.readStringList()).toOwnedSlice();
-                    },
-                }
-
-                frame.event = Event{ .SCHEMA_CHANGE = change };
+                frame.event = Event{ .SCHEMA_CHANGE = try SchemaChange.read(allocator, FramerType, framer) };
 
                 return frame;
             },
