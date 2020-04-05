@@ -12,21 +12,10 @@ const testing = @import("../testing.zig");
 ///
 /// Described in the protocol spec at §4.1.2.
 const AuthResponseFrame = struct {
-    const Self = @This();
-
-    allocator: *mem.Allocator,
-
     token: ?[]const u8,
 
-    pub fn deinit(self: Self) void {
-        if (self.token) |token| {
-            self.allocator.free(token);
-        }
-    }
-
-    pub fn read(allocator: *mem.Allocator, comptime FramerType: type, framer: *FramerType) !Self {
-        var frame = Self{
-            .allocator = allocator,
+    pub fn read(allocator: *mem.Allocator, comptime FramerType: type, framer: *FramerType) !AuthResponseFrame {
+        var frame = AuthResponseFrame{
             .token = undefined,
         };
 
@@ -40,21 +29,10 @@ const AuthResponseFrame = struct {
 ///
 /// Described in the protocol spec at §4.2.7.
 const AuthChallengeFrame = struct {
-    const Self = @This();
-
-    allocator: *mem.Allocator,
-
     token: ?[]const u8,
 
-    pub fn deinit(self: Self) void {
-        if (self.token) |token| {
-            self.allocator.free(token);
-        }
-    }
-
-    pub fn read(allocator: *mem.Allocator, comptime FramerType: type, framer: *FramerType) !Self {
-        var frame = Self{
-            .allocator = allocator,
+    pub fn read(allocator: *mem.Allocator, comptime FramerType: type, framer: *FramerType) !AuthChallengeFrame {
+        var frame = AuthChallengeFrame{
             .token = undefined,
         };
 
@@ -68,21 +46,10 @@ const AuthChallengeFrame = struct {
 ///
 /// Described in the protocol spec at §4.2.8.
 const AuthSuccessFrame = struct {
-    const Self = @This();
-
-    allocator: *mem.Allocator,
-
     token: ?[]const u8,
 
-    pub fn deinit(self: Self) void {
-        if (self.token) |token| {
-            self.allocator.free(token);
-        }
-    }
-
-    pub fn read(allocator: *mem.Allocator, comptime FramerType: type, framer: *FramerType) !Self {
-        var frame = Self{
-            .allocator = allocator,
+    pub fn read(allocator: *mem.Allocator, comptime FramerType: type, framer: *FramerType) !AuthSuccessFrame {
+        var frame = AuthSuccessFrame{
             .token = undefined,
         };
 
@@ -97,35 +64,38 @@ test "auth challenge frame" {
 }
 
 test "auth response frame" {
-    const data = "\x04\x00\x00\x02\x0f\x00\x00\x00\x18\x00\x00\x00\x14\x00\x63\x61\x73\x73\x61\x6e\x64\x72\x61\x00\x63\x61\x73\x73\x61\x6e\x64\x72\x61";
+    var arena = testing.arenaAllocator();
+    defer arena.deinit();
 
+    const data = "\x04\x00\x00\x02\x0f\x00\x00\x00\x18\x00\x00\x00\x14\x00\x63\x61\x73\x73\x61\x6e\x64\x72\x61\x00\x63\x61\x73\x73\x61\x6e\x64\x72\x61";
     var fbs = std.io.fixedBufferStream(data);
     var in_stream = fbs.inStream();
 
-    var framer = Framer(@TypeOf(in_stream)).init(testing.allocator, in_stream);
+    var framer = Framer(@TypeOf(in_stream)).init(&arena.allocator, in_stream);
     _ = try framer.readHeader();
 
     checkHeader(Opcode.AuthResponse, data.len, framer.header);
 
-    const frame = try AuthSuccessFrame.read(testing.allocator, @TypeOf(framer), &framer);
-    defer frame.deinit();
+    const frame = try AuthSuccessFrame.read(&arena.allocator, @TypeOf(framer), &framer);
 
     const exp_token = "\x00cassandra\x00cassandra";
     testing.expectEqualSlices(u8, exp_token, frame.token.?);
 }
 
 test "auth success frame" {
+    var arena = testing.arenaAllocator();
+    defer arena.deinit();
+
     const data = "\x84\x00\x00\x02\x10\x00\x00\x00\x04\xff\xff\xff\xff";
     var fbs = std.io.fixedBufferStream(data);
     var in_stream = fbs.inStream();
 
-    var framer = Framer(@TypeOf(in_stream)).init(testing.allocator, in_stream);
+    var framer = Framer(@TypeOf(in_stream)).init(&arena.allocator, in_stream);
     _ = try framer.readHeader();
 
     checkHeader(Opcode.AuthSuccess, data.len, framer.header);
 
-    const frame = try AuthSuccessFrame.read(testing.allocator, @TypeOf(framer), &framer);
-    defer frame.deinit();
+    const frame = try AuthSuccessFrame.read(&arena.allocator, @TypeOf(framer), &framer);
 
     testing.expect(frame.token == null);
 }
