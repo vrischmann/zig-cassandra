@@ -14,23 +14,12 @@ const testing = @import("../testing.zig");
 const ExecuteFrame = struct {
     const Self = @This();
 
-    allocator: *mem.Allocator,
-
     query_id: []const u8,
     result_metadata_id: ?[]const u8,
     query_parameters: QueryParameters,
 
-    pub fn deinit(self: Self) void {
-        self.allocator.free(self.query_id);
-        if (self.result_metadata_id) |id| {
-            self.allocator.free(id);
-        }
-        self.query_parameters.deinit();
-    }
-
     pub fn read(allocator: *mem.Allocator, comptime FramerType: type, framer: *FramerType) !Self {
         var frame = Self{
-            .allocator = allocator,
             .query_id = undefined,
             .result_metadata_id = null,
             .query_parameters = undefined,
@@ -47,17 +36,19 @@ const ExecuteFrame = struct {
 };
 
 test "execute frame" {
+    var arena = testing.arenaAllocator();
+    defer arena.deinit();
+
     const data = "\x04\x00\x01\x00\x0a\x00\x00\x00\x37\x00\x10\x97\x97\x95\x6d\xfe\xb2\x4c\x99\x86\x8e\xd3\x84\xff\x6f\xd9\x4c\x00\x04\x27\x00\x01\x00\x00\x00\x10\xeb\x11\xc9\x1e\xd8\xcc\x48\x4d\xaf\x55\xe9\x9f\x5c\xd9\xec\x4a\x00\x00\x13\x88\x00\x05\xa2\x41\x4c\x1b\x06\x4c";
     var fbs = std.io.fixedBufferStream(data);
     var in_stream = fbs.inStream();
 
-    var framer = Framer(@TypeOf(in_stream)).init(testing.allocator, in_stream);
+    var framer = Framer(@TypeOf(in_stream)).init(&arena.allocator, in_stream);
     _ = try framer.readHeader();
 
     checkHeader(Opcode.Execute, data.len, framer.header);
 
-    const frame = try ExecuteFrame.read(testing.allocator, @TypeOf(framer), &framer);
-    defer frame.deinit();
+    const frame = try ExecuteFrame.read(&arena.allocator, @TypeOf(framer), &framer);
 
     const exp_query_id = "\x97\x97\x95\x6d\xfe\xb2\x4c\x99\x86\x8e\xd3\x84\xff\x6f\xd9\x4c";
     testing.expectEqualSlices(u8, exp_query_id, frame.query_id);
