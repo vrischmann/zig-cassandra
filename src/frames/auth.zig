@@ -42,10 +42,12 @@ const AuthSuccessFrame = struct {
 
     allocator: *mem.Allocator,
 
-    token: []const u8,
+    token: ?[]const u8,
 
     pub fn deinit(self: *const Self) void {
-        self.allocator.free(self.token);
+        if (self.token) |token| {
+            self.allocator.free(token);
+        }
     }
 
     pub fn read(allocator: *mem.Allocator, comptime FramerType: type, framer: *FramerType) !Self {
@@ -64,4 +66,18 @@ test "auth challenge frame" {
     // TODO(vincent): how do I get one of these frame ?
 }
 
-test "auth success frame" {}
+test "auth success frame" {
+    const data = "\x84\x00\x00\x02\x10\x00\x00\x00\x04\xff\xff\xff\xff";
+    var fbs = std.io.fixedBufferStream(data);
+    var in_stream = fbs.inStream();
+
+    var framer = Framer(@TypeOf(in_stream)).init(testing.allocator, in_stream);
+    _ = try framer.readHeader();
+
+    checkHeader(Opcode.AuthSuccess, data.len, framer.header);
+
+    const frame = try AuthSuccessFrame.read(testing.allocator, @TypeOf(framer), &framer);
+    defer frame.deinit();
+
+    testing.expect(frame.token == null);
+}
