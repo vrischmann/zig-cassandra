@@ -13,22 +13,10 @@ const testing = @import("../testing.zig");
 const EventFrame = struct {
     const Self = @This();
 
-    allocator: *mem.Allocator,
-
     event: Event,
-
-    pub fn deinit(self: Self) void {
-        switch (self.event) {
-            .TOPOLOGY_CHANGE, .STATUS_CHANGE => return,
-            .SCHEMA_CHANGE => |ev| {
-                ev.deinit();
-            },
-        }
-    }
 
     pub fn read(allocator: *mem.Allocator, comptime FramerType: type, framer: *FramerType) !Self {
         var frame = Self{
-            .allocator = allocator,
             .event = undefined,
         };
 
@@ -90,7 +78,6 @@ test "event frame: topology change" {
     checkHeader(Opcode.Event, data.len, framer.header);
 
     const frame = try EventFrame.read(testing.allocator, @TypeOf(framer), &framer);
-    defer frame.deinit();
 
     testing.expect(frame.event == .TOPOLOGY_CHANGE);
 
@@ -102,17 +89,19 @@ test "event frame: topology change" {
 }
 
 test "event frame: status change" {
+    var arena = testing.arenaAllocator();
+    defer arena.deinit();
+
     const data = "\x84\x00\xff\xff\x0c\x00\x00\x00\x1e\x00\x0d\x53\x54\x41\x54\x55\x53\x5f\x43\x48\x41\x4e\x47\x45\x00\x04\x44\x4f\x57\x4e\x04\x7f\x00\x00\x01\x00\x00\x23\x52";
     var fbs = std.io.fixedBufferStream(data);
     var in_stream = fbs.inStream();
 
-    var framer = Framer(@TypeOf(in_stream)).init(testing.allocator, in_stream);
+    var framer = Framer(@TypeOf(in_stream)).init(&arena.allocator, in_stream);
     _ = try framer.readHeader();
 
     checkHeader(Opcode.Event, data.len, framer.header);
 
-    const frame = try EventFrame.read(testing.allocator, @TypeOf(framer), &framer);
-    defer frame.deinit();
+    const frame = try EventFrame.read(&arena.allocator, @TypeOf(framer), &framer);
 
     testing.expect(frame.event == .STATUS_CHANGE);
 
@@ -137,7 +126,6 @@ test "event frame: schema change/keyspace" {
     checkHeader(Opcode.Event, data.len, framer.header);
 
     const frame = try EventFrame.read(&arena.allocator, @TypeOf(framer), &framer);
-    defer frame.deinit();
 
     testing.expect(frame.event == .SCHEMA_CHANGE);
 
@@ -165,7 +153,6 @@ test "event frame: schema change/table" {
     checkHeader(Opcode.Event, data.len, framer.header);
 
     const frame = try EventFrame.read(&arena.allocator, @TypeOf(framer), &framer);
-    defer frame.deinit();
 
     testing.expect(frame.event == .SCHEMA_CHANGE);
 
@@ -193,7 +180,6 @@ test "event frame: schema change/function" {
     checkHeader(Opcode.Event, data.len, framer.header);
 
     const frame = try EventFrame.read(&arena.allocator, @TypeOf(framer), &framer);
-    defer frame.deinit();
 
     testing.expect(frame.event == .SCHEMA_CHANGE);
 
