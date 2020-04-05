@@ -59,7 +59,7 @@ const ResultFrame = struct {
         const kind = @intToEnum(ResultKind, try framer.readInt(u32));
 
         switch (kind) {
-            .Void => {},
+            .Void => frame.result = Result{ .Void = .{} },
             .Rows => unreachable,
             .SetKeyspace => {
                 const keyspace = try framer.readString();
@@ -75,6 +75,22 @@ const ResultFrame = struct {
         return frame;
     }
 };
+
+test "result frame: void" {
+    const data = "\x84\x00\x00\x9d\x08\x00\x00\x00\x04\x00\x00\x00\x01";
+    var fbs = std.io.fixedBufferStream(data);
+    var in_stream = fbs.inStream();
+
+    var framer = Framer(@TypeOf(in_stream)).init(testing.allocator, in_stream);
+    _ = try framer.readHeader();
+
+    checkHeader(Opcode.Result, data.len, framer.header);
+
+    const frame = try ResultFrame.read(testing.allocator, @TypeOf(framer), &framer);
+    defer frame.deinit();
+
+    testing.expect(frame.result == .Void);
+}
 
 test "result frame: set keyspace" {
     const data = "\x84\x00\x00\x77\x08\x00\x00\x00\x0c\x00\x00\x00\x03\x00\x06\x66\x6f\x6f\x62\x61\x72";
