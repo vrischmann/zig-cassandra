@@ -147,12 +147,6 @@ pub fn Framer(comptime InStreamType: type) type {
             unreachable;
         }
 
-        // TODO(vincent): add read option
-
-        // pub fn readOptionID(self: *Self) !u16 {
-        //     return self.readInt(u16);
-        // }
-
         pub fn readInetaddr(self: *Self) !net.Address {
             return self.readInetGeneric(false);
         }
