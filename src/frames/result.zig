@@ -17,13 +17,6 @@ const ResultKind = packed enum(u32) {
 const GlobalTableSpec = struct {
     keyspace: []const u8,
     table: []const u8,
-
-    allocator: *mem.Allocator,
-
-    pub fn deinit(self: @This()) void {
-        self.allocator.free(self.keyspace);
-        self.allocator.free(self.table);
-    }
 };
 
 const NativeType = packed enum(u16) {
@@ -90,26 +83,13 @@ const NativeValue = union(NativeType) {
 const ColumnSpec = struct {
     const Self = @This();
 
-    allocator: *mem.Allocator,
-
     keyspace: ?[]const u8,
     table: ?[]const u8,
     name: []const u8,
     native_type: NativeType,
 
-    pub fn deinit(self: Self) void {
-        if (self.keyspace) |s| {
-            self.allocator.free(s);
-        }
-        if (self.table) |s| {
-            self.allocator.free(s);
-        }
-        self.allocator.free(self.name);
-    }
-
     pub fn read(allocator: *mem.Allocator, comptime FramerType: type, framer: *FramerType, has_global_table_spec: bool) !Self {
         var spec = Self{
-            .allocator = allocator,
             .keyspace = null,
             .table = null,
             .name = undefined,
@@ -131,8 +111,6 @@ const ColumnSpec = struct {
 const RowsMetadata = struct {
     const Self = @This();
 
-    allocator: *mem.Allocator,
-
     paging_state: ?[]const u8,
     new_metadata_id: ?[]const u8,
     global_table_spec: ?GlobalTableSpec,
@@ -143,25 +121,8 @@ const RowsMetadata = struct {
     const FlagNoMetadata = 0x0004;
     const FlagMetadataChanged = 0x0008;
 
-    pub fn deinit(self: Self) void {
-        if (self.paging_state) |paging_state| {
-            self.allocator.free(paging_state);
-        }
-        if (self.new_metadata_id) |id| {
-            self.allocator.free(id);
-        }
-        if (self.global_table_spec) |spec| {
-            spec.deinit();
-        }
-        for (self.column_specs) |spec| {
-            spec.deinit();
-        }
-        self.allocator.free(self.column_specs);
-    }
-
     pub fn read(allocator: *mem.Allocator, comptime FramerType: type, framer: *FramerType) !Self {
         var metadata = Self{
-            .allocator = allocator,
             .paging_state = null,
             .new_metadata_id = null,
             .global_table_spec = null,
@@ -182,7 +143,6 @@ const RowsMetadata = struct {
         if (flags & FlagNoMetadata == 0) {
             if (flags & FlagGlobalTablesSpec == FlagGlobalTablesSpec) {
                 const spec = GlobalTableSpec{
-                    .allocator = allocator,
                     .keyspace = try framer.readString(),
                     .table = try framer.readString(),
                 };
@@ -206,17 +166,10 @@ const RowsMetadata = struct {
 const Rows = struct {
     const Self = @This();
 
-    allocator: *mem.Allocator,
-
     rows_metadata: RowsMetadata,
-
-    pub fn deinit(self: Self) void {
-        self.rows_metadata.deinit();
-    }
 
     pub fn read(allocator: *mem.Allocator, comptime FramerType: type, framer: *FramerType) !Rows {
         var rows = Self{
-            .allocator = allocator,
             .rows_metadata = undefined,
         };
 
@@ -234,16 +187,6 @@ const Result = union(ResultKind) {
     SetKeyspace: []const u8,
     Prepared: Prepared,
     SchemaChange: SchemaChange,
-
-    pub fn deinit(self: @This(), allocator: *mem.Allocator) void {
-        switch (self) {
-            Result.Void => return,
-            Result.Rows => |r| r.deinit(),
-            Result.SetKeyspace => |r| allocator.free(r),
-            Result.Prepared => unreachable,
-            Result.SchemaChange => |r| r.deinit(),
-        }
-    }
 };
 
 /// RESULT is the result to a query (QUERY, PREPARE, EXECUTE or BATCH messages).
@@ -252,17 +195,10 @@ const Result = union(ResultKind) {
 const ResultFrame = struct {
     const Self = @This();
 
-    allocator: *mem.Allocator,
-
     result: Result,
-
-    pub fn deinit(self: Self) void {
-        self.result.deinit(self.allocator);
-    }
 
     pub fn read(allocator: *mem.Allocator, comptime FramerType: type, framer: *FramerType) !ResultFrame {
         var frame = Self{
-            .allocator = allocator,
             .result = undefined,
         };
 
@@ -290,33 +226,37 @@ const ResultFrame = struct {
 };
 
 test "result frame: void" {
+    var arena = testing.arenaAllocator();
+    defer arena.deinit();
+
     const data = "\x84\x00\x00\x9d\x08\x00\x00\x00\x04\x00\x00\x00\x01";
     var fbs = std.io.fixedBufferStream(data);
     var in_stream = fbs.inStream();
 
-    var framer = Framer(@TypeOf(in_stream)).init(testing.allocator, in_stream);
+    var framer = Framer(@TypeOf(in_stream)).init(&arena.allocator, in_stream);
     _ = try framer.readHeader();
 
     checkHeader(Opcode.Result, data.len, framer.header);
 
-    const frame = try ResultFrame.read(testing.allocator, @TypeOf(framer), &framer);
-    defer frame.deinit();
+    const frame = try ResultFrame.read(&arena.allocator, @TypeOf(framer), &framer);
 
     testing.expect(frame.result == .Void);
 }
 
 test "result frame: rows" {
+    var arena = testing.arenaAllocator();
+    defer arena.deinit();
+
     const data = "\x84\x00\x00\xa7\x08\x00\x00\x00\x89\x00\x00\x00\x02\x00\x00\x00\x01\x00\x00\x00\x02\x00\x06\x66\x6f\x6f\x62\x61\x72\x00\x04\x75\x73\x65\x72\x00\x02\x69\x64\x00\x0c\x00\x04\x6e\x61\x6d\x65\x00\x0d\x00\x00\x00\x03\x00\x00\x00\x10\x70\xb7\xe5\x04\x81\x65\x4e\xdc\x81\x76\xdb\x24\x61\xc7\x74\x3e\x00\x00\x00\x07\x76\x69\x6e\x63\x65\x6e\x74\x00\x00\x00\x10\x4f\xd0\x7c\x5b\x14\x0c\x4d\x0c\xa3\xcf\xfd\xe4\xfe\x46\xa8\xf9\x00\x00\x00\x07\x76\x69\x6e\x63\x65\x6e\x74\x00\x00\x00\x10\x20\x33\x45\x82\xde\xcc\x4b\xee\xb3\x1e\x2f\x6d\xb9\xf2\x7e\x84\x00\x00\x00\x07\x76\x69\x6e\x63\x65\x6e\x74";
     var fbs = std.io.fixedBufferStream(data);
     var in_stream = fbs.inStream();
 
-    var framer = Framer(@TypeOf(in_stream)).init(testing.allocator, in_stream);
+    var framer = Framer(@TypeOf(in_stream)).init(&arena.allocator, in_stream);
     _ = try framer.readHeader();
 
     checkHeader(Opcode.Result, data.len, framer.header);
 
-    const frame = try ResultFrame.read(testing.allocator, @TypeOf(framer), &framer);
-    defer frame.deinit();
+    const frame = try ResultFrame.read(&arena.allocator, @TypeOf(framer), &framer);
 
     testing.expect(frame.result == .Rows);
 
@@ -329,17 +269,19 @@ test "result frame: rows" {
 }
 
 test "result frame: set keyspace" {
+    var arena = testing.arenaAllocator();
+    defer arena.deinit();
+
     const data = "\x84\x00\x00\x77\x08\x00\x00\x00\x0c\x00\x00\x00\x03\x00\x06\x66\x6f\x6f\x62\x61\x72";
     var fbs = std.io.fixedBufferStream(data);
     var in_stream = fbs.inStream();
 
-    var framer = Framer(@TypeOf(in_stream)).init(testing.allocator, in_stream);
+    var framer = Framer(@TypeOf(in_stream)).init(&arena.allocator, in_stream);
     _ = try framer.readHeader();
 
     checkHeader(Opcode.Result, data.len, framer.header);
 
-    const frame = try ResultFrame.read(testing.allocator, @TypeOf(framer), &framer);
-    defer frame.deinit();
+    const frame = try ResultFrame.read(&arena.allocator, @TypeOf(framer), &framer);
 
     testing.expect(frame.result == .SetKeyspace);
     testing.expectEqualString("foobar", frame.result.SetKeyspace);
