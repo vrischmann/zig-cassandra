@@ -15,13 +15,9 @@ const AuthResponseFrame = struct {
     token: ?[]const u8,
 
     pub fn read(allocator: *mem.Allocator, comptime FramerType: type, framer: *FramerType) !AuthResponseFrame {
-        var frame = AuthResponseFrame{
-            .token = undefined,
+        return AuthResponseFrame{
+            .token = try framer.readBytes(),
         };
-
-        frame.token = try framer.readBytes();
-
-        return frame;
     }
 };
 
@@ -32,13 +28,9 @@ const AuthChallengeFrame = struct {
     token: ?[]const u8,
 
     pub fn read(allocator: *mem.Allocator, comptime FramerType: type, framer: *FramerType) !AuthChallengeFrame {
-        var frame = AuthChallengeFrame{
-            .token = undefined,
+        return AuthChallengeFrame{
+            .token = try framer.readBytes(),
         };
-
-        frame.token = try framer.readBytes();
-
-        return frame;
     }
 };
 
@@ -49,13 +41,9 @@ const AuthSuccessFrame = struct {
     token: ?[]const u8,
 
     pub fn read(allocator: *mem.Allocator, comptime FramerType: type, framer: *FramerType) !AuthSuccessFrame {
-        var frame = AuthSuccessFrame{
-            .token = undefined,
+        return AuthSuccessFrame{
+            .token = try framer.readBytes(),
         };
-
-        frame.token = try framer.readBytes();
-
-        return frame;
     }
 };
 
