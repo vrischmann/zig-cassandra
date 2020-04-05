@@ -13,6 +13,8 @@ pub fn expectEqualString(a: []const u8, b: []const u8) void {
     }
 }
 
+/// Creates an arena allocator backed by the testing allocator.
+/// Only intended to be used for tests.
 pub fn arenaAllocator() std.heap.ArenaAllocator {
     return std.heap.ArenaAllocator.init(std.testing.allocator);
 }
