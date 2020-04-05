@@ -16,7 +16,7 @@ pub const CQLVersion = struct {
             .patch = 0,
         };
 
-        var it = mem.separate(s, ".");
+        var it = mem.split(s, ".");
         var pos: usize = 0;
         while (it.next()) |v| {
             const n = std.fmt.parseInt(u16, v, 10) catch return error.InvalidCQLVersion;
