@@ -11,8 +11,6 @@ usingnamespace @import("primitive_types.zig");
 pub const QueryParameters = struct {
     const Self = @This();
 
-    allocator: *mem.Allocator,
-
     consistency_level: Consistency,
     values: ?Values,
     page_size: ?u32,
@@ -21,20 +19,6 @@ pub const QueryParameters = struct {
     timestamp: ?u64,
     keyspace: ?[]const u8,
     now_in_seconds: ?u32,
-
-    pub fn deinit(self: Self) void {
-        if (self.values) |values| {
-            values.deinit(self.allocator);
-        }
-
-        if (self.paging_state) |ps| {
-            self.allocator.free(ps);
-        }
-
-        if (self.keyspace) |keyspace| {
-            self.allocator.free(keyspace);
-        }
-    }
 
     const FlagWithValues: u32 = 0x0001;
     const FlagSkipMetadata: u32 = 0x0002;
@@ -48,7 +32,6 @@ pub const QueryParameters = struct {
 
     pub fn read(allocator: *mem.Allocator, comptime FramerType: type, framer: *FramerType) !QueryParameters {
         var params = QueryParameters{
-            .allocator = allocator,
             .consistency_level = undefined,
             .values = null,
             .page_size = null,
