@@ -232,7 +232,7 @@ pub const SchemaChangeOptions = struct {
     object_name: []const u8,
     arguments: ?[][]const u8,
 
-    pub fn deinit(self: *const @This()) void {
+    pub fn deinit(self: @This()) void {
         self.allocator.free(self.keyspace);
         self.allocator.free(self.object_name);
         if (self.arguments) |args| {
