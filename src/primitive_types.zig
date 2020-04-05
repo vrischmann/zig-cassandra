@@ -3,7 +3,8 @@ const builtin = @import("builtin");
 const mem = std.mem;
 const meta = std.meta;
 const net = std.net;
-const testing = std.testing;
+
+const testing = @import("testing.zig");
 
 pub const CQLVersion = struct {
     major: u16,
@@ -236,26 +237,12 @@ pub const SchemaChangeTarget = enum {
 };
 
 pub const SchemaChangeOptions = struct {
-    allocator: *mem.Allocator,
-
     keyspace: []const u8,
     object_name: []const u8,
     arguments: ?[][]const u8,
 
-    pub fn deinit(self: @This()) void {
-        self.allocator.free(self.keyspace);
-        self.allocator.free(self.object_name);
-        if (self.arguments) |args| {
-            for (args) |arg| {
-                self.allocator.free(arg);
-            }
-            self.allocator.free(args);
-        }
-    }
-
-    pub fn init(allocator: *mem.Allocator) SchemaChangeOptions {
+    pub fn init() SchemaChangeOptions {
         return SchemaChangeOptions{
-            .allocator = allocator,
             .keyspace = &[_]u8{},
             .object_name = &[_]u8{},
             .arguments = null,
@@ -280,9 +267,7 @@ pub const SchemaChange = struct {
     target: SchemaChangeTarget,
     options: SchemaChangeOptions,
 
-    pub fn deinit(self: Self) void {
-        self.options.deinit();
-    }
+    pub fn deinit(self: Self) void {}
 
     pub fn read(allocator: *mem.Allocator, comptime FramerType: type, framer: *FramerType) !Self {
         var change = Self{
@@ -300,7 +285,7 @@ pub const SchemaChange = struct {
         change.type = meta.stringToEnum(SchemaChangeType, type_string) orelse return error.InvalidSchemaChangeType;
         change.target = meta.stringToEnum(SchemaChangeTarget, target_string) orelse return error.InvalidSchemaChangeTarget;
 
-        change.options = SchemaChangeOptions.init(allocator);
+        change.options = SchemaChangeOptions.init();
 
         switch (change.target) {
             .KEYSPACE => {
@@ -423,15 +408,17 @@ test "frame header: read and write" {
 }
 
 test "schema change options" {
-    var options = SchemaChangeOptions.init(testing.allocator);
-    defer options.deinit();
+    var arena = testing.arenaAllocator();
+    defer arena.deinit();
 
-    options.keyspace = try mem.dupe(testing.allocator, u8, "foobar");
-    options.object_name = try mem.dupe(testing.allocator, u8, "barbaz");
-    var arguments = try testing.allocator.alloc([]const u8, 4);
+    var options = SchemaChangeOptions.init();
+
+    options.keyspace = try mem.dupe(&arena.allocator, u8, "foobar");
+    options.object_name = try mem.dupe(&arena.allocator, u8, "barbaz");
+    var arguments = try arena.allocator.alloc([]const u8, 4);
     var i: usize = 0;
     while (i < arguments.len) : (i += 1) {
-        arguments[i] = try mem.dupe(testing.allocator, u8, "hello");
+        arguments[i] = try mem.dupe(&arena.allocator, u8, "hello");
     }
     options.arguments = arguments;
 }

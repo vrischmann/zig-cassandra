@@ -124,16 +124,19 @@ test "event frame: status change" {
 }
 
 test "event frame: schema change/keyspace" {
+    var arena = testing.arenaAllocator();
+    defer arena.deinit();
+
     const data = "\x84\x00\xff\xff\x0c\x00\x00\x00\x2a\x00\x0d\x53\x43\x48\x45\x4d\x41\x5f\x43\x48\x41\x4e\x47\x45\x00\x07\x43\x52\x45\x41\x54\x45\x44\x00\x08\x4b\x45\x59\x53\x50\x41\x43\x45\x00\x06\x62\x61\x72\x62\x61\x7a";
     var fbs = std.io.fixedBufferStream(data);
     var in_stream = fbs.inStream();
 
-    var framer = Framer(@TypeOf(in_stream)).init(testing.allocator, in_stream);
+    var framer = Framer(@TypeOf(in_stream)).init(&arena.allocator, in_stream);
     _ = try framer.readHeader();
 
     checkHeader(Opcode.Event, data.len, framer.header);
 
-    const frame = try EventFrame.read(testing.allocator, @TypeOf(framer), &framer);
+    const frame = try EventFrame.read(&arena.allocator, @TypeOf(framer), &framer);
     defer frame.deinit();
 
     testing.expect(frame.event == .SCHEMA_CHANGE);
@@ -149,16 +152,19 @@ test "event frame: schema change/keyspace" {
 }
 
 test "event frame: schema change/table" {
+    var arena = testing.arenaAllocator();
+    defer arena.deinit();
+
     const data = "\x84\x00\xff\xff\x0c\x00\x00\x00\x2e\x00\x0d\x53\x43\x48\x45\x4d\x41\x5f\x43\x48\x41\x4e\x47\x45\x00\x07\x43\x52\x45\x41\x54\x45\x44\x00\x05\x54\x41\x42\x4c\x45\x00\x06\x66\x6f\x6f\x62\x61\x72\x00\x05\x73\x61\x6c\x75\x74";
     var fbs = std.io.fixedBufferStream(data);
     var in_stream = fbs.inStream();
 
-    var framer = Framer(@TypeOf(in_stream)).init(testing.allocator, in_stream);
+    var framer = Framer(@TypeOf(in_stream)).init(&arena.allocator, in_stream);
     _ = try framer.readHeader();
 
     checkHeader(Opcode.Event, data.len, framer.header);
 
-    const frame = try EventFrame.read(testing.allocator, @TypeOf(framer), &framer);
+    const frame = try EventFrame.read(&arena.allocator, @TypeOf(framer), &framer);
     defer frame.deinit();
 
     testing.expect(frame.event == .SCHEMA_CHANGE);
@@ -174,16 +180,19 @@ test "event frame: schema change/table" {
 }
 
 test "event frame: schema change/function" {
+    var arena = testing.arenaAllocator();
+    defer arena.deinit();
+
     const data = "\x84\x00\xff\xff\x0c\x00\x00\x00\x40\x00\x0d\x53\x43\x48\x45\x4d\x41\x5f\x43\x48\x41\x4e\x47\x45\x00\x07\x43\x52\x45\x41\x54\x45\x44\x00\x08\x46\x55\x4e\x43\x54\x49\x4f\x4e\x00\x06\x66\x6f\x6f\x62\x61\x72\x00\x0d\x73\x6f\x6d\x65\x5f\x66\x75\x6e\x63\x74\x69\x6f\x6e\x00\x01\x00\x03\x69\x6e\x74";
     var fbs = std.io.fixedBufferStream(data);
     var in_stream = fbs.inStream();
 
-    var framer = Framer(@TypeOf(in_stream)).init(testing.allocator, in_stream);
+    var framer = Framer(@TypeOf(in_stream)).init(&arena.allocator, in_stream);
     _ = try framer.readHeader();
 
     checkHeader(Opcode.Event, data.len, framer.header);
 
-    const frame = try EventFrame.read(testing.allocator, @TypeOf(framer), &framer);
+    const frame = try EventFrame.read(&arena.allocator, @TypeOf(framer), &framer);
     defer frame.deinit();
 
     testing.expect(frame.event == .SCHEMA_CHANGE);
