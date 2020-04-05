@@ -1,4 +1,6 @@
 const std = @import("std");
+const heap = std.heap;
+const mem = std.mem;
 const os = std.os;
 const net = std.net;
 const ArrayList = std.ArrayList;
@@ -16,20 +18,18 @@ pub fn Framer(comptime InStreamType: type) type {
     return struct {
         const Self = @This();
 
-        allocator: *std.mem.Allocator,
+        allocator: *mem.Allocator,
         in_stream: InStreamType,
 
         header: FrameHeader,
 
-        pub fn init(allocator: *std.mem.Allocator, in: InStreamType) Self {
+        pub fn init(allocator: *mem.Allocator, in: InStreamType) Self {
             return Self{
                 .allocator = allocator,
                 .in_stream = in,
                 .header = undefined,
             };
         }
-
-        pub fn deinit(self: *Self) void {}
 
         pub fn readHeader(self: *Self) !void {
             self.header = try FrameHeader.read(InStreamType, self.in_stream);
@@ -220,12 +220,15 @@ pub fn Framer(comptime InStreamType: type) type {
 }
 
 test "framer: read int" {
+    var arena = testing.arenaAllocator();
+    defer arena.deinit();
+
     var buf: [1024]u8 = undefined;
     var fbs = std.io.fixedBufferStream(&buf);
     const fbs_type = @TypeOf(fbs);
     var in_stream = fbs.inStream();
 
-    var framer = Framer(@TypeOf(in_stream)).init(testing.allocator, in_stream);
+    var framer = Framer(@TypeOf(in_stream)).init(&arena.allocator, in_stream);
 
     // read all int types
 
@@ -243,18 +246,20 @@ test "framer: read int" {
 }
 
 test "framer: read strings and bytes" {
+    var arena = testing.arenaAllocator();
+    defer arena.deinit();
+
     var buf: [1024]u8 = undefined;
     var fbs = std.io.fixedBufferStream(&buf);
     const fbs_type = @TypeOf(fbs);
     var in_stream = fbs.inStream();
 
-    var framer = Framer(@TypeOf(in_stream)).init(testing.allocator, in_stream);
+    var framer = Framer(@TypeOf(in_stream)).init(&arena.allocator, in_stream);
 
     // short string
     {
         resetAndWrite(fbs_type, &fbs, "\x00\x06foobar");
         var result = try framer.readString();
-        defer std.testing.allocator.free(result);
 
         testing.expectEqualString("foobar", result);
 
@@ -262,7 +267,6 @@ test "framer: read strings and bytes" {
 
         resetAndWrite(fbs_type, &fbs, "\x00\x00\x00\x06foobar");
         result = try framer.readLongString();
-        defer std.testing.allocator.free(result);
 
         testing.expectEqualString("foobar", result);
     }
@@ -271,12 +275,10 @@ test "framer: read strings and bytes" {
     {
         resetAndWrite(fbs_type, &fbs, "\x00\x00\x00\x0A123456789A");
         var result = (try framer.readBytes()).?;
-        defer std.testing.allocator.free(result);
         testing.expectEqualString("123456789A", result);
 
         resetAndWrite(fbs_type, &fbs, "\x00\x00\x00\x00");
         var result2 = (try framer.readBytes()).?;
-        defer std.testing.allocator.free(result2);
         testing.expectEqualString("", result2);
 
         resetAndWrite(fbs_type, &fbs, "\xff\xff\xff\xff");
@@ -287,12 +289,10 @@ test "framer: read strings and bytes" {
     {
         resetAndWrite(fbs_type, &fbs, "\x00\x0A123456789A");
         var result = (try framer.readShortBytes()).?;
-        defer std.testing.allocator.free(result);
         testing.expectEqualString("123456789A", result);
 
         resetAndWrite(fbs_type, &fbs, "\x00\x00");
         var result2 = (try framer.readShortBytes()).?;
-        defer std.testing.allocator.free(result2);
         testing.expectEqualString("", result2);
 
         resetAndWrite(fbs_type, &fbs, "\xff\xff");
@@ -301,12 +301,15 @@ test "framer: read strings and bytes" {
 }
 
 test "framer: read uuid" {
+    var arena = testing.arenaAllocator();
+    defer arena.deinit();
+
     var buf: [1024]u8 = undefined;
     var fbs = std.io.fixedBufferStream(&buf);
     const fbs_type = @TypeOf(fbs);
     var in_stream = fbs.inStream();
 
-    var framer = Framer(@TypeOf(in_stream)).init(testing.allocator, in_stream);
+    var framer = Framer(@TypeOf(in_stream)).init(&arena.allocator, in_stream);
 
     // read UUID
 
@@ -318,12 +321,15 @@ test "framer: read uuid" {
 }
 
 test "framer: read string list" {
+    var arena = testing.arenaAllocator();
+    defer arena.deinit();
+
     var buf: [1024]u8 = undefined;
     var fbs = std.io.fixedBufferStream(&buf);
     const fbs_type = @TypeOf(fbs);
     var in_stream = fbs.inStream();
 
-    var framer = Framer(@TypeOf(in_stream)).init(testing.allocator, in_stream);
+    var framer = Framer(@TypeOf(in_stream)).init(&arena.allocator, in_stream);
 
     // read string lists
 
@@ -333,32 +339,30 @@ test "framer: read string list" {
     defer list.deinit();
 
     var result = list.toOwnedSlice();
-    defer std.testing.allocator.free(result);
-
     testing.expectEqual(@as(usize, 2), result.len);
 
     var tmp = result[0];
-    defer std.testing.allocator.free(tmp);
     testing.expectEqualString("foo", tmp);
 
     tmp = result[1];
-    defer std.testing.allocator.free(tmp);
     testing.expectEqualString("bar", tmp);
 }
 
 test "framer: read value" {
+    var arena = testing.arenaAllocator();
+    defer arena.deinit();
+
     var buf: [1024]u8 = undefined;
     var fbs = std.io.fixedBufferStream(&buf);
     const fbs_type = @TypeOf(fbs);
     var in_stream = fbs.inStream();
 
-    var framer = Framer(@TypeOf(in_stream)).init(testing.allocator, in_stream);
+    var framer = Framer(@TypeOf(in_stream)).init(&arena.allocator, in_stream);
 
     // Normal value
     resetAndWrite(fbs_type, &fbs, "\x00\x00\x00\x02\x61\x62");
 
     var value = try framer.readValue();
-    defer std.testing.allocator.free(value.Set);
     testing.expect(value == .Set);
     testing.expectEqualString("ab", value.Set);
 
@@ -376,12 +380,15 @@ test "framer: read value" {
 }
 
 test "framer: read inet and inetaddr" {
+    var arena = testing.arenaAllocator();
+    defer arena.deinit();
+
     var buf: [1024]u8 = undefined;
     var fbs = std.io.fixedBufferStream(&buf);
     const fbs_type = @TypeOf(fbs);
     var in_stream = fbs.inStream();
 
-    var framer = Framer(@TypeOf(in_stream)).init(testing.allocator, in_stream);
+    var framer = Framer(@TypeOf(in_stream)).init(&arena.allocator, in_stream);
 
     // IPv4
     resetAndWrite(fbs_type, &fbs, "\x04\x12\x34\x56\x78\x00\x00\x00\x22");
@@ -417,12 +424,15 @@ test "framer: read inet and inetaddr" {
 }
 
 test "framer: read consistency" {
+    var arena = testing.arenaAllocator();
+    defer arena.deinit();
+
     var buf: [1024]u8 = undefined;
     var fbs = std.io.fixedBufferStream(&buf);
     const fbs_type = @TypeOf(fbs);
     var in_stream = fbs.inStream();
 
-    var framer = Framer(@TypeOf(in_stream)).init(testing.allocator, in_stream);
+    var framer = Framer(@TypeOf(in_stream)).init(&arena.allocator, in_stream);
 
     const testCase = struct {
         exp: Consistency,
@@ -451,12 +461,15 @@ test "framer: read consistency" {
 }
 
 test "framer: read stringmap" {
+    var arena = testing.arenaAllocator();
+    defer arena.deinit();
+
     var buf: [1024]u8 = undefined;
     var fbs = std.io.fixedBufferStream(&buf);
     const fbs_type = @TypeOf(fbs);
     var in_stream = fbs.inStream();
 
-    var framer = Framer(@TypeOf(in_stream)).init(testing.allocator, in_stream);
+    var framer = Framer(@TypeOf(in_stream)).init(&arena.allocator, in_stream);
 
     // 2 elements string map
 
@@ -474,12 +487,15 @@ test "framer: read stringmap" {
 }
 
 test "framer: read string multimap" {
+    var arena = testing.arenaAllocator();
+    defer arena.deinit();
+
     var buf: [1024]u8 = undefined;
     var fbs = std.io.fixedBufferStream(&buf);
     const fbs_type = @TypeOf(fbs);
     var in_stream = fbs.inStream();
 
-    var framer = Framer(@TypeOf(in_stream)).init(testing.allocator, in_stream);
+    var framer = Framer(@TypeOf(in_stream)).init(&arena.allocator, in_stream);
 
     // 1 key, 2 values multimap
 
