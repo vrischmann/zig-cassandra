@@ -20,10 +20,7 @@ const EventFrame = struct {
             .event = undefined,
         };
 
-        const event_type_string = try framer.readString();
-        defer allocator.free(event_type_string);
-
-        const event_type = meta.stringToEnum(EventType, event_type_string) orelse return error.InvalidEventType;
+        const event_type = meta.stringToEnum(EventType, try framer.readString()) orelse return error.InvalidEventType;
 
         switch (event_type) {
             .TOPOLOGY_CHANGE => {
@@ -32,10 +29,7 @@ const EventFrame = struct {
                     .node_address = undefined,
                 };
 
-                const type_string = try framer.readString();
-                defer allocator.free(type_string);
-
-                change.type = meta.stringToEnum(TopologyChangeType, type_string) orelse return error.InvalidTopologyChangeType;
+                change.type = meta.stringToEnum(TopologyChangeType, try framer.readString()) orelse return error.InvalidTopologyChangeType;
                 change.node_address = try framer.readInet();
 
                 frame.event = Event{ .TOPOLOGY_CHANGE = change };
@@ -48,10 +42,7 @@ const EventFrame = struct {
                     .node_address = undefined,
                 };
 
-                const type_string = try framer.readString();
-                defer allocator.free(type_string);
-
-                change.type = meta.stringToEnum(StatusChangeType, type_string) orelse return error.InvalidStatusChangeType;
+                change.type = meta.stringToEnum(StatusChangeType, try framer.readString()) orelse return error.InvalidStatusChangeType;
                 change.node_address = try framer.readInet();
 
                 frame.event = Event{ .STATUS_CHANGE = change };
@@ -68,16 +59,19 @@ const EventFrame = struct {
 };
 
 test "event frame: topology change" {
+    var arena = testing.arenaAllocator();
+    defer arena.deinit();
+
     const data = "\x84\x00\xff\xff\x0c\x00\x00\x00\x24\x00\x0f\x54\x4f\x50\x4f\x4c\x4f\x47\x59\x5f\x43\x48\x41\x4e\x47\x45\x00\x08\x4e\x45\x57\x5f\x4e\x4f\x44\x45\x04\x7f\x00\x00\x04\x00\x00\x23\x52";
     var fbs = std.io.fixedBufferStream(data);
     var in_stream = fbs.inStream();
 
-    var framer = Framer(@TypeOf(in_stream)).init(testing.allocator, in_stream);
+    var framer = Framer(@TypeOf(in_stream)).init(&arena.allocator, in_stream);
     _ = try framer.readHeader();
 
     checkHeader(Opcode.Event, data.len, framer.header);
 
-    const frame = try EventFrame.read(testing.allocator, @TypeOf(framer), &framer);
+    const frame = try EventFrame.read(&arena.allocator, @TypeOf(framer), &framer);
 
     testing.expect(frame.event == .TOPOLOGY_CHANGE);
 
