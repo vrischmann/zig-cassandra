@@ -15,42 +15,31 @@ const testing = @import("../testing.zig");
 const QueryFrame = struct {
     const Self = @This();
 
-    allocator: *mem.Allocator,
-
     query: []const u8,
     query_parameters: QueryParameters,
 
-    pub fn deinit(self: Self) void {
-        self.allocator.free(self.query);
-        self.query_parameters.deinit();
-    }
-
     pub fn read(allocator: *mem.Allocator, comptime FramerType: type, framer: *FramerType) !Self {
-        var frame = Self{
-            .allocator = allocator,
-            .query = undefined,
-            .query_parameters = undefined,
+        return Self{
+            .query = try framer.readLongString(),
+            .query_parameters = try QueryParameters.read(allocator, FramerType, framer),
         };
-
-        frame.query = try framer.readLongString();
-        frame.query_parameters = try QueryParameters.read(allocator, FramerType, framer);
-
-        return frame;
     }
 };
 
 test "query frame: no values, no paging state" {
+    var arena = testing.arenaAllocator();
+    defer arena.deinit();
+
     const data = "\x04\x00\x00\x08\x07\x00\x00\x00\x30\x00\x00\x00\x1b\x53\x45\x4c\x45\x43\x54\x20\x2a\x20\x46\x52\x4f\x4d\x20\x66\x6f\x6f\x62\x61\x72\x2e\x75\x73\x65\x72\x20\x3b\x00\x01\x34\x00\x00\x00\x64\x00\x08\x00\x05\xa2\x2c\xf0\x57\x3e\x3f";
     var fbs = std.io.fixedBufferStream(data);
     var in_stream = fbs.inStream();
 
-    var framer = Framer(@TypeOf(in_stream)).init(testing.allocator, in_stream);
+    var framer = Framer(@TypeOf(in_stream)).init(&arena.allocator, in_stream);
     _ = try framer.readHeader();
 
     checkHeader(Opcode.Query, data.len, framer.header);
 
-    const frame = try QueryFrame.read(testing.allocator, @TypeOf(framer), &framer);
-    defer frame.deinit();
+    const frame = try QueryFrame.read(&arena.allocator, @TypeOf(framer), &framer);
 
     testing.expectEqualString("SELECT * FROM foobar.user ;", frame.query);
     testing.expectEqual(Consistency.One, frame.query_parameters.consistency_level);
