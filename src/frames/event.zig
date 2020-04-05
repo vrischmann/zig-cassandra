@@ -17,7 +17,7 @@ const EventFrame = struct {
 
     event: Event,
 
-    pub fn deinit(self: *const Self) void {
+    pub fn deinit(self: Self) void {
         switch (self.event) {
             .TOPOLOGY_CHANGE, .STATUS_CHANGE => return,
             .SCHEMA_CHANGE => |ev| {

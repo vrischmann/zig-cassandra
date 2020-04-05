@@ -20,7 +20,7 @@ const ExecuteFrame = struct {
     result_metadata_id: ?[]const u8,
     query_parameters: QueryParameters,
 
-    pub fn deinit(self: *const Self) void {
+    pub fn deinit(self: Self) void {
         self.allocator.free(self.query_id);
         if (self.result_metadata_id) |id| {
             self.allocator.free(id);

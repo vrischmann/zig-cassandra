@@ -18,7 +18,7 @@ const AuthResponseFrame = struct {
 
     token: ?[]const u8,
 
-    pub fn deinit(self: *const Self) void {
+    pub fn deinit(self: Self) void {
         if (self.token) |token| {
             self.allocator.free(token);
         }
@@ -46,7 +46,7 @@ const AuthChallengeFrame = struct {
 
     token: ?[]const u8,
 
-    pub fn deinit(self: *const Self) void {
+    pub fn deinit(self: Self) void {
         if (self.token) |token| {
             self.allocator.free(token);
         }
@@ -74,7 +74,7 @@ const AuthSuccessFrame = struct {
 
     token: ?[]const u8,
 
-    pub fn deinit(self: *const Self) void {
+    pub fn deinit(self: Self) void {
         if (self.token) |token| {
             self.allocator.free(token);
         }

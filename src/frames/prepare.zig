@@ -18,7 +18,7 @@ const PrepareFrame = struct {
     query: []const u8,
     keyspace: ?[]const u8,
 
-    pub fn deinit(self: *const Self) void {
+    pub fn deinit(self: Self) void {
         self.allocator.free(self.query);
     }
 

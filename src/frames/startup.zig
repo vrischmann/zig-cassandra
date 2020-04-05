@@ -17,7 +17,7 @@ const StartupFrame = struct {
     cql_version: []const u8,
     compression: ?CompressionAlgorithm,
 
-    pub fn deinit(self: *const Self) void {
+    pub fn deinit(self: Self) void {
         self.allocator.free(self.cql_version);
     }
 

@@ -17,7 +17,7 @@ const AuthenticateFrame = struct {
 
     authenticator: []const u8,
 
-    pub fn deinit(self: *const Self) void {
+    pub fn deinit(self: Self) void {
         self.allocator.free(self.authenticator);
     }
 

@@ -138,7 +138,7 @@ const ErrorFrame = struct {
     already_exists: ?AlreadyExistsError,
     unprepared: ?UnpreparedError,
 
-    pub fn deinit(self: *const Self) void {
+    pub fn deinit(self: Self) void {
         self.allocator.free(self.message);
 
         if (self.function_failure) |err| {

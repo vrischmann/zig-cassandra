@@ -20,7 +20,7 @@ const SupportedFrame = struct {
     cql_versions: []CQLVersion,
     compression_algorithms: []CompressionAlgorithm,
 
-    pub fn deinit(self: *const Self) void {
+    pub fn deinit(self: Self) void {
         self.allocator.free(self.protocol_versions);
         self.allocator.free(self.cql_versions);
         self.allocator.free(self.compression_algorithms);

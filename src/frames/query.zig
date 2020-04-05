@@ -20,7 +20,7 @@ const QueryFrame = struct {
     query: []const u8,
     query_parameters: QueryParameters,
 
-    pub fn deinit(self: *const Self) void {
+    pub fn deinit(self: Self) void {
         self.allocator.free(self.query);
         self.query_parameters.deinit();
     }

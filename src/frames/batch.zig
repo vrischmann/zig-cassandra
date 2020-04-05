@@ -20,7 +20,7 @@ const BatchQuery = struct {
 
     values: Values,
 
-    pub fn deinit(self: *const Self) void {
+    pub fn deinit(self: Self) void {
         if (self.query_string) |query| {
             self.allocator.free(query);
         }
@@ -83,7 +83,7 @@ const BatchFrame = struct {
     const FlagWithKeyspace: u32 = 0x0080;
     const FlagWithNowInSeconds: u32 = 0x100;
 
-    pub fn deinit(self: *const Self) void {
+    pub fn deinit(self: Self) void {
         for (self.queries) |query| {
             query.deinit();
         }

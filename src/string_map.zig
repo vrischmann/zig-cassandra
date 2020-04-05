@@ -19,7 +19,7 @@ pub const Map = struct {
         };
     }
 
-    pub fn deinit(self: *const Self) void {
+    pub fn deinit(self: Self) void {
         var it = self.map.iterator();
         while (it.next()) |entry| {
             self.allocator.free(entry.key);
@@ -38,15 +38,15 @@ pub const Map = struct {
         }
     }
 
-    pub fn count(self: *const Self) usize {
+    pub fn count(self: Self) usize {
         return self.map.count();
     }
 
-    pub fn iterator(self: *const Self) Iterator {
+    pub fn iterator(self: Self) Iterator {
         return self.map.iterator();
     }
 
-    pub fn get(self: *const Self, key: []const u8) ?*KV {
+    pub fn get(self: Self, key: []const u8) ?*KV {
         return self.map.get(key);
     }
 };
@@ -95,7 +95,7 @@ pub const Multimap = struct {
         };
     }
 
-    pub fn deinit(self: *const Self) void {
+    pub fn deinit(self: Self) void {
         var it = self.map.iterator();
         while (it.next()) |entry| {
             self.allocator.free(entry.key);
@@ -111,7 +111,7 @@ pub const Multimap = struct {
         _ = try self.map.put(key, values);
     }
 
-    pub fn get(self: *const Self, key: []const u8) ?[][]const u8 {
+    pub fn get(self: Self, key: []const u8) ?[][]const u8 {
         if (self.map.get(key)) |entry| {
             return entry.value.span();
         } else {
@@ -119,11 +119,11 @@ pub const Multimap = struct {
         }
     }
 
-    pub fn count(self: *const Self) usize {
+    pub fn count(self: Self) usize {
         return self.map.count();
     }
 
-    pub fn iterator(self: *const Self) Iterator {
+    pub fn iterator(self: Self) Iterator {
         return Iterator{
             .map_it = self.map.iterator(),
         };

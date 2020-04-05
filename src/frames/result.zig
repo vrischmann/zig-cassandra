@@ -46,7 +46,7 @@ const ResultFrame = struct {
 
     result: Result,
 
-    pub fn deinit(self: *const Self) void {
+    pub fn deinit(self: Self) void {
         self.result.deinit(self.allocator);
     }
 

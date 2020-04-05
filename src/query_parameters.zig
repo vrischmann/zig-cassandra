@@ -22,7 +22,7 @@ pub const QueryParameters = struct {
     keyspace: ?[]const u8,
     now_in_seconds: ?u32,
 
-    pub fn deinit(self: *const Self) void {
+    pub fn deinit(self: Self) void {
         if (self.values) |values| {
             values.deinit(self.allocator);
         }

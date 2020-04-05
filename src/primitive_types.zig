@@ -270,7 +270,7 @@ pub const SchemaChange = struct {
     target: SchemaChangeTarget,
     options: SchemaChangeOptions,
 
-    pub fn deinit(self: *const Self) void {
+    pub fn deinit(self: Self) void {
         self.options.deinit();
     }
 

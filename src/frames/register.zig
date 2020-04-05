@@ -17,7 +17,7 @@ const RegisterFrame = struct {
 
     event_types: [][]const u8,
 
-    pub fn deinit(self: *const Self) void {
+    pub fn deinit(self: Self) void {
         for (self.event_types) |s| {
             self.allocator.free(s);
         }
