@@ -476,7 +476,6 @@ test "framer: read stringmap" {
     resetAndWrite(fbs_type, &fbs, "\x00\x02\x00\x03foo\x00\x03baz\x00\x03bar\x00\x03baz");
 
     var result = try framer.readStringMap();
-    defer result.deinit();
     testing.expectEqual(@as(usize, 2), result.count());
 
     var it = result.iterator();
@@ -502,7 +501,6 @@ test "framer: read string multimap" {
     resetAndWrite(fbs_type, &fbs, "\x00\x01\x00\x03foo\x00\x02\x00\x03bar\x00\x03baz");
 
     var result = try framer.readStringMultimap();
-    defer result.deinit();
     testing.expectEqual(@as(usize, 1), result.count());
 
     var it = result.iterator();

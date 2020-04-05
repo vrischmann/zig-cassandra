@@ -14,28 +14,18 @@ const testing = @import("../testing.zig");
 const SupportedFrame = struct {
     const Self = @This();
 
-    allocator: *mem.Allocator,
-
     protocol_versions: []ProtocolVersion,
     cql_versions: []CQLVersion,
     compression_algorithms: []CompressionAlgorithm,
 
-    pub fn deinit(self: Self) void {
-        self.allocator.free(self.protocol_versions);
-        self.allocator.free(self.cql_versions);
-        self.allocator.free(self.compression_algorithms);
-    }
-
     pub fn read(allocator: *mem.Allocator, comptime FramerType: type, framer: *FramerType) !Self {
         var frame = Self{
-            .allocator = allocator,
             .protocol_versions = &[_]ProtocolVersion{},
             .cql_versions = &[_]CQLVersion{},
             .compression_algorithms = &[_]CompressionAlgorithm{},
         };
 
         const options = try framer.readStringMultimap();
-        defer options.deinit();
 
         if (options.get("CQL_VERSION")) |values| {
             var list = std.ArrayList(CQLVersion).init(allocator);
@@ -79,17 +69,19 @@ const SupportedFrame = struct {
 };
 
 test "supported frame" {
+    var arena = testing.arenaAllocator();
+    defer arena.deinit();
+
     const data = "\x84\x00\x00\x09\x06\x00\x00\x00\x60\x00\x03\x00\x11\x50\x52\x4f\x54\x4f\x43\x4f\x4c\x5f\x56\x45\x52\x53\x49\x4f\x4e\x53\x00\x03\x00\x04\x33\x2f\x76\x33\x00\x04\x34\x2f\x76\x34\x00\x09\x35\x2f\x76\x35\x2d\x62\x65\x74\x61\x00\x0b\x43\x4f\x4d\x50\x52\x45\x53\x53\x49\x4f\x4e\x00\x02\x00\x06\x73\x6e\x61\x70\x70\x79\x00\x03\x6c\x7a\x34\x00\x0b\x43\x51\x4c\x5f\x56\x45\x52\x53\x49\x4f\x4e\x00\x01\x00\x05\x33\x2e\x34\x2e\x34";
     var fbs = std.io.fixedBufferStream(data);
     var in_stream = fbs.inStream();
 
-    var framer = Framer(@TypeOf(in_stream)).init(testing.allocator, in_stream);
+    var framer = Framer(@TypeOf(in_stream)).init(&arena.allocator, in_stream);
     _ = try framer.readHeader();
 
     checkHeader(Opcode.Supported, data.len, framer.header);
 
-    const frame = try SupportedFrame.read(testing.allocator, @TypeOf(framer), &framer);
-    defer frame.deinit();
+    const frame = try SupportedFrame.read(&arena.allocator, @TypeOf(framer), &framer);
 
     testing.expectEqual(@as(usize, 1), frame.cql_versions.len);
     testing.expectEqual(CQLVersion{ .major = 3, .minor = 4, .patch = 4 }, frame.cql_versions[0]);

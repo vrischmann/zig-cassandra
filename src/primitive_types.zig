@@ -139,13 +139,6 @@ pub const Value = union(ValueTag) {
     Set: []u8,
     NotSet: void,
     Null: void,
-
-    pub fn deinit(self: @This(), allocator: *mem.Allocator) void {
-        switch (self) {
-            Value.Set => |inner_value| allocator.free(inner_value),
-            Value.NotSet, Value.Null => return,
-        }
-    }
 };
 
 pub const NamedValue = struct {
@@ -161,35 +154,11 @@ pub const ValuesType = enum {
 pub const Values = union(ValuesType) {
     Normal: []Value,
     Named: []NamedValue,
-
-    pub fn deinit(self: @This(), allocator: *mem.Allocator) void {
-        switch (self) {
-            .Normal => |nv| {
-                for (nv) |v| {
-                    v.deinit(allocator);
-                }
-                allocator.free(nv);
-            },
-            .Named => |nv| {
-                for (nv) |v| {
-                    allocator.free(v.name);
-                    v.value.deinit(allocator);
-                }
-                allocator.free(nv);
-            },
-        }
-    }
 };
 
 pub const Option = struct {
     id: u16,
     value: Value,
-
-    allocator: *mem.Allocator,
-
-    pub fn deinit(self: @This()) void {
-        self.value.deinit(self.allocator);
-    }
 };
 
 pub const Consistency = packed enum(u16) {
@@ -267,8 +236,6 @@ pub const SchemaChange = struct {
     target: SchemaChangeTarget,
     options: SchemaChangeOptions,
 
-    pub fn deinit(self: Self) void {}
-
     pub fn read(allocator: *mem.Allocator, comptime FramerType: type, framer: *FramerType) !Self {
         var change = Self{
             .type = undefined,
@@ -276,14 +243,8 @@ pub const SchemaChange = struct {
             .options = undefined,
         };
 
-        const type_string = try framer.readString();
-        defer allocator.free(type_string);
-
-        const target_string = try framer.readString();
-        defer allocator.free(target_string);
-
-        change.type = meta.stringToEnum(SchemaChangeType, type_string) orelse return error.InvalidSchemaChangeType;
-        change.target = meta.stringToEnum(SchemaChangeTarget, target_string) orelse return error.InvalidSchemaChangeTarget;
+        change.type = meta.stringToEnum(SchemaChangeType, (try framer.readString())) orelse return error.InvalidSchemaChangeType;
+        change.target = meta.stringToEnum(SchemaChangeTarget, (try framer.readString())) orelse return error.InvalidSchemaChangeTarget;
 
         change.options = SchemaChangeOptions.init();
 
