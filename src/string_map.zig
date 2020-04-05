@@ -19,15 +19,6 @@ pub const Map = struct {
         };
     }
 
-    pub fn deinit(self: Self) void {
-        var it = self.map.iterator();
-        while (it.next()) |entry| {
-            self.allocator.free(entry.key);
-            self.allocator.free(entry.value);
-        }
-        self.map.deinit();
-    }
-
     pub fn put(self: *Self, key: []const u8, value: []const u8) !?KV {
         if (self.map.get(key)) |kv| {
             self.allocator.free(kv.value);
@@ -63,7 +54,6 @@ pub const Multimap = struct {
 
     const MapType = std.StringHashMap(EntryList);
 
-    allocator: *std.mem.Allocator,
     map: MapType,
 
     const KV = struct {
@@ -90,21 +80,8 @@ pub const Multimap = struct {
 
     pub fn init(allocator: *std.mem.Allocator) Self {
         return Self{
-            .allocator = allocator,
             .map = std.StringHashMap(EntryList).init(allocator),
         };
-    }
-
-    pub fn deinit(self: Self) void {
-        var it = self.map.iterator();
-        while (it.next()) |entry| {
-            self.allocator.free(entry.key);
-            for (entry.value.span()) |s| {
-                self.allocator.free(s);
-            }
-            entry.value.deinit();
-        }
-        self.map.deinit();
     }
 
     pub fn put(self: *Self, key: []const u8, values: std.ArrayList([]const u8)) !void {
@@ -131,18 +108,21 @@ pub const Multimap = struct {
 };
 
 test "map" {
-    var m = Map.init(testing.allocator);
-    defer m.deinit();
+    var arena = testing.arenaAllocator();
+    defer arena.deinit();
+    const allocator = &arena.allocator;
+
+    var m = Map.init(allocator);
 
     {
         const dupe = std.mem.dupe;
 
-        const k1 = try dupe(testing.allocator, u8, "foo");
-        const k2 = try dupe(testing.allocator, u8, "bar");
+        const k1 = try dupe(allocator, u8, "foo");
+        const k2 = try dupe(allocator, u8, "bar");
 
-        const v1 = try dupe(testing.allocator, u8, "bar");
-        const v2 = try dupe(testing.allocator, u8, "heo");
-        const v3 = try dupe(testing.allocator, u8, "baz");
+        const v1 = try dupe(allocator, u8, "bar");
+        const v2 = try dupe(allocator, u8, "heo");
+        const v3 = try dupe(allocator, u8, "baz");
 
         _ = try m.put(k1, v1);
         _ = try m.put(k1, v2);
@@ -156,24 +136,27 @@ test "map" {
 }
 
 test "multimap" {
-    var m = Multimap.init(testing.allocator);
-    defer m.deinit();
+    var arena = testing.arenaAllocator();
+    defer arena.deinit();
+    const allocator = &arena.allocator;
+
+    var m = Multimap.init(allocator);
 
     const dupe = std.mem.dupe;
 
     {
-        const k1 = try dupe(testing.allocator, u8, "foo");
-        var v1 = std.ArrayList([]const u8).init(testing.allocator);
-        _ = try v1.append(try dupe(testing.allocator, u8, "bar"));
-        _ = try v1.append(try dupe(testing.allocator, u8, "baz"));
+        const k1 = try dupe(allocator, u8, "foo");
+        var v1 = std.ArrayList([]const u8).init(allocator);
+        _ = try v1.append(try dupe(allocator, u8, "bar"));
+        _ = try v1.append(try dupe(allocator, u8, "baz"));
         _ = try m.put(k1, v1);
     }
 
     {
-        const k2 = try dupe(testing.allocator, u8, "fou");
-        var v2 = std.ArrayList([]const u8).init(testing.allocator);
-        _ = try v2.append(try dupe(testing.allocator, u8, "bar"));
-        _ = try v2.append(try dupe(testing.allocator, u8, "baz"));
+        const k2 = try dupe(allocator, u8, "fou");
+        var v2 = std.ArrayList([]const u8).init(allocator);
+        _ = try v2.append(try dupe(allocator, u8, "bar"));
+        _ = try v2.append(try dupe(allocator, u8, "baz"));
         _ = try m.put(k2, v2);
     }
 
