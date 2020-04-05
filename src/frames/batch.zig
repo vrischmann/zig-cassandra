@@ -13,26 +13,13 @@ const testing = @import("../testing.zig");
 const BatchQuery = struct {
     const Self = @This();
 
-    allocator: *mem.Allocator,
-
     query_string: ?[]const u8,
     query_id: ?[]const u8,
 
     values: Values,
 
-    pub fn deinit(self: Self) void {
-        if (self.query_string) |query| {
-            self.allocator.free(query);
-        }
-        if (self.query_id) |id| {
-            self.allocator.free(id);
-        }
-        self.values.deinit(self.allocator);
-    }
-
     pub fn read(allocator: *mem.Allocator, comptime FramerType: type, framer: *FramerType) !BatchQuery {
         var query = Self{
-            .allocator = allocator,
             .query_string = null,
             .query_id = null,
             .values = undefined,
@@ -67,8 +54,6 @@ const BatchQuery = struct {
 const BatchFrame = struct {
     const Self = @This();
 
-    allocator: *mem.Allocator,
-
     batch_type: BatchType,
     queries: []BatchQuery,
     consistency_level: Consistency,
@@ -83,19 +68,8 @@ const BatchFrame = struct {
     const FlagWithKeyspace: u32 = 0x0080;
     const FlagWithNowInSeconds: u32 = 0x100;
 
-    pub fn deinit(self: Self) void {
-        for (self.queries) |query| {
-            query.deinit();
-        }
-        self.allocator.free(self.queries);
-        if (self.keyspace) |keyspace| {
-            self.allocator.free(keyspace);
-        }
-    }
-
     pub fn read(allocator: *mem.Allocator, comptime FramerType: type, framer: *FramerType) !Self {
         var frame = Self{
-            .allocator = allocator,
             .batch_type = undefined,
             .queries = undefined,
             .consistency_level = undefined,
@@ -166,17 +140,19 @@ const BatchFrame = struct {
 };
 
 test "batch frame: query type string" {
+    var arena = testing.arenaAllocator();
+    defer arena.deinit();
+
     const data = "\x04\x00\x00\xc0\x0d\x00\x00\x00\xcc\x00\x00\x03\x00\x00\x00\x00\x3b\x49\x4e\x53\x45\x52\x54\x20\x49\x4e\x54\x4f\x20\x66\x6f\x6f\x62\x61\x72\x2e\x75\x73\x65\x72\x28\x69\x64\x2c\x20\x6e\x61\x6d\x65\x29\x20\x76\x61\x6c\x75\x65\x73\x28\x75\x75\x69\x64\x28\x29\x2c\x20\x27\x76\x69\x6e\x63\x65\x6e\x74\x27\x29\x00\x00\x00\x00\x00\x00\x3b\x49\x4e\x53\x45\x52\x54\x20\x49\x4e\x54\x4f\x20\x66\x6f\x6f\x62\x61\x72\x2e\x75\x73\x65\x72\x28\x69\x64\x2c\x20\x6e\x61\x6d\x65\x29\x20\x76\x61\x6c\x75\x65\x73\x28\x75\x75\x69\x64\x28\x29\x2c\x20\x27\x76\x69\x6e\x63\x65\x6e\x74\x27\x29\x00\x00\x00\x00\x00\x00\x3b\x49\x4e\x53\x45\x52\x54\x20\x49\x4e\x54\x4f\x20\x66\x6f\x6f\x62\x61\x72\x2e\x75\x73\x65\x72\x28\x69\x64\x2c\x20\x6e\x61\x6d\x65\x29\x20\x76\x61\x6c\x75\x65\x73\x28\x75\x75\x69\x64\x28\x29\x2c\x20\x27\x76\x69\x6e\x63\x65\x6e\x74\x27\x29\x00\x00\x00\x00\x00";
     var fbs = std.io.fixedBufferStream(data);
     var in_stream = fbs.inStream();
 
-    var framer = Framer(@TypeOf(in_stream)).init(testing.allocator, in_stream);
+    var framer = Framer(@TypeOf(in_stream)).init(&arena.allocator, in_stream);
     _ = try framer.readHeader();
 
     checkHeader(Opcode.Batch, data.len, framer.header);
 
-    const frame = try BatchFrame.read(testing.allocator, @TypeOf(framer), &framer);
-    defer frame.deinit();
+    const frame = try BatchFrame.read(&arena.allocator, @TypeOf(framer), &framer);
 
     testing.expectEqual(BatchType.Logged, frame.batch_type);
 
@@ -197,17 +173,19 @@ test "batch frame: query type string" {
 }
 
 test "batch frame: query type prepared" {
+    var arena = testing.arenaAllocator();
+    defer arena.deinit();
+
     const data = "\x04\x00\x01\x00\x0d\x00\x00\x00\xa2\x00\x00\x03\x01\x00\x10\x88\xb7\xd6\x81\x8b\x2d\x8d\x97\xfc\x41\xc1\x34\x7b\x27\xde\x65\x00\x02\x00\x00\x00\x10\x3a\x9a\xab\x41\x68\x24\x4a\xef\x9d\xf5\x72\xc7\x84\xab\xa2\x57\x00\x00\x00\x07\x56\x69\x6e\x63\x65\x6e\x74\x01\x00\x10\x88\xb7\xd6\x81\x8b\x2d\x8d\x97\xfc\x41\xc1\x34\x7b\x27\xde\x65\x00\x02\x00\x00\x00\x10\xed\x54\xb0\x6d\xcc\xb2\x43\x51\x96\x51\x74\x5e\xee\xae\xd2\xfe\x00\x00\x00\x07\x56\x69\x6e\x63\x65\x6e\x74\x01\x00\x10\x88\xb7\xd6\x81\x8b\x2d\x8d\x97\xfc\x41\xc1\x34\x7b\x27\xde\x65\x00\x02\x00\x00\x00\x10\x79\xdf\x8a\x28\x5a\x60\x47\x19\x9b\x42\x84\xea\x69\x10\x1a\xe6\x00\x00\x00\x07\x56\x69\x6e\x63\x65\x6e\x74\x00\x00\x00";
     var fbs = std.io.fixedBufferStream(data);
     var in_stream = fbs.inStream();
 
-    var framer = Framer(@TypeOf(in_stream)).init(testing.allocator, in_stream);
+    var framer = Framer(@TypeOf(in_stream)).init(&arena.allocator, in_stream);
     _ = try framer.readHeader();
 
     checkHeader(Opcode.Batch, data.len, framer.header);
 
-    const frame = try BatchFrame.read(testing.allocator, @TypeOf(framer), &framer);
-    defer frame.deinit();
+    const frame = try BatchFrame.read(&arena.allocator, @TypeOf(framer), &framer);
 
     testing.expectEqual(BatchType.Logged, frame.batch_type);
 
