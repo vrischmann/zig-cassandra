@@ -19,7 +19,7 @@ const GlobalTableSpec = struct {
     table: []const u8,
 };
 
-const NativeType = packed enum(u16) {
+const OptionID = packed enum(u16) {
     Custom = 0x0000,
     Ascii = 0x0001,
     Bigint = 0x0002,
@@ -48,37 +48,26 @@ const NativeType = packed enum(u16) {
     Tuple = 0x0031,
 };
 
-const NativeValue = union(NativeType) {
-    Custom: []const u8,
-    Ascii: void,
-    Bigint: void,
-    Blob: void,
-    Boolean: void,
-    Counter: void,
-    Decimal: void,
-    Double: void,
-    Float: void,
-    Int: void,
-    Timestamp: void,
-    UUID: void,
-    Varchar: void,
-    Varint: void,
-    Timeuuid: void,
-    Inet: void,
-    Date: void,
-    Time: void,
-    Smallint: void,
-    Tinyint: void,
-    Duration: void,
-    List: Option,
-    Map: struct {
-        key_type: Option,
-        value_type: Option,
-    },
-    Set: Option,
-    UDT: void,
-    Tuple: void,
+const Option = struct {
+    id: OptionID,
+    value: ?Value,
 };
+
+fn readOption(comptime FramerType: type, framer: *FramerType) !Option {
+    var option = Option{
+        .id = @intToEnum(OptionID, try framer.readInt(u16)),
+        .value = null,
+    };
+
+    switch (option.id) {
+        .Custom, .List, .Map, .Set, .UDT, .Tuple => {
+            option.value = try framer.readValue();
+        },
+        else => {},
+    }
+
+    return option;
+}
 
 const ColumnSpec = struct {
     const Self = @This();
@@ -86,14 +75,17 @@ const ColumnSpec = struct {
     keyspace: ?[]const u8,
     table: ?[]const u8,
     name: []const u8,
-    native_type: NativeType,
+
+    option: Option,
+
+    // TODO(vincent): Custom types
 
     pub fn read(allocator: *mem.Allocator, comptime FramerType: type, framer: *FramerType, has_global_table_spec: bool) !Self {
         var spec = Self{
             .keyspace = null,
             .table = null,
             .name = undefined,
-            .native_type = undefined,
+            .option = undefined,
         };
 
         if (!has_global_table_spec) {
@@ -101,7 +93,31 @@ const ColumnSpec = struct {
             spec.table = try framer.readString();
         }
         spec.name = try framer.readString();
-        spec.native_type = @intToEnum(NativeType, try framer.readInt(u16));
+        spec.option = try readOption(FramerType, framer);
+
+        switch (spec.option.id) {
+            .Custom => {
+                // TODO(vincent): test this
+                unreachable;
+            },
+            .List, .Set => {
+                // TODO(vincent): test this
+                unreachable;
+            },
+            .Map => {
+                // TODO(vincent): test this
+                unreachable;
+            },
+            .UDT => {
+                // TODO(vincent): test this
+                unreachable;
+            },
+            .Tuple => {
+                // TODO(vincent): test this
+                unreachable;
+            },
+            else => {},
+        }
 
         return spec;
     }
@@ -263,9 +279,14 @@ test "result frame: rows" {
     const metadata = frame.result.Rows.rows_metadata;
     testing.expect(metadata.paging_state == null);
     testing.expect(metadata.new_metadata_id == null);
-
     testing.expectEqualString("foobar", metadata.global_table_spec.?.keyspace);
     testing.expectEqualString("user", metadata.global_table_spec.?.table);
+    testing.expectEqual(@as(usize, 2), metadata.column_specs.len);
+
+    const col1 = metadata.column_specs[0];
+    testing.expectEqualString("id", col1.name);
+    testing.expectEqual(OptionID.UUID, col1.option.id);
+    testing.expectEqual(OptionID.UUID, col1.option.id);
 }
 
 test "result frame: set keyspace" {

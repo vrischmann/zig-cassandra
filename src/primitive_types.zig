@@ -156,11 +156,6 @@ pub const Values = union(ValuesType) {
     Named: []NamedValue,
 };
 
-pub const Option = struct {
-    id: u16,
-    value: Value,
-};
-
 pub const Consistency = packed enum(u16) {
     Any = 0x0000,
     One = 0x0001,
