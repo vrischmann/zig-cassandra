@@ -176,8 +176,18 @@ pub const Values = union(ValuesType) {
                 }
                 allocator.free(nv);
             },
-            else => unreachable,
         }
+    }
+};
+
+pub const Option = struct {
+    id: u16,
+    value: Value,
+
+    allocator: *mem.Allocator,
+
+    pub fn deinit(self: @This()) void {
+        self.value.deinit(self.allocator);
     }
 };
 
