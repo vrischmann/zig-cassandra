@@ -12,7 +12,6 @@ const testing = @import("testing.zig");
 
 test "" {
     _ = @import("frames/startup.zig");
-    _ = @import("frames/auth_response.zig");
     _ = @import("frames/options.zig");
     _ = @import("frames/query.zig");
     _ = @import("frames/prepare.zig");
