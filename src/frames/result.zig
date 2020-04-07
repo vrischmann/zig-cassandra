@@ -14,43 +14,9 @@ const ResultKind = packed enum(u32) {
     SchemaChange = 0x0005,
 };
 
-const GlobalTableSpec = struct {
+pub const GlobalTableSpec = struct {
     keyspace: []const u8,
     table: []const u8,
-};
-
-const OptionID = packed enum(u16) {
-    Custom = 0x0000,
-    Ascii = 0x0001,
-    Bigint = 0x0002,
-    Blob = 0x0003,
-    Boolean = 0x0004,
-    Counter = 0x0005,
-    Decimal = 0x0006,
-    Double = 0x0007,
-    Float = 0x0008,
-    Int = 0x0009,
-    Timestamp = 0x000B,
-    UUID = 0x000C,
-    Varchar = 0x000D,
-    Varint = 0x000E,
-    Timeuuid = 0x000F,
-    Inet = 0x0010,
-    Date = 0x0011,
-    Time = 0x0012,
-    Smallint = 0x0013,
-    Tinyint = 0x0014,
-    Duration = 0x0015,
-    List = 0x0020,
-    Map = 0x0021,
-    Set = 0x0022,
-    UDT = 0x0030,
-    Tuple = 0x0031,
-};
-
-const Option = struct {
-    id: OptionID,
-    value: ?Value,
 };
 
 fn readOption(comptime FramerType: type, framer: *FramerType) !Option {
@@ -69,7 +35,7 @@ fn readOption(comptime FramerType: type, framer: *FramerType) !Option {
     return option;
 }
 
-const ColumnSpec = struct {
+pub const ColumnSpec = struct {
     const Self = @This();
 
     keyspace: ?[]const u8,
@@ -124,7 +90,7 @@ const ColumnSpec = struct {
 };
 
 /// Described in the protocol spec at §4.2.5.2.
-const RowsMetadata = struct {
+pub const RowsMetadata = struct {
     const Self = @This();
 
     paging_state: ?[]const u8,
