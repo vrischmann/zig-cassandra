@@ -182,27 +182,37 @@ const RowsMetadata = struct {
 const Rows = struct {
     const Self = @This();
 
-    rows_metadata: RowsMetadata,
+    metadata: RowsMetadata,
+    data: [][]const u8,
 
     pub fn read(allocator: *mem.Allocator, comptime FramerType: type, framer: *FramerType) !Rows {
         var rows = Self{
-            .rows_metadata = undefined,
+            .metadata = undefined,
+            .data = undefined,
         };
 
-        rows.rows_metadata = try RowsMetadata.read(allocator, FramerType, framer);
+        rows.metadata = try RowsMetadata.read(allocator, FramerType, framer);
 
-        const rows_count = @as(usize, try framer.readInt(u32));
+        var data = std.ArrayList([]const u8).init(allocator);
+        errdefer data.deinit();
 
         // Iterate over rows
+        const rows_count = @as(usize, try framer.readInt(u32));
+
         var i: usize = 0;
         while (i < rows_count) : (i += 1) {
             // Read a single row
             var j: usize = 0;
-            while (j < rows.rows_metadata.column_specs.len) : (j += 1) {
-                const column_data = try framer.readBytes();
-                // TODO(vincent): decode this using the column spec
+            while (j < rows.metadata.column_specs.len) : (j += 1) {
+                const column_spec = rows.metadata.column_specs[j];
+                // TODO(vincent): can this ever be null ?
+                const column_data = (try framer.readBytes()) orelse unreachable;
+
+                _ = try data.append(column_data);
             }
         }
+
+        rows.data = data.toOwnedSlice();
 
         return rows;
     }
@@ -276,7 +286,7 @@ test "result frame: rows" {
     var arena = testing.arenaAllocator();
     defer arena.deinit();
 
-    const data = "\x84\x00\x00\xa7\x08\x00\x00\x00\x89\x00\x00\x00\x02\x00\x00\x00\x01\x00\x00\x00\x02\x00\x06\x66\x6f\x6f\x62\x61\x72\x00\x04\x75\x73\x65\x72\x00\x02\x69\x64\x00\x0c\x00\x04\x6e\x61\x6d\x65\x00\x0d\x00\x00\x00\x03\x00\x00\x00\x10\x70\xb7\xe5\x04\x81\x65\x4e\xdc\x81\x76\xdb\x24\x61\xc7\x74\x3e\x00\x00\x00\x07\x76\x69\x6e\x63\x65\x6e\x74\x00\x00\x00\x10\x4f\xd0\x7c\x5b\x14\x0c\x4d\x0c\xa3\xcf\xfd\xe4\xfe\x46\xa8\xf9\x00\x00\x00\x07\x76\x69\x6e\x63\x65\x6e\x74\x00\x00\x00\x10\x20\x33\x45\x82\xde\xcc\x4b\xee\xb3\x1e\x2f\x6d\xb9\xf2\x7e\x84\x00\x00\x00\x07\x76\x69\x6e\x63\x65\x6e\x74";
+    const data = "\x84\x00\x00\x20\x08\x00\x00\x00\xa2\x00\x00\x00\x02\x00\x00\x00\x01\x00\x00\x00\x03\x00\x06\x66\x6f\x6f\x62\x61\x72\x00\x04\x75\x73\x65\x72\x00\x02\x69\x64\x00\x0c\x00\x03\x61\x67\x65\x00\x14\x00\x04\x6e\x61\x6d\x65\x00\x0d\x00\x00\x00\x03\x00\x00\x00\x10\x35\x94\x43\xf3\xb7\xc4\x47\xb2\x8a\xb4\xe2\x42\x39\x79\x36\xf8\x00\x00\x00\x01\x00\x00\x00\x00\x08\x56\x69\x6e\x63\x65\x6e\x74\x30\x00\x00\x00\x10\xd7\x77\xd5\xd7\x58\xc0\x4d\x2b\x8c\xf9\xa3\x53\xfa\x8e\x6c\x96\x00\x00\x00\x01\x01\x00\x00\x00\x08\x56\x69\x6e\x63\x65\x6e\x74\x31\x00\x00\x00\x10\x94\xa4\x7b\xb2\x8c\xf7\x43\x3d\x97\x6e\x72\x74\xb3\xfd\xd3\x31\x00\x00\x00\x01\x02\x00\x00\x00\x08\x56\x69\x6e\x63\x65\x6e\x74\x32";
     var fbs = std.io.fixedBufferStream(data);
     var in_stream = fbs.inStream();
 
@@ -289,17 +299,26 @@ test "result frame: rows" {
 
     testing.expect(frame.result == .Rows);
 
-    const metadata = frame.result.Rows.rows_metadata;
+    // check metadata
+
+    const metadata = frame.result.Rows.metadata;
     testing.expect(metadata.paging_state == null);
     testing.expect(metadata.new_metadata_id == null);
     testing.expectEqualString("foobar", metadata.global_table_spec.?.keyspace);
     testing.expectEqualString("user", metadata.global_table_spec.?.table);
-    testing.expectEqual(@as(usize, 2), metadata.column_specs.len);
+    testing.expectEqual(@as(usize, 3), metadata.column_specs.len);
 
     const col1 = metadata.column_specs[0];
     testing.expectEqualString("id", col1.name);
     testing.expectEqual(OptionID.UUID, col1.option.id);
-    testing.expectEqual(OptionID.UUID, col1.option.id);
+    const col2 = metadata.column_specs[1];
+    testing.expectEqualString("age", col2.name);
+    testing.expectEqual(OptionID.Tinyint, col2.option.id);
+    const col3 = metadata.column_specs[2];
+    testing.expectEqualString("name", col3.name);
+    testing.expectEqual(OptionID.Varchar, col3.option.id);
+
+    // check data
 }
 
 test "result frame: set keyspace" {
