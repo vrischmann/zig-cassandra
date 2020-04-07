@@ -7,6 +7,7 @@ const ArrayList = std.ArrayList;
 const testing = @import("testing.zig");
 
 test "" {
+    _ = @import("conn.zig");
     _ = @import("frame.zig");
     _ = @import("iterator.zig");
 }
