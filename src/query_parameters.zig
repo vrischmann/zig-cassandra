@@ -4,9 +4,11 @@ const meta = std.meta;
 const net = std.net;
 const ArrayList = std.ArrayList;
 
+usingnamespace @import("primitive_types.zig");
+usingnamespace @import("value.zig");
+
 const Framer = @import("framer.zig").Framer;
 const sm = @import("string_map.zig");
-usingnamespace @import("primitive_types.zig");
 
 pub const QueryParameters = struct {
     const Self = @This();

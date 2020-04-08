@@ -3,6 +3,7 @@ const mem = std.mem;
 const meta = std.meta;
 
 const Framer = @import("../framer.zig").Framer;
+usingnamespace @import("../frames.zig");
 usingnamespace @import("../primitive_types.zig");
 const testing = @import("../testing.zig");
 
@@ -14,142 +15,11 @@ const ResultKind = packed enum(u32) {
     SchemaChange = 0x0005,
 };
 
-pub const GlobalTableSpec = struct {
-    keyspace: []const u8,
-    table: []const u8,
-};
-
-fn readOption(comptime FramerType: type, framer: *FramerType) !Option {
-    var option = Option{
-        .id = @intToEnum(OptionID, try framer.readInt(u16)),
-        .value = null,
-    };
-
-    switch (option.id) {
-        .Custom, .List, .Map, .Set, .UDT, .Tuple => {
-            option.value = try framer.readValue();
-        },
-        else => {},
-    }
-
-    return option;
-}
-
-pub const ColumnSpec = struct {
-    const Self = @This();
-
-    keyspace: ?[]const u8,
-    table: ?[]const u8,
-    name: []const u8,
-
-    option: Option,
-
-    // TODO(vincent): Custom types
-
-    pub fn read(allocator: *mem.Allocator, comptime FramerType: type, framer: *FramerType, has_global_table_spec: bool) !Self {
-        var spec = Self{
-            .keyspace = null,
-            .table = null,
-            .name = undefined,
-            .option = undefined,
-        };
-
-        if (!has_global_table_spec) {
-            spec.keyspace = try framer.readString();
-            spec.table = try framer.readString();
-        }
-        spec.name = try framer.readString();
-        spec.option = try readOption(FramerType, framer);
-
-        switch (spec.option.id) {
-            .Custom => {
-                // TODO(vincent): test this
-                unreachable;
-            },
-            .List, .Set => {
-                // TODO(vincent): test this
-                unreachable;
-            },
-            .Map => {
-                // TODO(vincent): test this
-                unreachable;
-            },
-            .UDT => {
-                // TODO(vincent): test this
-                unreachable;
-            },
-            .Tuple => {
-                // TODO(vincent): test this
-                unreachable;
-            },
-            else => {},
-        }
-
-        return spec;
-    }
-};
-
-/// Described in the protocol spec at §4.2.5.2.
-pub const RowsMetadata = struct {
-    const Self = @This();
-
-    paging_state: ?[]const u8,
-    new_metadata_id: ?[]const u8,
-    global_table_spec: ?GlobalTableSpec,
-    column_specs: []ColumnSpec,
-
-    const FlagGlobalTablesSpec = 0x0001;
-    const FlagHasMorePages = 0x0002;
-    const FlagNoMetadata = 0x0004;
-    const FlagMetadataChanged = 0x0008;
-
-    pub fn read(allocator: *mem.Allocator, comptime FramerType: type, framer: *FramerType) !Self {
-        var metadata = Self{
-            .paging_state = null,
-            .new_metadata_id = null,
-            .global_table_spec = null,
-            .column_specs = undefined,
-        };
-
-        const flags = try framer.readInt(u32);
-        const columns_count = @as(usize, try framer.readInt(u32));
-
-        if (flags & FlagHasMorePages == FlagHasMorePages) {
-            metadata.paging_state = try framer.readBytes();
-        }
-        // Only valid with Protocol v5
-        if (flags & FlagMetadataChanged == FlagMetadataChanged) {
-            metadata.new_metadata_id = try framer.readShortBytes();
-        }
-
-        if (flags & FlagNoMetadata == 0) {
-            if (flags & FlagGlobalTablesSpec == FlagGlobalTablesSpec) {
-                const spec = GlobalTableSpec{
-                    .keyspace = try framer.readString(),
-                    .table = try framer.readString(),
-                };
-                metadata.global_table_spec = spec;
-            }
-
-            var column_specs = std.ArrayList(ColumnSpec).init(allocator);
-            var i: usize = 0;
-            while (i < columns_count) : (i += 1) {
-                const column_spec = try ColumnSpec.read(allocator, FramerType, framer, metadata.global_table_spec != null);
-                _ = try column_specs.append(column_spec);
-            }
-
-            metadata.column_specs = column_specs.toOwnedSlice();
-        }
-
-        return metadata;
-    }
-};
-
 const Rows = struct {
     const Self = @This();
 
     metadata: RowsMetadata,
-    data: [][]const u8,
+    data: []RowData,
 
     pub fn read(allocator: *mem.Allocator, comptime FramerType: type, framer: *FramerType) !Rows {
         var rows = Self{
@@ -159,14 +29,18 @@ const Rows = struct {
 
         rows.metadata = try RowsMetadata.read(allocator, FramerType, framer);
 
-        var data = std.ArrayList([]const u8).init(allocator);
-        errdefer data.deinit();
-
         // Iterate over rows
         const rows_count = @as(usize, try framer.readInt(u32));
 
+        var data = std.ArrayList(RowData).init(allocator);
+        _ = try data.ensureCapacity(rows_count);
+        errdefer data.deinit();
+
         var i: usize = 0;
         while (i < rows_count) : (i += 1) {
+            var row_data = std.ArrayList(ColumnData).init(allocator);
+            errdefer row_data.deinit();
+
             // Read a single row
             var j: usize = 0;
             while (j < rows.metadata.column_specs.len) : (j += 1) {
@@ -174,8 +48,14 @@ const Rows = struct {
                 // TODO(vincent): can this ever be null ?
                 const column_data = (try framer.readBytes()) orelse unreachable;
 
-                _ = try data.append(column_data);
+                _ = try row_data.append(ColumnData{
+                    .data = column_data,
+                });
             }
+
+            _ = try data.append(RowData{
+                .data = row_data.toOwnedSlice(),
+            });
         }
 
         rows.data = data.toOwnedSlice();
@@ -285,6 +165,21 @@ test "result frame: rows" {
     testing.expectEqual(OptionID.Varchar, col3.option.id);
 
     // check data
+
+    const rows = frame.result.Rows;
+    testing.expectEqual(@as(usize, 3), rows.data.len);
+
+    // TODO(vincent): real checks
+
+    std.debug.warn("\n", .{});
+
+    for (rows.data) |row_data| {
+        var j: usize = 0;
+        for (row_data.data) |column_data| {
+            std.debug.warn("column: {} data: {x}\n", .{ metadata.column_specs[j].name, column_data });
+            j += 1;
+        }
+    }
 }
 
 test "result frame: set keyspace" {

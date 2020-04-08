@@ -130,32 +130,6 @@ pub const CompressionAlgorithm = enum {
     }
 };
 
-pub const ValueTag = enum {
-    Set,
-    NotSet,
-    Null,
-};
-pub const Value = union(ValueTag) {
-    Set: []u8,
-    NotSet: void,
-    Null: void,
-};
-
-pub const NamedValue = struct {
-    name: []const u8,
-    value: Value,
-};
-
-pub const ValuesType = enum {
-    Normal,
-    Named,
-};
-
-pub const Values = union(ValuesType) {
-    Normal: []Value,
-    Named: []NamedValue,
-};
-
 pub const Consistency = packed enum(u16) {
     Any = 0x0000,
     One = 0x0001,
@@ -272,40 +246,6 @@ pub const Event = union(EventType) {
     TOPOLOGY_CHANGE: TopologyChange,
     STATUS_CHANGE: StatusChange,
     SCHEMA_CHANGE: SchemaChange,
-};
-
-pub const OptionID = packed enum(u16) {
-    Custom = 0x0000,
-    Ascii = 0x0001,
-    Bigint = 0x0002,
-    Blob = 0x0003,
-    Boolean = 0x0004,
-    Counter = 0x0005,
-    Decimal = 0x0006,
-    Double = 0x0007,
-    Float = 0x0008,
-    Int = 0x0009,
-    Timestamp = 0x000B,
-    UUID = 0x000C,
-    Varchar = 0x000D,
-    Varint = 0x000E,
-    Timeuuid = 0x000F,
-    Inet = 0x0010,
-    Date = 0x0011,
-    Time = 0x0012,
-    Smallint = 0x0013,
-    Tinyint = 0x0014,
-    Duration = 0x0015,
-    List = 0x0020,
-    Map = 0x0021,
-    Set = 0x0022,
-    UDT = 0x0030,
-    Tuple = 0x0031,
-};
-
-pub const Option = struct {
-    id: OptionID,
-    value: ?Value,
 };
 
 test "cql version: fromString" {
