@@ -185,12 +185,12 @@ pub const RowsMetadata = struct {
 
 /// ColumnData is a wrapper around a slice of bytes.
 pub const ColumnData = struct {
-    data: []const u8,
+    slice: []const u8,
 };
 
 /// RowData is a wrapper around a slice of ColumnData.
 pub const RowData = struct {
-    data: []const ColumnData,
+    slice: []const ColumnData,
 };
 
 test "" {

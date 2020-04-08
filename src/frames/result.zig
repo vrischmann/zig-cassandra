@@ -49,12 +49,12 @@ const Rows = struct {
                 const column_data = (try framer.readBytes()) orelse unreachable;
 
                 _ = try row_data.append(ColumnData{
-                    .data = column_data,
+                    .slice = column_data,
                 });
             }
 
             _ = try data.append(RowData{
-                .data = row_data.toOwnedSlice(),
+                .slice = row_data.toOwnedSlice(),
             });
         }
 
@@ -169,17 +169,20 @@ test "result frame: rows" {
     const rows = frame.result.Rows;
     testing.expectEqual(@as(usize, 3), rows.data.len);
 
-    // TODO(vincent): real checks
+    const row1 = rows.data[0].slice;
+    testing.expectEqualSlices(u8, "\x35\x94\x43\xf3\xb7\xc4\x47\xb2\x8a\xb4\xe2\x42\x39\x79\x36\xf8", row1[0].slice);
+    testing.expectEqualSlices(u8, "\x00", row1[1].slice);
+    testing.expectEqualSlices(u8, "\x56\x69\x6e\x63\x65\x6e\x74\x30", row1[2].slice);
 
-    std.debug.warn("\n", .{});
+    const row2 = rows.data[1].slice;
+    testing.expectEqualSlices(u8, "\xd7\x77\xd5\xd7\x58\xc0\x4d\x2b\x8c\xf9\xa3\x53\xfa\x8e\x6c\x96", row2[0].slice);
+    testing.expectEqualSlices(u8, "\x01", row2[1].slice);
+    testing.expectEqualSlices(u8, "\x56\x69\x6e\x63\x65\x6e\x74\x31", row2[2].slice);
 
-    for (rows.data) |row_data| {
-        var j: usize = 0;
-        for (row_data.data) |column_data| {
-            std.debug.warn("column: {} data: {x}\n", .{ metadata.column_specs[j].name, column_data });
-            j += 1;
-        }
-    }
+    const row3 = rows.data[2].slice;
+    testing.expectEqualSlices(u8, "\x94\xa4\x7b\xb2\x8c\xf7\x43\x3d\x97\x6e\x72\x74\xb3\xfd\xd3\x31", row3[0].slice);
+    testing.expectEqualSlices(u8, "\x02", row3[1].slice);
+    testing.expectEqualSlices(u8, "\x56\x69\x6e\x63\x65\x6e\x74\x32", row3[2].slice);
 }
 
 test "result frame: set keyspace" {
