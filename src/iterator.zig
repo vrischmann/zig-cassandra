@@ -69,10 +69,10 @@ test "iterator scan" {
 
     const row_data = &[_]RowData{
         RowData{
-            .data = &[_]ColumnData{
-                ColumnData{ .data = "\x35\x94\x43\xf3\xb7\xc4\x47\xb2\x8a\xb4\xe2\x42\x39\x79\x36\xf8" },
-                ColumnData{ .data = "\x00" },
-                ColumnData{ .data = "\x56\x69\x6e\x63\x65\x6e\x74\x30" },
+            .slice = &[_]ColumnData{
+                ColumnData{ .slice = "\x35\x94\x43\xf3\xb7\xc4\x47\xb2\x8a\xb4\xe2\x42\x39\x79\x36\xf8" },
+                ColumnData{ .slice = "\x00" },
+                ColumnData{ .slice = "\x56\x69\x6e\x63\x65\x6e\x74\x30" },
             },
         },
     };
