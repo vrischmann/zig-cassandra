@@ -30,7 +30,7 @@ const Iterator = struct {
             else => @compileError("Expected a pointer to a tuple or struct, found " ++ @typeName(@TypeOf(args))),
         };
         if (@typeInfo(child) != .Struct) {
-            @compileError("Expected tuple or struct argument, found " ++ @typeName(child));
+            @compileError("Expected tuple or struct argument, found " ++ @typeName(child) ++ " of type " ++ @tagName(@typeInfo(child)));
         }
 
         if (self.pos >= self.rows.len) {
@@ -85,18 +85,20 @@ const Iterator = struct {
 
         const id = column_spec.option.id;
 
+        // TODO(vincent): maybe this can refactored and simplified
+
         switch (Type) {
             u8, i8 => {
                 switch (id) {
-                    .Tinyint => return column_data.slice[0],
+                    .Tinyint => return @intCast(Type, column_data.slice[0]),
                     else => std.debug.panic("CQL type {} can't be read into the type {}", .{ @tagName(id), @typeName(Type) }),
                 }
             },
             u16, i16 => {
                 switch (id) {
-                    .Tinyint => return column_data.slice[0],
-                    .SmallInt => {
-                        var bytes = @ptrCast(*const [2]u8, &column_data.slice[0..2]);
+                    .Tinyint => return @intCast(Type, column_data.slice[0]),
+                    .Smallint => {
+                        var bytes = @ptrCast(*const [2]u8, column_data.slice[0..2]);
                         return mem.readIntBig(Type, bytes);
                     },
                     else => std.debug.panic("CQL type {} can't be read into the type {}", .{ @tagName(id), @typeName(Type) }),
@@ -104,10 +106,9 @@ const Iterator = struct {
             },
             u32, i32 => {
                 switch (id) {
-                    .Tinyint => return column_data.slice[0],
-                    .SmallInt, .Int, .Date => {
-                        comptime const len = (Type.bit_count + 7) / 8;
-                        var bytes = @ptrCast(*const [len]u8, &column_data.slice[0..len]);
+                    .Tinyint => return @intCast(Type, column_data.slice[0]),
+                    .Smallint, .Int, .Date => {
+                        var bytes = @ptrCast(*const [4]u8, column_data.slice[0..4]);
                         return mem.readIntBig(Type, bytes);
                     },
                     else => std.debug.panic("CQL type {} can't be read into the type {}", .{ @tagName(id), @typeName(Type) }),
@@ -115,10 +116,10 @@ const Iterator = struct {
             },
             u64, i64, u128, i128 => {
                 switch (id) {
-                    .Tinyint => return column_data.slice[0],
-                    .SmallInt, .Int, Bigint, .Counter, .Date, .Time, .Timestamp => {
+                    .Tinyint => return @intCast(Type, column_data.slice[0]),
+                    .Smallint, .Int, .Bigint, .Counter, .Date, .Time, .Timestamp => {
                         comptime const len = (Type.bit_count + 7) / 8;
-                        var bytes = @ptrCast(*const [len]u8, &column_data.slice[0..len]);
+                        var bytes = @ptrCast(*const [len]u8, column_data.slice[0..len]);
                         return mem.readIntBig(Type, bytes);
                     },
                     else => std.debug.panic("CQL type {} can't be read into the type {}", .{ @tagName(id), @typeName(Type) }),
@@ -236,35 +237,173 @@ fn getTestRowsMetadata() RowsMetadata {
     };
 }
 
-test "iterator scan" {
-    const metadata = getTestRowsMetadata();
+fn columnSpec(id: OptionID) ColumnSpec {
+    return ColumnSpec{
+        .keyspace = null,
+        .table = null,
+        .name = "name",
+        .option = Option{ .id = id, .value = null },
+    };
+}
+
+fn testIteratorScan(column_specs: []ColumnSpec, data: []const []const u8, row: var) !void {
+    const metadata = RowsMetadata{
+        .paging_state = null,
+        .new_metadata_id = null,
+        .global_table_spec = GlobalTableSpec{
+            .keyspace = "foobar",
+            .table = "user",
+        },
+        .column_specs = column_specs,
+    };
+
+    var column_data = std.ArrayList(ColumnData).init(testing.allocator);
+    defer column_data.deinit();
+    for (data) |d| {
+        _ = try column_data.append(ColumnData{ .slice = d });
+    }
 
     const row_data = &[_]RowData{
-        RowData{
-            .slice = &[_]ColumnData{
-                ColumnData{ .slice = "\x35\x94\x43\xf3\xb7\xc4\x47\xb2\x8a\xb4\xe2\x42\x39\x79\x36\xf8" },
-                ColumnData{ .slice = "\x10" },
-                ColumnData{ .slice = "\x56\x69\x6e\x63\x65\x6e\x74\x30" },
-            },
-        },
+        RowData{ .slice = column_data.span() },
     };
 
     var iterator = Iterator.init(metadata, row_data);
+    var res = try iterator.scan(row);
+    testing.expect(res);
+}
 
+test "iterator scan: u8/i8" {
     const Row = struct {
-        id: [16]u8,
-        age: u8,
-        name: []const u8,
+        u_8: u8,
+        i_8: i8,
+        // u_16: u16,
+        // i_16: i16,
+        // u_32: u32,
+        // i_32: i32,
+        // u_64: u64,
+        // i_64: i64,
+        // u_128: u128,
+        // i_128: i128,
     };
     var row: Row = undefined;
 
-    var res = try iterator.scan(&row);
-    testing.expect(res);
+    const column_specs = &[_]ColumnSpec{
+        columnSpec(.Tinyint),
+        columnSpec(.Tinyint),
+    };
+    const test_data = &[_][]const u8{ "\x20", "\x20" };
 
-    testing.expectEqualSlices(u8, "\x35\x94\x43\xf3\xb7\xc4\x47\xb2\x8a\xb4\xe2\x42\x39\x79\x36\xf8", &row.id);
-    testing.expectEqual(@as(u8, 16), row.age);
-    testing.expectEqualString("Vincent0", row.name);
+    try testIteratorScan(column_specs, test_data, &row);
 
-    res = try iterator.scan(&row);
-    testing.expect(!res);
+    testing.expectEqual(@as(u8, 0x20), row.u_8);
+    testing.expectEqual(@as(i8, 0x20), row.i_8);
 }
+
+test "iterator scan: u16/i16" {
+    const Row = struct {
+        u_16: u16,
+        i_16: i16,
+        // u_32: u32,
+        // i_32: i32,
+        // u_64: u64,
+        // i_64: i64,
+        // u_128: u128,
+        // i_128: i128,
+    };
+    var row: Row = undefined;
+
+    {
+        const column_specs = &[_]ColumnSpec{
+            columnSpec(.Tinyint),
+            columnSpec(.Tinyint),
+        };
+        const test_data = &[_][]const u8{ "\x20", "\x20" };
+
+        try testIteratorScan(column_specs, test_data, &row);
+        testing.expectEqual(@as(u16, 0x20), row.u_16);
+        testing.expectEqual(@as(i16, 0x20), row.i_16);
+    }
+
+    {
+        const column_specs = &[_]ColumnSpec{
+            columnSpec(.Smallint),
+            columnSpec(.Smallint),
+        };
+        const test_data = &[_][]const u8{ "\x20\x20", "\x20\x20" };
+
+        try testIteratorScan(column_specs, test_data, &row);
+        testing.expectEqual(@as(u16, 0x2020), row.u_16);
+        testing.expectEqual(@as(i16, 0x2020), row.i_16);
+    }
+}
+
+test "iterator scan: u32/i32" {
+    const Row = struct {
+        u_32: u32,
+        i_32: i32,
+        // u_64: u64,
+        // i_64: i64,
+        // u_128: u128,
+        // i_128: i128,
+    };
+    var row: Row = undefined;
+
+    {
+        const column_specs = &[_]ColumnSpec{
+            columnSpec(.Tinyint),
+            columnSpec(.Tinyint),
+        };
+        const test_data = &[_][]const u8{ "\x20", "\x20" };
+
+        try testIteratorScan(column_specs, test_data, &row);
+        testing.expectEqual(@as(u32, 0x20), row.u_32);
+        testing.expectEqual(@as(i32, 0x20), row.i_32);
+    }
+
+    {
+        const column_specs = &[_]ColumnSpec{
+            columnSpec(.Smallint),
+            columnSpec(.Smallint),
+        };
+        const test_data = &[_][]const u8{ "\x20\x20", "\x20\x20" };
+
+        try testIteratorScan(column_specs, test_data, &row);
+        testing.expectEqual(@as(u32, 0x2020), row.u_32);
+        testing.expectEqual(@as(i32, 0x2020), row.i_32);
+    }
+
+    {
+        const column_specs = &[_]ColumnSpec{
+            columnSpec(.Int),
+            columnSpec(.Int),
+        };
+        const test_data = &[_][]const u8{ "\x20\x20\x20\x20", "\x20\x20\x20\x20" };
+
+        try testIteratorScan(column_specs, test_data, &row);
+        testing.expectEqual(@as(u32, 0x20202020), row.u_32);
+        testing.expectEqual(@as(i32, 0x20202020), row.i_32);
+    }
+}
+
+// test "iterator scan" {
+//     const metadata = getTestRowsMetadata();
+
+//     var iterator = Iterator.init(metadata, row_data);
+
+//     const Row = struct {
+//         id: [16]u8,
+//         age: u8,
+//         name: []const u8,
+//     };
+//     var row: Row = undefined;
+
+//     var res = try iterator.scan(&row);
+//     testing.expect(res);
+
+//     testing.expectEqualSlices(u8, "\x35\x94\x43\xf3\xb7\xc4\x47\xb2\x8a\xb4\xe2\x42\x39\x79\x36\xf8", &row.id);
+//     testing.expectEqual(@as(u8, 16), row.age);
+//     testing.expectEqualString("Vincent0", row.name);
+
+//     res = try iterator.scan(&row);
+//     testing.expect(!res);
+// }
