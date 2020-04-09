@@ -80,48 +80,70 @@ const Iterator = struct {
         }
     }
 
+    fn readIntFromSlice(comptime Type: type, slice: []const u8) Type {
+        var r: Type = 0;
+
+        switch (Type.bit_count) {
+            8 => {
+                if (slice.len < 1) {
+                    return r;
+                }
+                return @intCast(Type, slice[0]);
+            },
+            else => {
+                comptime const len = @divExact(Type.bit_count, 8);
+
+                var buf = [_]u8{0} ** len;
+                mem.copy(u8, &buf, slice);
+
+                var bytes = @ptrCast(*const [len]u8, &buf);
+
+                return mem.readIntLittle(Type, bytes);
+            },
+        }
+    }
+
     fn readInt(self: *Self, column_spec: ColumnSpec, column_data: ColumnData, comptime Type: type) !Type {
         var r: Type = 0;
 
         const id = column_spec.option.id;
 
-        // TODO(vincent): maybe this can refactored and simplified
-
         switch (Type) {
             u8, i8 => {
                 switch (id) {
-                    .Tinyint => return @intCast(Type, column_data.slice[0]),
+                    .Tinyint => return readIntFromSlice(Type, column_data.slice),
                     else => std.debug.panic("CQL type {} can't be read into the type {}", .{ @tagName(id), @typeName(Type) }),
                 }
             },
             u16, i16 => {
                 switch (id) {
-                    .Tinyint => return @intCast(Type, column_data.slice[0]),
-                    .Smallint => {
-                        var bytes = @ptrCast(*const [2]u8, column_data.slice[0..2]);
-                        return mem.readIntBig(Type, bytes);
-                    },
+                    .Tinyint,
+                    .Smallint,
+                    => return readIntFromSlice(Type, column_data.slice),
                     else => std.debug.panic("CQL type {} can't be read into the type {}", .{ @tagName(id), @typeName(Type) }),
                 }
             },
             u32, i32 => {
                 switch (id) {
-                    .Tinyint => return @intCast(Type, column_data.slice[0]),
-                    .Smallint, .Int, .Date => {
-                        var bytes = @ptrCast(*const [4]u8, column_data.slice[0..4]);
-                        return mem.readIntBig(Type, bytes);
-                    },
+                    .Tinyint,
+                    .Smallint,
+                    .Int,
+                    .Date,
+                    => return readIntFromSlice(Type, column_data.slice),
                     else => std.debug.panic("CQL type {} can't be read into the type {}", .{ @tagName(id), @typeName(Type) }),
                 }
             },
             u64, i64, u128, i128 => {
                 switch (id) {
-                    .Tinyint => return @intCast(Type, column_data.slice[0]),
-                    .Smallint, .Int, .Bigint, .Counter, .Date, .Time, .Timestamp => {
-                        comptime const len = (Type.bit_count + 7) / 8;
-                        var bytes = @ptrCast(*const [len]u8, column_data.slice[0..len]);
-                        return mem.readIntBig(Type, bytes);
-                    },
+                    .Tinyint,
+                    .Smallint,
+                    .Int,
+                    .Bigint,
+                    .Counter,
+                    .Date,
+                    .Time,
+                    .Timestamp,
+                    => return readIntFromSlice(Type, column_data.slice),
                     else => std.debug.panic("CQL type {} can't be read into the type {}", .{ @tagName(id), @typeName(Type) }),
                 }
             },
@@ -276,14 +298,6 @@ test "iterator scan: u8/i8" {
     const Row = struct {
         u_8: u8,
         i_8: i8,
-        // u_16: u16,
-        // i_16: i16,
-        // u_32: u32,
-        // i_32: i32,
-        // u_64: u64,
-        // i_64: i64,
-        // u_128: u128,
-        // i_128: i128,
     };
     var row: Row = undefined;
 
@@ -303,12 +317,6 @@ test "iterator scan: u16/i16" {
     const Row = struct {
         u_16: u16,
         i_16: i16,
-        // u_32: u32,
-        // i_32: i32,
-        // u_64: u64,
-        // i_64: i64,
-        // u_128: u128,
-        // i_128: i128,
     };
     var row: Row = undefined;
 
