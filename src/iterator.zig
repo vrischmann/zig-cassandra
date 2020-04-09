@@ -230,48 +230,6 @@ const Iterator = struct {
     }
 };
 
-fn getTestRowsMetadata() RowsMetadata {
-    const column_specs = &[_]ColumnSpec{
-        ColumnSpec{
-            .keyspace = null,
-            .table = null,
-            .name = "id",
-            .option = Option{
-                .id = .UUID,
-                .value = null,
-            },
-        },
-        ColumnSpec{
-            .keyspace = null,
-            .table = null,
-            .name = "age",
-            .option = Option{
-                .id = .Tinyint,
-                .value = null,
-            },
-        },
-        ColumnSpec{
-            .keyspace = null,
-            .table = null,
-            .name = "name",
-            .option = Option{
-                .id = .Varchar,
-                .value = null,
-            },
-        },
-    };
-
-    return RowsMetadata{
-        .paging_state = null,
-        .new_metadata_id = null,
-        .global_table_spec = GlobalTableSpec{
-            .keyspace = "foobar",
-            .table = "user",
-        },
-        .column_specs = column_specs,
-    };
-}
-
 fn columnSpec(id: OptionID) ColumnSpec {
     return ColumnSpec{
         .keyspace = null,
