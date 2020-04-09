@@ -4,6 +4,8 @@ const mem = std.mem;
 usingnamespace @import("primitive_types.zig");
 usingnamespace @import("frames.zig");
 
+const testing = @import("testing.zig");
+
 const Iterator = struct {
     const Self = @This();
 
@@ -241,7 +243,7 @@ test "iterator scan" {
         RowData{
             .slice = &[_]ColumnData{
                 ColumnData{ .slice = "\x35\x94\x43\xf3\xb7\xc4\x47\xb2\x8a\xb4\xe2\x42\x39\x79\x36\xf8" },
-                ColumnData{ .slice = "\x00" },
+                ColumnData{ .slice = "\x10" },
                 ColumnData{ .slice = "\x56\x69\x6e\x63\x65\x6e\x74\x30" },
             },
         },
@@ -256,10 +258,13 @@ test "iterator scan" {
     };
     var row: Row = undefined;
 
-    row.age = 1;
-    row.name = undefined;
+    var res = try iterator.scan(&row);
+    testing.expect(res);
 
-    while (try iterator.scan(&row)) {
-        std.debug.warn("{x}\n", .{row});
-    }
+    testing.expectEqualSlices(u8, "\x35\x94\x43\xf3\xb7\xc4\x47\xb2\x8a\xb4\xe2\x42\x39\x79\x36\xf8", &row.id);
+    testing.expectEqual(@as(u8, 16), row.age);
+    testing.expectEqualString("Vincent0", row.name);
+
+    res = try iterator.scan(&row);
+    testing.expect(!res);
 }
