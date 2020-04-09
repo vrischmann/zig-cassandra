@@ -202,15 +202,13 @@ const Iterator = struct {
         var slice: Type = undefined;
 
         switch (column_spec.option.id) {
-            .Blob, .UUID, .Timeuuid => {
-                slice = column_data.slice;
+            .Blob, .UUID, .Timeuuid => slice = column_data.slice,
+            .Ascii, .Varchar => slice = column_data.slice,
+            .List, .Set => {
+                // TODO(vincent): implement me
+                unreachable;
             },
-            .Ascii, .Varchar => {
-                slice = column_data.slice;
-            },
-            else => {
-                std.debug.panic("CQL type {} can't be read into the type {}", .{ std.meta.tagName(column_spec.option.id), @typeName(Type) });
-            },
+            else => std.debug.panic("CQL type {} can't be read into the type {}", .{ std.meta.tagName(column_spec.option.id), @typeName(Type) }),
         }
 
         return slice;
@@ -219,16 +217,13 @@ const Iterator = struct {
     fn readArray(self: *Self, column_spec: ColumnSpec, column_data: ColumnData, comptime Type: type) !Type {
         var array: Type = undefined;
 
+        // NOTE(vincent): Arrays are fixed size and the only thing we know has a fixed size with CQL is a UUID.
+        // Maybe in the future we could allow more advanced stuff like reading blobs for arrays of packed struct/union/enum
+        // Maybe we can also allow reading strings and adding zeroes to tne end ?
+
         switch (column_spec.option.id) {
-            .UUID, .Timeuuid => {
-                mem.copy(u8, &array, column_data.slice[0..array.len]);
-            },
-            .List, .Set => {
-                unreachable;
-            },
-            else => {
-                std.debug.panic("CQL type {} can't be read into the type {}", .{ std.meta.tagName(column_spec.option.id), @typeName(Type) });
-            },
+            .UUID, .Timeuuid => mem.copy(u8, &array, column_data.slice[0..array.len]),
+            else => std.debug.panic("CQL type {} can't be read into the type {}", .{ std.meta.tagName(column_spec.option.id), @typeName(Type) }),
         }
 
         return array;
