@@ -362,10 +362,6 @@ test "iterator scan: u32/i32" {
     const Row = struct {
         u_32: u32,
         i_32: i32,
-        // u_64: u64,
-        // i_64: i64,
-        // u_128: u128,
-        // i_128: i128,
     };
     var row: Row = undefined;
 
@@ -410,8 +406,6 @@ test "iterator scan: u64/i64" {
     const Row = struct {
         u_64: u64,
         i_64: i64,
-        // u_128: u128,
-        // i_128: i128,
     };
     var row: Row = undefined;
 
@@ -518,6 +512,32 @@ test "iterator scan: u64/i64" {
         testing.expectEqual(@as(u128, 0x2122232425262728), row.u_128);
         testing.expectEqual(@as(i128, 0x3132333435363738), row.i_128);
     }
+}
+
+test "iterator scan: blobs, uuids, timeuuids" {
+    const Row = struct {
+        blob: []const u8,
+        uuid: [16]u8,
+        tuuid: [16]u8,
+    };
+    var row: Row = undefined;
+
+    const column_specs = &[_]ColumnSpec{
+        columnSpec(.Blob),
+        columnSpec(.UUID),
+        columnSpec(.Timeuuid),
+    };
+    const test_data = &[_][]const u8{
+        "Vincent",
+        "\x02\x9a\x93\xa9\xc3\x27\x4c\x79\xbe\x32\x71\x8e\x22\xb5\x02\x4c",
+        "\xe9\x13\x93\x2e\x7a\xb7\x11\xea\xbf\x1b\x10\xc3\x7b\x6e\x96\xcc",
+    };
+
+    try testIteratorScan(column_specs, test_data, &row);
+
+    testing.expectEqualString("Vincent", row.blob);
+    testing.expectEqualSlices(u8, "\x02\x9a\x93\xa9\xc3\x27\x4c\x79\xbe\x32\x71\x8e\x22\xb5\x02\x4c", &row.uuid);
+    testing.expectEqualSlices(u8, "\xe9\x13\x93\x2e\x7a\xb7\x11\xea\xbf\x1b\x10\xc3\x7b\x6e\x96\xcc", &row.tuuid);
 }
 
 // test "iterator scan" {
