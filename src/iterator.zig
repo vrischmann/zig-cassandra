@@ -458,14 +458,70 @@ test "iterator scan: u64/i64" {
 
     {
         const column_specs = &[_]ColumnSpec{
-            columnSpec(.Int),
-            columnSpec(.Int),
+            columnSpec(.Bigint),
+            columnSpec(.Bigint),
         };
         const test_data = &[_][]const u8{ "\x21\x22\x23\x24\x25\x26\x27\x28", "\x31\x32\x33\x34\x35\x36\x37\x38" };
 
         try testIteratorScan(column_specs, test_data, &row);
         testing.expectEqual(@as(u64, 0x2122232425262728), row.u_64);
         testing.expectEqual(@as(i64, 0x3132333435363738), row.i_64);
+    }
+}
+
+test "iterator scan: u64/i64" {
+    const Row = struct {
+        u_128: u128,
+        i_128: i128,
+    };
+    var row: Row = undefined;
+
+    {
+        const column_specs = &[_]ColumnSpec{
+            columnSpec(.Tinyint),
+            columnSpec(.Tinyint),
+        };
+        const test_data = &[_][]const u8{ "\x20", "\x20" };
+
+        try testIteratorScan(column_specs, test_data, &row);
+        testing.expectEqual(@as(u128, 0x20), row.u_128);
+        testing.expectEqual(@as(i128, 0x20), row.i_128);
+    }
+
+    {
+        const column_specs = &[_]ColumnSpec{
+            columnSpec(.Smallint),
+            columnSpec(.Smallint),
+        };
+        const test_data = &[_][]const u8{ "\x22\x20", "\x23\x20" };
+
+        try testIteratorScan(column_specs, test_data, &row);
+        testing.expectEqual(@as(u128, 0x2220), row.u_128);
+        testing.expectEqual(@as(i128, 0x2320), row.i_128);
+    }
+
+    {
+        const column_specs = &[_]ColumnSpec{
+            columnSpec(.Bigint),
+            columnSpec(.Bigint),
+        };
+        const test_data = &[_][]const u8{ "\x24\x22\x28\x21", "\x22\x29\x23\x22" };
+
+        try testIteratorScan(column_specs, test_data, &row);
+        testing.expectEqual(@as(u128, 0x24222821), row.u_128);
+        testing.expectEqual(@as(i128, 0x22292322), row.i_128);
+    }
+
+    {
+        const column_specs = &[_]ColumnSpec{
+            columnSpec(.Bigint),
+            columnSpec(.Bigint),
+        };
+        const test_data = &[_][]const u8{ "\x21\x22\x23\x24\x25\x26\x27\x28", "\x31\x32\x33\x34\x35\x36\x37\x38" };
+
+        try testIteratorScan(column_specs, test_data, &row);
+        testing.expectEqual(@as(u128, 0x2122232425262728), row.u_128);
+        testing.expectEqual(@as(i128, 0x3132333435363738), row.i_128);
     }
 }
 
