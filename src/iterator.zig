@@ -540,6 +540,28 @@ test "iterator scan: blobs, uuids, timeuuids" {
     testing.expectEqualSlices(u8, "\xe9\x13\x93\x2e\x7a\xb7\x11\xea\xbf\x1b\x10\xc3\x7b\x6e\x96\xcc", &row.tuuid);
 }
 
+test "iterator scan: ascii/varchar" {
+    const Row = struct {
+        ascii: []const u8,
+        varchar: []const u8,
+    };
+    var row: Row = undefined;
+
+    const column_specs = &[_]ColumnSpec{
+        columnSpec(.Ascii),
+        columnSpec(.Varchar),
+    };
+    const test_data = &[_][]const u8{
+        "Ascii vincent",
+        "Varchar vincent",
+    };
+
+    try testIteratorScan(column_specs, test_data, &row);
+
+    testing.expectEqualString("Ascii vincent", row.ascii);
+    testing.expectEqualString("Varchar vincent", row.varchar);
+}
+
 // test "iterator scan" {
 //     const metadata = getTestRowsMetadata();
 
