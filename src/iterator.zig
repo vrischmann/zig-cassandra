@@ -80,6 +80,26 @@ const Iterator = struct {
         }
     }
 
+    fn readFloatFromSlice(comptime Type: type, slice: []const u8) Type {
+        var r: Type = 0.0;
+
+        // Compute the number of bytes needed for the float type we're trying to read.
+        comptime const len = @divExact(Type.bit_count, 8);
+
+        std.debug.assert(slice.len <= len);
+
+        // See readIntFromSlice below for an explanation as to why we do this.
+
+        var buf = [_]u8{0} ** len;
+
+        const padding = len - slice.len;
+        mem.copy(u8, buf[padding..buf.len], slice);
+
+        var bytes = @ptrCast(*const [len]u8, &buf);
+
+        return @ptrCast(*align(1) const Type, bytes).*;
+    }
+
     fn readIntFromSlice(comptime Type: type, slice: []const u8) Type {
         var r: Type = 0;
 
@@ -88,10 +108,7 @@ const Iterator = struct {
         // Compute the number of bytes needed for the integer type we're trying to read.
         comptime const len = @divExact(Type.bit_count, 8);
 
-        // TODO(vincent): do we want to do this or fail ?
-        if (slice.len > len) {
-            return r;
-        }
+        std.debug.assert(slice.len <= len);
 
         // This may be confusing.
         //
@@ -179,20 +196,34 @@ const Iterator = struct {
         switch (Type) {
             f32 => {
                 switch (id) {
-                    .Float => return @ptrCast(*f32, &column_data.slice[0..4]),
+                    .Float => return readFloatFromSlice(f32, column_data.slice),
                     else => std.debug.panic("CQL type {} can't be read into the type {}", .{ @tagName(id), @typeName(Type) }),
                 }
             },
-            f64, f128 => {
+            f64 => {
                 switch (id) {
                     .Float => {
-                        comptime const len = (Type.bits + 7) / 8;
-                        return @ptrCast(*align(1) const Type, &column_data.slice[0..len]);
+                        const f_32 = readFloatFromSlice(f32, column_data.slice);
+                        return @floatCast(Type, f_32);
+                    },
+                    .Double => return readFloatFromSlice(f64, column_data.slice),
+                    else => std.debug.panic("CQL type {} can't be read into the type {}", .{ @tagName(id), @typeName(Type) }),
+                }
+            },
+            f128 => {
+                switch (id) {
+                    .Float => {
+                        const f_32 = readFloatFromSlice(f32, column_data.slice);
+                        return @floatCast(Type, f_32);
+                    },
+                    .Double => {
+                        const f_64 = readFloatFromSlice(f64, column_data.slice);
+                        return @floatCast(Type, f_64);
                     },
                     else => std.debug.panic("CQL type {} can't be read into the type {}", .{ @tagName(id), @typeName(Type) }),
                 }
             },
-            else => @compileError("int type " ++ @typeName(Type) ++ " is invalid"),
+            else => @compileError("float type " ++ @typeName(Type) ++ " is invalid"),
         }
 
         return r;
@@ -469,6 +500,63 @@ test "iterator scan: u64/i64" {
         try testIteratorScan(column_specs, test_data, &row);
         testing.expectEqual(@as(u128, 0x2122232425262728), row.u_128);
         testing.expectEqual(@as(i128, 0x3132333435363738), row.i_128);
+    }
+}
+
+test "iterator scan: f32" {
+    const Row = struct {
+        f_32: f32,
+    };
+    var row: Row = undefined;
+
+    const column_specs = &[_]ColumnSpec{columnSpec(.Float)};
+    const test_data = &[_][]const u8{"\x85\xeb\x01\x40"};
+
+    try testIteratorScan(column_specs, test_data, &row);
+    testing.expectEqual(@as(f32, 2.03), row.f_32);
+}
+
+test "iterator scan: f64" {
+    const Row = struct {
+        f_64: f64,
+    };
+    var row: Row = undefined;
+
+    {
+        const column_specs = &[_]ColumnSpec{columnSpec(.Float)};
+        const test_data = &[_][]const u8{"\x85\xeb\x01\x40"};
+
+        try testIteratorScan(column_specs, test_data, &row);
+        testing.expectInDelta(@as(f64, 2.03), row.f_64, 0.000001);
+    }
+
+    {
+        const column_specs = &[_]ColumnSpec{columnSpec(.Double)};
+        const test_data = &[_][]const u8{"\x05\x51\xf7\x01\x40\x12\xe6\x40"};
+        try testIteratorScan(column_specs, test_data, &row);
+        testing.expectInDelta(@as(f64, 45202.00024), row.f_64, 0.000001);
+    }
+}
+
+test "iterator scan: f128" {
+    const Row = struct {
+        f_128: f128,
+    };
+    var row: Row = undefined;
+
+    {
+        const column_specs = &[_]ColumnSpec{columnSpec(.Float)};
+        const test_data = &[_][]const u8{"\x85\xeb\x01\x40"};
+
+        try testIteratorScan(column_specs, test_data, &row);
+        testing.expectInDelta(@as(f128, 2.03), row.f_128, 0.000001);
+    }
+
+    {
+        const column_specs = &[_]ColumnSpec{columnSpec(.Double)};
+        const test_data = &[_][]const u8{"\x05\x51\xf7\x01\x40\x12\xe6\x40"};
+        try testIteratorScan(column_specs, test_data, &row);
+        testing.expectInDelta(@as(f128, 45202.00024), row.f_128, 0.000001);
     }
 }
 
