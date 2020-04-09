@@ -83,24 +83,42 @@ const Iterator = struct {
     fn readIntFromSlice(comptime Type: type, slice: []const u8) Type {
         var r: Type = 0;
 
-        switch (Type.bit_count) {
-            8 => {
-                if (slice.len < 1) {
-                    return r;
-                }
-                return @intCast(Type, slice[0]);
-            },
-            else => {
-                comptime const len = @divExact(Type.bit_count, 8);
+        // TODO(vincent): should we optimize for u8/i8 ?
 
-                var buf = [_]u8{0} ** len;
-                mem.copy(u8, &buf, slice);
+        // Compute the number of bytes needed for the integer type we're trying to read.
+        comptime const len = @divExact(Type.bit_count, 8);
 
-                var bytes = @ptrCast(*const [len]u8, &buf);
-
-                return mem.readIntLittle(Type, bytes);
-            },
+        // TODO(vincent): do we want to do this or fail ?
+        if (slice.len > len) {
+            return r;
         }
+
+        // This may be confusing.
+        //
+        // This function needs to be able to read a integers from
+        // the slice even if the integer type has more bytes than the slice has.
+        //
+        // For example, if we read a tinyint from Cassandra which is a u8,
+        // we need to be able to read that into a u16/u32/u64/u128.
+        //
+        // To do that we allocate a buffer of how many bytes the integer type has,
+        // then we copy the slice data in it starting from the correct position.
+        //
+        // So for example if we have a u32 and we read a u16, we allocate a 4 byte buffer:
+        //   [0x00, 0x00, 0x00, 0x00]
+        // Then to write at the correct position we compute the padding, in this case 2 bytes.
+        // With that we write the data:
+        //   [0x00, 0x00, 0x21, 0x20]
+        // Now the u32 will have to correct data.
+
+        var buf = [_]u8{0} ** len;
+
+        const padding = len - slice.len;
+        mem.copy(u8, buf[padding..buf.len], slice);
+
+        var bytes = @ptrCast(*const [len]u8, &buf);
+
+        return mem.readIntBig(Type, bytes);
     }
 
     fn readInt(self: *Self, column_spec: ColumnSpec, column_data: ColumnData, comptime Type: type) !Type {
@@ -337,11 +355,11 @@ test "iterator scan: u16/i16" {
             columnSpec(.Smallint),
             columnSpec(.Smallint),
         };
-        const test_data = &[_][]const u8{ "\x20\x20", "\x20\x20" };
+        const test_data = &[_][]const u8{ "\x21\x20", "\x22\x20" };
 
         try testIteratorScan(column_specs, test_data, &row);
-        testing.expectEqual(@as(u16, 0x2020), row.u_16);
-        testing.expectEqual(@as(i16, 0x2020), row.i_16);
+        testing.expectEqual(@as(u16, 0x2120), row.u_16);
+        testing.expectEqual(@as(i16, 0x2220), row.i_16);
     }
 }
 
@@ -373,11 +391,11 @@ test "iterator scan: u32/i32" {
             columnSpec(.Smallint),
             columnSpec(.Smallint),
         };
-        const test_data = &[_][]const u8{ "\x20\x20", "\x20\x20" };
+        const test_data = &[_][]const u8{ "\x21\x20", "\x22\x20" };
 
         try testIteratorScan(column_specs, test_data, &row);
-        testing.expectEqual(@as(u32, 0x2020), row.u_32);
-        testing.expectEqual(@as(i32, 0x2020), row.i_32);
+        testing.expectEqual(@as(u32, 0x2120), row.u_32);
+        testing.expectEqual(@as(i32, 0x2220), row.i_32);
     }
 
     {
@@ -385,11 +403,69 @@ test "iterator scan: u32/i32" {
             columnSpec(.Int),
             columnSpec(.Int),
         };
-        const test_data = &[_][]const u8{ "\x20\x20\x20\x20", "\x20\x20\x20\x20" };
+        const test_data = &[_][]const u8{ "\x21\x22\x23\x24", "\x25\x26\x27\x28" };
 
         try testIteratorScan(column_specs, test_data, &row);
-        testing.expectEqual(@as(u32, 0x20202020), row.u_32);
-        testing.expectEqual(@as(i32, 0x20202020), row.i_32);
+        testing.expectEqual(@as(u32, 0x21222324), row.u_32);
+        testing.expectEqual(@as(i32, 0x25262728), row.i_32);
+    }
+}
+
+test "iterator scan: u64/i64" {
+    const Row = struct {
+        u_64: u64,
+        i_64: i64,
+        // u_128: u128,
+        // i_128: i128,
+    };
+    var row: Row = undefined;
+
+    {
+        const column_specs = &[_]ColumnSpec{
+            columnSpec(.Tinyint),
+            columnSpec(.Tinyint),
+        };
+        const test_data = &[_][]const u8{ "\x20", "\x20" };
+
+        try testIteratorScan(column_specs, test_data, &row);
+        testing.expectEqual(@as(u64, 0x20), row.u_64);
+        testing.expectEqual(@as(i64, 0x20), row.i_64);
+    }
+
+    {
+        const column_specs = &[_]ColumnSpec{
+            columnSpec(.Smallint),
+            columnSpec(.Smallint),
+        };
+        const test_data = &[_][]const u8{ "\x22\x20", "\x23\x20" };
+
+        try testIteratorScan(column_specs, test_data, &row);
+        testing.expectEqual(@as(u64, 0x2220), row.u_64);
+        testing.expectEqual(@as(i64, 0x2320), row.i_64);
+    }
+
+    {
+        const column_specs = &[_]ColumnSpec{
+            columnSpec(.Int),
+            columnSpec(.Int),
+        };
+        const test_data = &[_][]const u8{ "\x24\x22\x28\x21", "\x22\x29\x23\x22" };
+
+        try testIteratorScan(column_specs, test_data, &row);
+        testing.expectEqual(@as(u64, 0x24222821), row.u_64);
+        testing.expectEqual(@as(i64, 0x22292322), row.i_64);
+    }
+
+    {
+        const column_specs = &[_]ColumnSpec{
+            columnSpec(.Int),
+            columnSpec(.Int),
+        };
+        const test_data = &[_][]const u8{ "\x21\x22\x23\x24\x25\x26\x27\x28", "\x31\x32\x33\x34\x35\x36\x37\x38" };
+
+        try testIteratorScan(column_specs, test_data, &row);
+        testing.expectEqual(@as(u64, 0x2122232425262728), row.u_64);
+        testing.expectEqual(@as(i64, 0x3132333435363738), row.i_64);
     }
 }
 
