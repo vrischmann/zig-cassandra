@@ -5,8 +5,11 @@ const os = std.os;
 const net = std.net;
 const ArrayList = std.ArrayList;
 
-const sm = @import("string_map.zig");
 usingnamespace @import("primitive_types.zig");
+usingnamespace @import("value.zig");
+
+const sm = @import("string_map.zig");
+
 const testing = @import("testing.zig");
 
 pub fn Framer(comptime InStreamType: type) type {
