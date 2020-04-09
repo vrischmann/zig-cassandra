@@ -35,6 +35,10 @@ const Iterator = struct {
             return false;
         }
 
+        if (self.metadata.column_specs.len > @typeInfo(child).Struct.fields.len) {
+            return error.NotEnoughFieldsInStruct;
+        }
+
         inline for (@typeInfo(child).Struct.fields) |struct_field, i| {
             const field_type_info = @typeInfo(struct_field.field_type);
             const field_name = struct_field.name;
@@ -53,13 +57,13 @@ const Iterator = struct {
     fn readType(self: *Self, column_spec: ColumnSpec, column_data: ColumnData, comptime Type: type) !Type {
         const type_info = @typeInfo(Type);
 
+        // TODO(vincent): if the struct is packed we could maybe read stuff directly
+        // TODO(vincent): handle packed enum
+        // TODO(vincent): handle union
+
         switch (type_info) {
-            .Array => {
-                return try self.readArray(column_spec, column_data, Type);
-            },
-            .Int => {
-                return try self.readInt(column_spec, column_data, Type);
-            },
+            .Int => return try self.readInt(column_spec, column_data, Type),
+            .Float => return try self.readFloat(column_spec, column_data, Type),
             .Pointer => |pointer| switch (pointer.size) {
                 .One => {
                     return try self.readType(column_spec, column_data, @TypeOf(pointer.child));
@@ -69,12 +73,84 @@ const Iterator = struct {
                 },
                 else => @compileError("invalid pointer size " ++ @tagName(pointer.size)),
             },
+            .Array => return try self.readArray(column_spec, column_data, Type),
             else => @compileError("field type " ++ @typeName(struct_field.field_type) ++ " not handled yet"),
         }
     }
 
     fn readInt(self: *Self, column_spec: ColumnSpec, column_data: ColumnData, comptime Type: type) !Type {
         var r: Type = 0;
+
+        const id = column_spec.option.id;
+
+        switch (Type) {
+            u8, i8 => {
+                switch (id) {
+                    .Tinyint => return column_data.slice[0],
+                    else => std.debug.panic("CQL type {} can't be read into the type {}", .{ @tagName(id), @typeName(Type) }),
+                }
+            },
+            u16, i16 => {
+                switch (id) {
+                    .Tinyint => return column_data.slice[0],
+                    .SmallInt => {
+                        var bytes = @ptrCast(*const [2]u8, &column_data.slice[0..2]);
+                        return mem.readIntBig(Type, bytes);
+                    },
+                    else => std.debug.panic("CQL type {} can't be read into the type {}", .{ @tagName(id), @typeName(Type) }),
+                }
+            },
+            u32, i32 => {
+                switch (id) {
+                    .Tinyint => return column_data.slice[0],
+                    .SmallInt, .Int, .Date => {
+                        comptime const len = (Type.bit_count + 7) / 8;
+                        var bytes = @ptrCast(*const [len]u8, &column_data.slice[0..len]);
+                        return mem.readIntBig(Type, bytes);
+                    },
+                    else => std.debug.panic("CQL type {} can't be read into the type {}", .{ @tagName(id), @typeName(Type) }),
+                }
+            },
+            u64, i64, u128, i128 => {
+                switch (id) {
+                    .Tinyint => return column_data.slice[0],
+                    .SmallInt, .Int, Bigint, .Counter, .Date, .Time, .Timestamp => {
+                        comptime const len = (Type.bit_count + 7) / 8;
+                        var bytes = @ptrCast(*const [len]u8, &column_data.slice[0..len]);
+                        return mem.readIntBig(Type, bytes);
+                    },
+                    else => std.debug.panic("CQL type {} can't be read into the type {}", .{ @tagName(id), @typeName(Type) }),
+                }
+            },
+            else => @compileError("int type " ++ @typeName(Type) ++ " is invalid"),
+        }
+
+        return r;
+    }
+
+    fn readFloat(self: *Self, column_spec: ColumnSpec, column_data: ColumnData, comptime Type: type) !Type {
+        var r: Type = 0.0;
+
+        const id = column_spec.option.id;
+
+        switch (Type) {
+            f32 => {
+                switch (id) {
+                    .Float => return @ptrCast(*f32, &column_data.slice[0..4]),
+                    else => std.debug.panic("CQL type {} can't be read into the type {}", .{ @tagName(id), @typeName(Type) }),
+                }
+            },
+            f64, f128 => {
+                switch (id) {
+                    .Float => {
+                        comptime const len = (Type.bits + 7) / 8;
+                        return @ptrCast(*align(1) const Type, &column_data.slice[0..len]);
+                    },
+                    else => std.debug.panic("CQL type {} can't be read into the type {}", .{ @tagName(id), @typeName(Type) }),
+                }
+            },
+            else => @compileError("int type " ++ @typeName(Type) ++ " is invalid"),
+        }
 
         return r;
     }
@@ -89,7 +165,9 @@ const Iterator = struct {
             .Ascii, .Varchar => {
                 slice = column_data.slice;
             },
-            else => unreachable,
+            else => {
+                std.debug.panic("CQL type {} can't be read into the type {}", .{ std.meta.tagName(column_spec.option.id), @typeName(Type) });
+            },
         }
 
         return slice;
