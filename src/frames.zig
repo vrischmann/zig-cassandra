@@ -48,28 +48,28 @@ pub const OptionID = packed enum(u16) {
 pub const Option = struct {
     id: OptionID,
     value: ?Value,
+
+    pub fn read(comptime FramerType: type, framer: *FramerType) !Option {
+        var option = Option{
+            .id = @intToEnum(OptionID, try framer.readInt(u16)),
+            .value = null,
+        };
+
+        switch (option.id) {
+            .Custom, .List, .Map, .Set, .UDT, .Tuple => {
+                option.value = try framer.readValue();
+            },
+            else => {},
+        }
+
+        return option;
+    }
 };
 
 pub const GlobalTableSpec = struct {
     keyspace: []const u8,
     table: []const u8,
 };
-
-pub fn readOption(comptime FramerType: type, framer: *FramerType) !Option {
-    var option = Option{
-        .id = @intToEnum(OptionID, try framer.readInt(u16)),
-        .value = null,
-    };
-
-    switch (option.id) {
-        .Custom, .List, .Map, .Set, .UDT, .Tuple => {
-            option.value = try framer.readValue();
-        },
-        else => {},
-    }
-
-    return option;
-}
 
 pub const ColumnSpec = struct {
     const Self = @This();
@@ -95,7 +95,7 @@ pub const ColumnSpec = struct {
             spec.table = try framer.readString();
         }
         spec.name = try framer.readString();
-        spec.option = try readOption(FramerType, framer);
+        spec.option = try Option.read(FramerType, framer);
 
         switch (spec.option.id) {
             .Custom => {
