@@ -13,11 +13,6 @@ const sm = @import("string_map.zig");
 const testing = @import("testing.zig");
 
 pub fn Framer(comptime InStreamType: type) type {
-    const BytesType = enum {
-        Short,
-        Long,
-    };
-
     return struct {
         const Self = @This();
 
@@ -47,6 +42,11 @@ pub fn Framer(comptime InStreamType: type) type {
         pub fn readByte(self: *Self) !u8 {
             return self.in_stream.readByte();
         }
+
+        const BytesType = enum {
+            Short,
+            Long,
+        };
 
         /// Read a length-prefixed byte slice from the stream. The length is 2 bytes.
         /// The slice can be null.
