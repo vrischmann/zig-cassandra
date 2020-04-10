@@ -1,6 +1,8 @@
 const std = @import("std");
+const heap = std.heap;
 const mem = std.mem;
 
+const Framer = @import("framer.zig").Framer;
 usingnamespace @import("primitive_types.zig");
 usingnamespace @import("frames.zig");
 
@@ -9,15 +11,19 @@ const testing = @import("testing.zig");
 const Iterator = struct {
     const Self = @This();
 
+    arena: heap.ArenaAllocator,
     metadata: RowsMetadata,
     rows: []const RowData,
 
     pos: usize,
 
-    pub fn deinit(self: Self) void {}
+    pub fn deinit(self: Self) void {
+        self.arena.deinit();
+    }
 
-    pub fn init(metadata: RowsMetadata, rows: []const RowData) Self {
+    pub fn init(allocator: *mem.Allocator, metadata: RowsMetadata, rows: []const RowData) Self {
         return Self{
+            .arena = heap.ArenaAllocator.init(allocator),
             .metadata = metadata,
             .rows = rows,
             .pos = 0,
@@ -236,8 +242,20 @@ const Iterator = struct {
             .Blob, .UUID, .Timeuuid => slice = column_data.slice,
             .Ascii, .Varchar => slice = column_data.slice,
             .List, .Set => {
-                // TODO(vincent): implement me
-                unreachable;
+                std.debug.warn("{}\n", .{column_spec.option.value});
+
+                // TODO(vincent): maybe too heavy weight to have the full streamer here
+                var fbs = std.io.fixedBufferStream(column_data.slice);
+                var framer = Framer(@TypeOf(fbs.inStream())).init(&self.arena.allocator, fbs.inStream());
+
+                const n = try framer.readInt(u32);
+
+                // var res = try self.arena.allocator.alloc(ChildType, @as(usize, n));
+
+                var i: usize = 0;
+                while (i < @as(usize, n)) : (i += 1) {
+                    // _ = try res.append();
+                }
             },
             else => std.debug.panic("CQL type {} can't be read into the type {}", .{ std.meta.tagName(column_spec.option.id), @typeName(Type) }),
         }
@@ -291,7 +309,9 @@ fn testIteratorScan(column_specs: []ColumnSpec, data: []const []const u8, row: v
         RowData{ .slice = column_data.span() },
     };
 
-    var iterator = Iterator.init(metadata, row_data);
+    var iterator = Iterator.init(testing.allocator, metadata, row_data);
+    defer iterator.deinit();
+
     var res = try iterator.scan(row);
     testing.expect(res);
 }
@@ -606,6 +626,25 @@ test "iterator scan: ascii/varchar" {
 
     testing.expectEqualString("Ascii vincent", row.ascii);
     testing.expectEqualString("Varchar vincent", row.varchar);
+}
+
+test "iterator scan: set/list" {
+    const Row = struct {
+        set: []u32,
+        list: []u32,
+    };
+    var row: Row = undefined;
+
+    const column_specs = &[_]ColumnSpec{
+        columnSpec(.Set),
+        columnSpec(.List),
+    };
+    const test_data = &[_][]const u8{
+        "\x00\x00\x00\x02\x00\x00\x00\x04\x21\x22\x23\x24\x00\x00\x00\x04\x31\x32\x33\x34",
+        "\x00\x00\x00\x02\x00\x00\x00\x04\x41\x42\x43\x44\x00\x00\x00\x04\x51\x52\x53\x54",
+    };
+
+    try testIteratorScan(column_specs, test_data, &row);
 }
 
 // test "iterator scan" {
