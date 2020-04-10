@@ -238,26 +238,39 @@ const Iterator = struct {
     fn readSlice(self: *Self, column_spec: ColumnSpec, column_data: ColumnData, comptime Type: type, comptime ChildType: type) !Type {
         var slice: Type = undefined;
 
-        switch (column_spec.option.id) {
-            .Blob, .UUID, .Timeuuid => slice = column_data.slice,
-            .Ascii, .Varchar => slice = column_data.slice,
-            .List, .Set => {
-                std.debug.warn("{}\n", .{column_spec.option.value});
+        const id = column_spec.option.id;
 
-                // TODO(vincent): maybe too heavy weight to have the full streamer here
-                var fbs = std.io.fixedBufferStream(column_data.slice);
-                var framer = Framer(@TypeOf(fbs.inStream())).init(&self.arena.allocator, fbs.inStream());
-
-                const n = try framer.readInt(u32);
-
-                // var res = try self.arena.allocator.alloc(ChildType, @as(usize, n));
-
-                var i: usize = 0;
-                while (i < @as(usize, n)) : (i += 1) {
-                    // _ = try res.append();
+        switch (Type) {
+            []u8,
+            []const u8,
+            => {
+                switch (id) {
+                    .Blob, .UUID, .Timeuuid => slice = column_data.slice,
+                    .Ascii, .Varchar => slice = column_data.slice,
+                    else => std.debug.panic("CQL type {} can't be read into the type {}", .{ std.meta.tagName(column_spec.option.id), @typeName(Type) }),
                 }
             },
-            else => std.debug.panic("CQL type {} can't be read into the type {}", .{ std.meta.tagName(column_spec.option.id), @typeName(Type) }),
+            else => {
+                switch (id) {
+                    .List, .Set => {
+                        std.debug.warn("id: {} {}\n", .{ id, column_spec.option.value });
+
+                        // TODO(vincent): maybe too heavy weight to have the full streamer here
+                        var fbs = std.io.fixedBufferStream(column_data.slice);
+                        var framer = Framer(@TypeOf(fbs.inStream())).init(&self.arena.allocator, fbs.inStream());
+
+                        const n = try framer.readInt(u32);
+
+                        // var res = try self.arena.allocator.alloc(ChildType, @as(usize, n));
+
+                        var i: usize = 0;
+                        while (i < @as(usize, n)) : (i += 1) {
+                            // _ = try res.append();
+                        }
+                    },
+                    else => std.debug.panic("CQL type {} can't be read into the type {}", .{ std.meta.tagName(column_spec.option.id), @typeName(Type) }),
+                }
+            },
         }
 
         return slice;
@@ -285,6 +298,15 @@ fn columnSpec(id: OptionID) ColumnSpec {
         .table = null,
         .name = "name",
         .option = Option{ .id = id, .value = null },
+    };
+}
+
+fn columnSpecWithValue(id: OptionID, value: Value) ColumnSpec {
+    return ColumnSpec{
+        .keyspace = null,
+        .table = null,
+        .name = "name",
+        .option = Option{ .id = id, .value = value },
     };
 }
 
@@ -634,6 +656,8 @@ test "iterator scan: set/list" {
         list: []u32,
     };
     var row: Row = undefined;
+
+    // TODO(vincent): need to test with real values so we can decode properly
 
     const column_specs = &[_]ColumnSpec{
         columnSpec(.Set),
