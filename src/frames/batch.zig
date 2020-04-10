@@ -4,10 +4,9 @@ const meta = std.meta;
 const net = std.net;
 const ArrayList = std.ArrayList;
 
+usingnamespace @import("../frame.zig");
 usingnamespace @import("../primitive_types.zig");
-usingnamespace @import("../value.zig");
 
-const Framer = @import("../framer.zig").Framer;
 const sm = @import("../string_map.zig");
 
 const testing = @import("../testing.zig");
@@ -21,27 +20,27 @@ const BatchQuery = struct {
 
     values: Values,
 
-    pub fn read(allocator: *mem.Allocator, comptime FramerType: type, framer: *FramerType) !BatchQuery {
+    pub fn read(allocator: *mem.Allocator, pr: *PrimitiveReader) !BatchQuery {
         var query = Self{
             .query_string = null,
             .query_id = null,
             .values = undefined,
         };
 
-        const kind = try framer.readByte();
+        const kind = try pr.readByte();
         switch (kind) {
-            0 => query.query_string = try framer.readLongString(),
-            1 => query.query_id = try framer.readShortBytes(),
+            0 => query.query_string = try pr.readLongString(),
+            1 => query.query_id = try pr.readShortBytes(),
             else => return error.InvalidQueryKind,
         }
 
         var list = std.ArrayList(Value).init(allocator);
         errdefer list.deinit();
 
-        const n_values = try framer.readInt(u16);
+        const n_values = try pr.readInt(u16);
         var j: usize = 0;
         while (j < @as(usize, n_values)) : (j += 1) {
-            const value = try framer.readValue();
+            const value = try pr.readValue();
             _ = try list.append(value);
         }
 
@@ -71,7 +70,7 @@ const BatchFrame = struct {
     const FlagWithKeyspace: u32 = 0x0080;
     const FlagWithNowInSeconds: u32 = 0x100;
 
-    pub fn read(allocator: *mem.Allocator, comptime FramerType: type, framer: *FramerType) !Self {
+    pub fn read(allocator: *mem.Allocator, pr: *PrimitiveReader, header: FrameHeader) !Self {
         var frame = Self{
             .batch_type = undefined,
             .queries = undefined,
@@ -82,7 +81,7 @@ const BatchFrame = struct {
             .now_in_seconds = null,
         };
 
-        frame.batch_type = @intToEnum(BatchType, try framer.readByte());
+        frame.batch_type = @intToEnum(BatchType, try pr.readByte());
         frame.queries = &[_]BatchQuery{};
 
         // Read all queries in the batch
@@ -90,10 +89,10 @@ const BatchFrame = struct {
         var queries = std.ArrayList(BatchQuery).init(allocator);
         errdefer queries.deinit();
 
-        const n = try framer.readInt(u16);
+        const n = try pr.readInt(u16);
         var i: usize = 0;
         while (i < @as(usize, n)) : (i += 1) {
-            const query = try BatchQuery.read(allocator, FramerType, framer);
+            const query = try BatchQuery.read(allocator, pr);
             _ = try queries.append(query);
         }
 
@@ -101,41 +100,41 @@ const BatchFrame = struct {
 
         // Read the rest of the frame
 
-        frame.consistency_level = try framer.readConsistency();
+        frame.consistency_level = try pr.readConsistency();
 
         // The size of the flags bitmask depends on the protocol version.
         var flags: u32 = 0;
-        if (framer.header.version == ProtocolVersion.V5) {
-            flags = try framer.readInt(u32);
+        if (header.version == ProtocolVersion.V5) {
+            flags = try pr.readInt(u32);
         } else {
-            flags = try framer.readInt(u8);
+            flags = try pr.readInt(u8);
         }
 
         if (flags & FlagWithSerialConsistency == FlagWithSerialConsistency) {
-            const consistency_level = try framer.readConsistency();
+            const consistency_level = try pr.readConsistency();
             if (consistency_level != .Serial and consistency_level != .LocalSerial) {
                 return error.InvalidSerialConsistency;
             }
             frame.serial_consistency_level = consistency_level;
         }
         if (flags & FlagWithDefaultTimestamp == FlagWithDefaultTimestamp) {
-            const timestamp = try framer.readInt(u64);
+            const timestamp = try pr.readInt(u64);
             if (timestamp < 0) {
                 return error.InvalidNegativeTimestamp;
             }
             frame.timestamp = timestamp;
         }
 
-        if (framer.header.version != ProtocolVersion.V5) {
+        if (header.version != ProtocolVersion.V5) {
             return frame;
         }
 
         // The following flags are only valid with protocol v5
         if (flags & FlagWithKeyspace == FlagWithKeyspace) {
-            frame.keyspace = try framer.readString();
+            frame.keyspace = try pr.readString();
         }
         if (flags & FlagWithNowInSeconds == FlagWithNowInSeconds) {
-            frame.now_in_seconds = try framer.readInt(u32);
+            frame.now_in_seconds = try pr.readInt(u32);
         }
 
         return frame;
@@ -147,15 +146,14 @@ test "batch frame: query type string" {
     defer arena.deinit();
 
     const data = "\x04\x00\x00\xc0\x0d\x00\x00\x00\xcc\x00\x00\x03\x00\x00\x00\x00\x3b\x49\x4e\x53\x45\x52\x54\x20\x49\x4e\x54\x4f\x20\x66\x6f\x6f\x62\x61\x72\x2e\x75\x73\x65\x72\x28\x69\x64\x2c\x20\x6e\x61\x6d\x65\x29\x20\x76\x61\x6c\x75\x65\x73\x28\x75\x75\x69\x64\x28\x29\x2c\x20\x27\x76\x69\x6e\x63\x65\x6e\x74\x27\x29\x00\x00\x00\x00\x00\x00\x3b\x49\x4e\x53\x45\x52\x54\x20\x49\x4e\x54\x4f\x20\x66\x6f\x6f\x62\x61\x72\x2e\x75\x73\x65\x72\x28\x69\x64\x2c\x20\x6e\x61\x6d\x65\x29\x20\x76\x61\x6c\x75\x65\x73\x28\x75\x75\x69\x64\x28\x29\x2c\x20\x27\x76\x69\x6e\x63\x65\x6e\x74\x27\x29\x00\x00\x00\x00\x00\x00\x3b\x49\x4e\x53\x45\x52\x54\x20\x49\x4e\x54\x4f\x20\x66\x6f\x6f\x62\x61\x72\x2e\x75\x73\x65\x72\x28\x69\x64\x2c\x20\x6e\x61\x6d\x65\x29\x20\x76\x61\x6c\x75\x65\x73\x28\x75\x75\x69\x64\x28\x29\x2c\x20\x27\x76\x69\x6e\x63\x65\x6e\x74\x27\x29\x00\x00\x00\x00\x00";
-    var fbs = std.io.fixedBufferStream(data);
-    var in_stream = fbs.inStream();
+    const raw_frame = try testing.readRawFrame(&arena.allocator, data);
 
-    var framer = Framer(@TypeOf(in_stream)).init(&arena.allocator, in_stream);
-    _ = try framer.readHeader();
+    checkHeader(Opcode.Batch, data.len, raw_frame.header);
 
-    checkHeader(Opcode.Batch, data.len, framer.header);
+    var pr = PrimitiveReader.init(&arena.allocator);
+    pr.reset(raw_frame.body);
 
-    const frame = try BatchFrame.read(&arena.allocator, @TypeOf(framer), &framer);
+    const frame = try BatchFrame.read(&arena.allocator, &pr, raw_frame.header);
 
     testing.expectEqual(BatchType.Logged, frame.batch_type);
 
@@ -180,15 +178,14 @@ test "batch frame: query type prepared" {
     defer arena.deinit();
 
     const data = "\x04\x00\x01\x00\x0d\x00\x00\x00\xa2\x00\x00\x03\x01\x00\x10\x88\xb7\xd6\x81\x8b\x2d\x8d\x97\xfc\x41\xc1\x34\x7b\x27\xde\x65\x00\x02\x00\x00\x00\x10\x3a\x9a\xab\x41\x68\x24\x4a\xef\x9d\xf5\x72\xc7\x84\xab\xa2\x57\x00\x00\x00\x07\x56\x69\x6e\x63\x65\x6e\x74\x01\x00\x10\x88\xb7\xd6\x81\x8b\x2d\x8d\x97\xfc\x41\xc1\x34\x7b\x27\xde\x65\x00\x02\x00\x00\x00\x10\xed\x54\xb0\x6d\xcc\xb2\x43\x51\x96\x51\x74\x5e\xee\xae\xd2\xfe\x00\x00\x00\x07\x56\x69\x6e\x63\x65\x6e\x74\x01\x00\x10\x88\xb7\xd6\x81\x8b\x2d\x8d\x97\xfc\x41\xc1\x34\x7b\x27\xde\x65\x00\x02\x00\x00\x00\x10\x79\xdf\x8a\x28\x5a\x60\x47\x19\x9b\x42\x84\xea\x69\x10\x1a\xe6\x00\x00\x00\x07\x56\x69\x6e\x63\x65\x6e\x74\x00\x00\x00";
-    var fbs = std.io.fixedBufferStream(data);
-    var in_stream = fbs.inStream();
+    const raw_frame = try testing.readRawFrame(&arena.allocator, data);
 
-    var framer = Framer(@TypeOf(in_stream)).init(&arena.allocator, in_stream);
-    _ = try framer.readHeader();
+    checkHeader(Opcode.Batch, data.len, raw_frame.header);
 
-    checkHeader(Opcode.Batch, data.len, framer.header);
+    var pr = PrimitiveReader.init(&arena.allocator);
+    pr.reset(raw_frame.body);
 
-    const frame = try BatchFrame.read(&arena.allocator, @TypeOf(framer), &framer);
+    const frame = try BatchFrame.read(&arena.allocator, &pr, raw_frame.header);
 
     testing.expectEqual(BatchType.Logged, frame.batch_type);
 

@@ -3,7 +3,7 @@ const mem = std.mem;
 const meta = std.meta;
 const net = std.net;
 
-const Framer = @import("../framer.zig").Framer;
+usingnamespace @import("../frame.zig");
 usingnamespace @import("../primitive_types.zig");
 const testing = @import("../testing.zig");
 
@@ -15,12 +15,12 @@ const EventFrame = struct {
 
     event: Event,
 
-    pub fn read(allocator: *mem.Allocator, comptime FramerType: type, framer: *FramerType) !Self {
+    pub fn read(allocator: *mem.Allocator, pr: *PrimitiveReader) !Self {
         var frame = Self{
             .event = undefined,
         };
 
-        const event_type = meta.stringToEnum(EventType, try framer.readString()) orelse return error.InvalidEventType;
+        const event_type = meta.stringToEnum(EventType, try pr.readString()) orelse return error.InvalidEventType;
 
         switch (event_type) {
             .TOPOLOGY_CHANGE => {
@@ -29,8 +29,8 @@ const EventFrame = struct {
                     .node_address = undefined,
                 };
 
-                change.type = meta.stringToEnum(TopologyChangeType, try framer.readString()) orelse return error.InvalidTopologyChangeType;
-                change.node_address = try framer.readInet();
+                change.type = meta.stringToEnum(TopologyChangeType, try pr.readString()) orelse return error.InvalidTopologyChangeType;
+                change.node_address = try pr.readInet();
 
                 frame.event = Event{ .TOPOLOGY_CHANGE = change };
 
@@ -42,15 +42,15 @@ const EventFrame = struct {
                     .node_address = undefined,
                 };
 
-                change.type = meta.stringToEnum(StatusChangeType, try framer.readString()) orelse return error.InvalidStatusChangeType;
-                change.node_address = try framer.readInet();
+                change.type = meta.stringToEnum(StatusChangeType, try pr.readString()) orelse return error.InvalidStatusChangeType;
+                change.node_address = try pr.readInet();
 
                 frame.event = Event{ .STATUS_CHANGE = change };
 
                 return frame;
             },
             .SCHEMA_CHANGE => {
-                frame.event = Event{ .SCHEMA_CHANGE = try SchemaChange.read(allocator, FramerType, framer) };
+                frame.event = Event{ .SCHEMA_CHANGE = try SchemaChange.read(allocator, pr) };
 
                 return frame;
             },
@@ -63,15 +63,14 @@ test "event frame: topology change" {
     defer arena.deinit();
 
     const data = "\x84\x00\xff\xff\x0c\x00\x00\x00\x24\x00\x0f\x54\x4f\x50\x4f\x4c\x4f\x47\x59\x5f\x43\x48\x41\x4e\x47\x45\x00\x08\x4e\x45\x57\x5f\x4e\x4f\x44\x45\x04\x7f\x00\x00\x04\x00\x00\x23\x52";
-    var fbs = std.io.fixedBufferStream(data);
-    var in_stream = fbs.inStream();
+    const raw_frame = try testing.readRawFrame(&arena.allocator, data);
 
-    var framer = Framer(@TypeOf(in_stream)).init(&arena.allocator, in_stream);
-    _ = try framer.readHeader();
+    checkHeader(Opcode.Event, data.len, raw_frame.header);
 
-    checkHeader(Opcode.Event, data.len, framer.header);
+    var pr = PrimitiveReader.init(&arena.allocator);
+    pr.reset(raw_frame.body);
 
-    const frame = try EventFrame.read(&arena.allocator, @TypeOf(framer), &framer);
+    const frame = try EventFrame.read(&arena.allocator, &pr);
 
     testing.expect(frame.event == .TOPOLOGY_CHANGE);
 
@@ -87,15 +86,14 @@ test "event frame: status change" {
     defer arena.deinit();
 
     const data = "\x84\x00\xff\xff\x0c\x00\x00\x00\x1e\x00\x0d\x53\x54\x41\x54\x55\x53\x5f\x43\x48\x41\x4e\x47\x45\x00\x04\x44\x4f\x57\x4e\x04\x7f\x00\x00\x01\x00\x00\x23\x52";
-    var fbs = std.io.fixedBufferStream(data);
-    var in_stream = fbs.inStream();
+    const raw_frame = try testing.readRawFrame(&arena.allocator, data);
 
-    var framer = Framer(@TypeOf(in_stream)).init(&arena.allocator, in_stream);
-    _ = try framer.readHeader();
+    checkHeader(Opcode.Event, data.len, raw_frame.header);
 
-    checkHeader(Opcode.Event, data.len, framer.header);
+    var pr = PrimitiveReader.init(&arena.allocator);
+    pr.reset(raw_frame.body);
 
-    const frame = try EventFrame.read(&arena.allocator, @TypeOf(framer), &framer);
+    const frame = try EventFrame.read(&arena.allocator, &pr);
 
     testing.expect(frame.event == .STATUS_CHANGE);
 
@@ -111,15 +109,14 @@ test "event frame: schema change/keyspace" {
     defer arena.deinit();
 
     const data = "\x84\x00\xff\xff\x0c\x00\x00\x00\x2a\x00\x0d\x53\x43\x48\x45\x4d\x41\x5f\x43\x48\x41\x4e\x47\x45\x00\x07\x43\x52\x45\x41\x54\x45\x44\x00\x08\x4b\x45\x59\x53\x50\x41\x43\x45\x00\x06\x62\x61\x72\x62\x61\x7a";
-    var fbs = std.io.fixedBufferStream(data);
-    var in_stream = fbs.inStream();
+    const raw_frame = try testing.readRawFrame(&arena.allocator, data);
 
-    var framer = Framer(@TypeOf(in_stream)).init(&arena.allocator, in_stream);
-    _ = try framer.readHeader();
+    checkHeader(Opcode.Event, data.len, raw_frame.header);
 
-    checkHeader(Opcode.Event, data.len, framer.header);
+    var pr = PrimitiveReader.init(&arena.allocator);
+    pr.reset(raw_frame.body);
 
-    const frame = try EventFrame.read(&arena.allocator, @TypeOf(framer), &framer);
+    const frame = try EventFrame.read(&arena.allocator, &pr);
 
     testing.expect(frame.event == .SCHEMA_CHANGE);
 
@@ -138,15 +135,14 @@ test "event frame: schema change/table" {
     defer arena.deinit();
 
     const data = "\x84\x00\xff\xff\x0c\x00\x00\x00\x2e\x00\x0d\x53\x43\x48\x45\x4d\x41\x5f\x43\x48\x41\x4e\x47\x45\x00\x07\x43\x52\x45\x41\x54\x45\x44\x00\x05\x54\x41\x42\x4c\x45\x00\x06\x66\x6f\x6f\x62\x61\x72\x00\x05\x73\x61\x6c\x75\x74";
-    var fbs = std.io.fixedBufferStream(data);
-    var in_stream = fbs.inStream();
+    const raw_frame = try testing.readRawFrame(&arena.allocator, data);
 
-    var framer = Framer(@TypeOf(in_stream)).init(&arena.allocator, in_stream);
-    _ = try framer.readHeader();
+    checkHeader(Opcode.Event, data.len, raw_frame.header);
 
-    checkHeader(Opcode.Event, data.len, framer.header);
+    var pr = PrimitiveReader.init(&arena.allocator);
+    pr.reset(raw_frame.body);
 
-    const frame = try EventFrame.read(&arena.allocator, @TypeOf(framer), &framer);
+    const frame = try EventFrame.read(&arena.allocator, &pr);
 
     testing.expect(frame.event == .SCHEMA_CHANGE);
 
@@ -165,15 +161,14 @@ test "event frame: schema change/function" {
     defer arena.deinit();
 
     const data = "\x84\x00\xff\xff\x0c\x00\x00\x00\x40\x00\x0d\x53\x43\x48\x45\x4d\x41\x5f\x43\x48\x41\x4e\x47\x45\x00\x07\x43\x52\x45\x41\x54\x45\x44\x00\x08\x46\x55\x4e\x43\x54\x49\x4f\x4e\x00\x06\x66\x6f\x6f\x62\x61\x72\x00\x0d\x73\x6f\x6d\x65\x5f\x66\x75\x6e\x63\x74\x69\x6f\x6e\x00\x01\x00\x03\x69\x6e\x74";
-    var fbs = std.io.fixedBufferStream(data);
-    var in_stream = fbs.inStream();
+    const raw_frame = try testing.readRawFrame(&arena.allocator, data);
 
-    var framer = Framer(@TypeOf(in_stream)).init(&arena.allocator, in_stream);
-    _ = try framer.readHeader();
+    checkHeader(Opcode.Event, data.len, raw_frame.header);
 
-    checkHeader(Opcode.Event, data.len, framer.header);
+    var pr = PrimitiveReader.init(&arena.allocator);
+    pr.reset(raw_frame.body);
 
-    const frame = try EventFrame.read(&arena.allocator, @TypeOf(framer), &framer);
+    const frame = try EventFrame.read(&arena.allocator, &pr);
 
     testing.expect(frame.event == .SCHEMA_CHANGE);
 

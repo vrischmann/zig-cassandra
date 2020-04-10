@@ -4,7 +4,7 @@ const meta = std.meta;
 const net = std.net;
 const ArrayList = std.ArrayList;
 
-const Framer = @import("../framer.zig").Framer;
+usingnamespace @import("../frame.zig");
 usingnamespace @import("../primitive_types.zig");
 usingnamespace @import("../query_parameters.zig");
 const testing = @import("../testing.zig");
@@ -18,10 +18,10 @@ const QueryFrame = struct {
     query: []const u8,
     query_parameters: QueryParameters,
 
-    pub fn read(allocator: *mem.Allocator, comptime FramerType: type, framer: *FramerType) !Self {
+    pub fn read(allocator: *mem.Allocator, header: FrameHeader, pr: *PrimitiveReader) !Self {
         return Self{
-            .query = try framer.readLongString(),
-            .query_parameters = try QueryParameters.read(allocator, FramerType, framer),
+            .query = try pr.readLongString(),
+            .query_parameters = try QueryParameters.read(allocator, header, pr),
         };
     }
 };
@@ -31,15 +31,14 @@ test "query frame: no values, no paging state" {
     defer arena.deinit();
 
     const data = "\x04\x00\x00\x08\x07\x00\x00\x00\x30\x00\x00\x00\x1b\x53\x45\x4c\x45\x43\x54\x20\x2a\x20\x46\x52\x4f\x4d\x20\x66\x6f\x6f\x62\x61\x72\x2e\x75\x73\x65\x72\x20\x3b\x00\x01\x34\x00\x00\x00\x64\x00\x08\x00\x05\xa2\x2c\xf0\x57\x3e\x3f";
-    var fbs = std.io.fixedBufferStream(data);
-    var in_stream = fbs.inStream();
+    const raw_frame = try testing.readRawFrame(&arena.allocator, data);
 
-    var framer = Framer(@TypeOf(in_stream)).init(&arena.allocator, in_stream);
-    _ = try framer.readHeader();
+    checkHeader(Opcode.Query, data.len, raw_frame.header);
 
-    checkHeader(Opcode.Query, data.len, framer.header);
+    var pr = PrimitiveReader.init(&arena.allocator);
+    pr.reset(raw_frame.body);
 
-    const frame = try QueryFrame.read(&arena.allocator, @TypeOf(framer), &framer);
+    const frame = try QueryFrame.read(&arena.allocator, raw_frame.header, &pr);
 
     testing.expectEqualString("SELECT * FROM foobar.user ;", frame.query);
     testing.expectEqual(Consistency.One, frame.query_parameters.consistency_level);

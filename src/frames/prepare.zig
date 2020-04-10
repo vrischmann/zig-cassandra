@@ -3,7 +3,7 @@ const mem = std.mem;
 const meta = std.meta;
 const net = std.net;
 
-const Framer = @import("../framer.zig").Framer;
+usingnamespace @import("../frame.zig");
 usingnamespace @import("../primitive_types.zig");
 const testing = @import("../testing.zig");
 
@@ -18,21 +18,21 @@ const PrepareFrame = struct {
 
     const FlagWithKeyspace = 0x01;
 
-    pub fn read(allocator: *mem.Allocator, comptime FramerType: type, framer: *FramerType) !Self {
+    pub fn read(allocator: *mem.Allocator, header: FrameHeader, pr: *PrimitiveReader) !Self {
         var frame = Self{
             .query = undefined,
             .keyspace = null,
         };
 
-        frame.query = try framer.readLongString();
+        frame.query = try pr.readLongString();
 
-        if (framer.header.version != ProtocolVersion.V5) {
+        if (header.version != ProtocolVersion.V5) {
             return frame;
         }
 
-        const flags = try framer.readInt(u32);
+        const flags = try pr.readInt(u32);
         if (flags & FlagWithKeyspace == FlagWithKeyspace) {
-            frame.keyspace = try framer.readString();
+            frame.keyspace = try pr.readString();
         }
 
         return frame;
@@ -44,15 +44,14 @@ test "prepare frame" {
     defer arena.deinit();
 
     const data = "\x04\x00\x00\xc0\x09\x00\x00\x00\x32\x00\x00\x00\x2e\x53\x45\x4c\x45\x43\x54\x20\x61\x67\x65\x2c\x20\x6e\x61\x6d\x65\x20\x66\x72\x6f\x6d\x20\x66\x6f\x6f\x62\x61\x72\x2e\x75\x73\x65\x72\x20\x77\x68\x65\x72\x65\x20\x69\x64\x20\x3d\x20\x3f";
-    var fbs = std.io.fixedBufferStream(data);
-    var in_stream = fbs.inStream();
+    const raw_frame = try testing.readRawFrame(&arena.allocator, data);
 
-    var framer = Framer(@TypeOf(in_stream)).init(&arena.allocator, in_stream);
-    _ = try framer.readHeader();
+    checkHeader(Opcode.Prepare, data.len, raw_frame.header);
 
-    checkHeader(Opcode.Prepare, data.len, framer.header);
+    var pr = PrimitiveReader.init(&arena.allocator);
+    pr.reset(raw_frame.body);
 
-    const frame = try PrepareFrame.read(&arena.allocator, @TypeOf(framer), &framer);
+    const frame = try PrepareFrame.read(&arena.allocator, raw_frame.header, &pr);
 
     testing.expectEqualString("SELECT age, name from foobar.user where id = ?", frame.query);
     testing.expect(frame.keyspace == null);
