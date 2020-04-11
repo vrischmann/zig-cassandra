@@ -3,7 +3,7 @@ const mem = std.mem;
 const meta = std.meta;
 const net = std.net;
 
-const Framer = @import("../framer.zig").Framer;
+usingnamespace @import("../frame.zig");
 usingnamespace @import("../primitive_types.zig");
 const testing = @import("../testing.zig");
 
@@ -13,9 +13,9 @@ const testing = @import("../testing.zig");
 const RegisterFrame = struct {
     event_types: [][]const u8,
 
-    pub fn read(allocator: *mem.Allocator, comptime FramerType: type, framer: *FramerType) !RegisterFrame {
+    pub fn read(allocator: *mem.Allocator, pr: *PrimitiveReader) !RegisterFrame {
         return RegisterFrame{
-            .event_types = (try framer.readStringList()).toOwnedSlice(),
+            .event_types = (try pr.readStringList()).toOwnedSlice(),
         };
     }
 };
@@ -25,15 +25,14 @@ test "register frame" {
     defer arena.deinit();
 
     const data = "\x04\x00\x00\xc0\x0b\x00\x00\x00\x31\x00\x03\x00\x0f\x54\x4f\x50\x4f\x4c\x4f\x47\x59\x5f\x43\x48\x41\x4e\x47\x45\x00\x0d\x53\x54\x41\x54\x55\x53\x5f\x43\x48\x41\x4e\x47\x45\x00\x0d\x53\x43\x48\x45\x4d\x41\x5f\x43\x48\x41\x4e\x47\x45";
-    var fbs = std.io.fixedBufferStream(data);
-    var in_stream = fbs.inStream();
+    const raw_frame = try testing.readRawFrame(&arena.allocator, data);
 
-    var framer = Framer(@TypeOf(in_stream)).init(&arena.allocator, in_stream);
-    _ = try framer.readHeader();
+    checkHeader(Opcode.Register, data.len, raw_frame.header);
 
-    checkHeader(Opcode.Register, data.len, framer.header);
+    var pr = PrimitiveReader.init(&arena.allocator);
+    pr.reset(raw_frame.body);
 
-    const frame = try RegisterFrame.read(&arena.allocator, @TypeOf(framer), &framer);
+    const frame = try RegisterFrame.read(&arena.allocator, &pr);
 
     testing.expectEqual(@as(usize, 3), frame.event_types.len);
     testing.expectEqualString("TOPOLOGY_CHANGE", frame.event_types[0]);

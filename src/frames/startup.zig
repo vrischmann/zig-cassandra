@@ -2,7 +2,7 @@ const std = @import("std");
 const mem = std.mem;
 const meta = std.meta;
 
-const Framer = @import("../framer.zig").Framer;
+usingnamespace @import("../frame.zig");
 usingnamespace @import("../primitive_types.zig");
 const testing = @import("../testing.zig");
 
@@ -15,13 +15,13 @@ const StartupFrame = struct {
     cql_version: []const u8,
     compression: ?CompressionAlgorithm,
 
-    pub fn read(allocator: *mem.Allocator, comptime FramerType: type, framer: *FramerType) !Self {
+    pub fn read(allocator: *mem.Allocator, pr: *PrimitiveReader) !Self {
         var frame = Self{
             .cql_version = undefined,
             .compression = null,
         };
 
-        const map = try framer.readStringMap();
+        const map = try pr.readStringMap();
 
         // CQL_VERSION is mandatory and the only version supported is 3.0.0 right now.
         if (map.get("CQL_VERSION")) |version| {
@@ -53,15 +53,14 @@ test "startup frame" {
 
     // from cqlsh exported via Wireshark
     const data = "\x04\x00\x00\x00\x01\x00\x00\x00\x16\x00\x01\x00\x0b\x43\x51\x4c\x5f\x56\x45\x52\x53\x49\x4f\x4e\x00\x05\x33\x2e\x30\x2e\x30";
-    var fbs = std.io.fixedBufferStream(data);
-    var in_stream = fbs.inStream();
+    const raw_frame = try testing.readRawFrame(&arena.allocator, data);
 
-    var framer = Framer(@TypeOf(in_stream)).init(&arena.allocator, in_stream);
-    _ = try framer.readHeader();
+    checkHeader(Opcode.Startup, data.len, raw_frame.header);
 
-    checkHeader(Opcode.Startup, data.len, framer.header);
+    var pr = PrimitiveReader.init(&arena.allocator);
+    pr.reset(raw_frame.body);
 
-    const frame = try StartupFrame.read(&arena.allocator, @TypeOf(framer), &framer);
+    const frame = try StartupFrame.read(&arena.allocator, &pr);
 
     // TODO(vincent): checks
 }

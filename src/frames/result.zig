@@ -2,8 +2,7 @@ const std = @import("std");
 const mem = std.mem;
 const meta = std.meta;
 
-const Framer = @import("../framer.zig").Framer;
-usingnamespace @import("../frames.zig");
+usingnamespace @import("../frame.zig");
 usingnamespace @import("../primitive_types.zig");
 const testing = @import("../testing.zig");
 
@@ -21,16 +20,16 @@ const Rows = struct {
     metadata: RowsMetadata,
     data: []RowData,
 
-    pub fn read(allocator: *mem.Allocator, comptime FramerType: type, framer: *FramerType) !Rows {
+    pub fn read(allocator: *mem.Allocator, pr: *PrimitiveReader) !Rows {
         var rows = Self{
             .metadata = undefined,
             .data = undefined,
         };
 
-        rows.metadata = try RowsMetadata.read(allocator, FramerType, framer);
+        rows.metadata = try RowsMetadata.read(allocator, pr);
 
         // Iterate over rows
-        const rows_count = @as(usize, try framer.readInt(u32));
+        const rows_count = @as(usize, try pr.readInt(u32));
 
         var data = std.ArrayList(RowData).init(allocator);
         _ = try data.ensureCapacity(rows_count);
@@ -46,7 +45,7 @@ const Rows = struct {
             while (j < rows.metadata.column_specs.len) : (j += 1) {
                 const column_spec = rows.metadata.column_specs[j];
                 // TODO(vincent): can this ever be null ?
-                const column_data = (try framer.readBytes()) orelse unreachable;
+                const column_data = (try pr.readBytes()) orelse unreachable;
 
                 _ = try row_data.append(ColumnData{
                     .slice = column_data,
@@ -82,26 +81,26 @@ const ResultFrame = struct {
 
     result: Result,
 
-    pub fn read(allocator: *mem.Allocator, comptime FramerType: type, framer: *FramerType) !ResultFrame {
+    pub fn read(allocator: *mem.Allocator, pr: *PrimitiveReader) !ResultFrame {
         var frame = Self{
             .result = undefined,
         };
 
-        const kind = @intToEnum(ResultKind, try framer.readInt(u32));
+        const kind = @intToEnum(ResultKind, try pr.readInt(u32));
 
         switch (kind) {
             .Void => frame.result = Result{ .Void = .{} },
             .Rows => {
-                const rows = try Rows.read(allocator, FramerType, framer);
+                const rows = try Rows.read(allocator, pr);
                 frame.result = Result{ .Rows = rows };
             },
             .SetKeyspace => {
-                const keyspace = try framer.readString();
+                const keyspace = try pr.readString();
                 frame.result = Result{ .SetKeyspace = keyspace };
             },
             .Prepared => unreachable,
             .SchemaChange => {
-                const schema_change = try SchemaChange.read(allocator, FramerType, framer);
+                const schema_change = try SchemaChange.read(allocator, pr);
                 frame.result = Result{ .SchemaChange = schema_change };
             },
         }
@@ -115,15 +114,14 @@ test "result frame: void" {
     defer arena.deinit();
 
     const data = "\x84\x00\x00\x9d\x08\x00\x00\x00\x04\x00\x00\x00\x01";
-    var fbs = std.io.fixedBufferStream(data);
-    var in_stream = fbs.inStream();
+    const raw_frame = try testing.readRawFrame(&arena.allocator, data);
 
-    var framer = Framer(@TypeOf(in_stream)).init(&arena.allocator, in_stream);
-    _ = try framer.readHeader();
+    checkHeader(Opcode.Result, data.len, raw_frame.header);
 
-    checkHeader(Opcode.Result, data.len, framer.header);
+    var pr = PrimitiveReader.init(&arena.allocator);
+    pr.reset(raw_frame.body);
 
-    const frame = try ResultFrame.read(&arena.allocator, @TypeOf(framer), &framer);
+    const frame = try ResultFrame.read(&arena.allocator, &pr);
 
     testing.expect(frame.result == .Void);
 }
@@ -133,15 +131,14 @@ test "result frame: rows" {
     defer arena.deinit();
 
     const data = "\x84\x00\x00\x20\x08\x00\x00\x00\xa2\x00\x00\x00\x02\x00\x00\x00\x01\x00\x00\x00\x03\x00\x06\x66\x6f\x6f\x62\x61\x72\x00\x04\x75\x73\x65\x72\x00\x02\x69\x64\x00\x0c\x00\x03\x61\x67\x65\x00\x14\x00\x04\x6e\x61\x6d\x65\x00\x0d\x00\x00\x00\x03\x00\x00\x00\x10\x35\x94\x43\xf3\xb7\xc4\x47\xb2\x8a\xb4\xe2\x42\x39\x79\x36\xf8\x00\x00\x00\x01\x00\x00\x00\x00\x08\x56\x69\x6e\x63\x65\x6e\x74\x30\x00\x00\x00\x10\xd7\x77\xd5\xd7\x58\xc0\x4d\x2b\x8c\xf9\xa3\x53\xfa\x8e\x6c\x96\x00\x00\x00\x01\x01\x00\x00\x00\x08\x56\x69\x6e\x63\x65\x6e\x74\x31\x00\x00\x00\x10\x94\xa4\x7b\xb2\x8c\xf7\x43\x3d\x97\x6e\x72\x74\xb3\xfd\xd3\x31\x00\x00\x00\x01\x02\x00\x00\x00\x08\x56\x69\x6e\x63\x65\x6e\x74\x32";
-    var fbs = std.io.fixedBufferStream(data);
-    var in_stream = fbs.inStream();
+    const raw_frame = try testing.readRawFrame(&arena.allocator, data);
 
-    var framer = Framer(@TypeOf(in_stream)).init(&arena.allocator, in_stream);
-    _ = try framer.readHeader();
+    checkHeader(Opcode.Result, data.len, raw_frame.header);
 
-    checkHeader(Opcode.Result, data.len, framer.header);
+    var pr = PrimitiveReader.init(&arena.allocator);
+    pr.reset(raw_frame.body);
 
-    const frame = try ResultFrame.read(&arena.allocator, @TypeOf(framer), &framer);
+    const frame = try ResultFrame.read(&arena.allocator, &pr);
 
     testing.expect(frame.result == .Rows);
 
@@ -190,15 +187,14 @@ test "result frame: set keyspace" {
     defer arena.deinit();
 
     const data = "\x84\x00\x00\x77\x08\x00\x00\x00\x0c\x00\x00\x00\x03\x00\x06\x66\x6f\x6f\x62\x61\x72";
-    var fbs = std.io.fixedBufferStream(data);
-    var in_stream = fbs.inStream();
+    const raw_frame = try testing.readRawFrame(&arena.allocator, data);
 
-    var framer = Framer(@TypeOf(in_stream)).init(&arena.allocator, in_stream);
-    _ = try framer.readHeader();
+    checkHeader(Opcode.Result, data.len, raw_frame.header);
 
-    checkHeader(Opcode.Result, data.len, framer.header);
+    var pr = PrimitiveReader.init(&arena.allocator);
+    pr.reset(raw_frame.body);
 
-    const frame = try ResultFrame.read(&arena.allocator, @TypeOf(framer), &framer);
+    const frame = try ResultFrame.read(&arena.allocator, &pr);
 
     testing.expect(frame.result == .SetKeyspace);
     testing.expectEqualString("foobar", frame.result.SetKeyspace);

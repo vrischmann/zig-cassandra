@@ -4,10 +4,9 @@ const meta = std.meta;
 const net = std.net;
 const ArrayList = std.ArrayList;
 
+usingnamespace @import("frame.zig");
 usingnamespace @import("primitive_types.zig");
-usingnamespace @import("value.zig");
 
-const Framer = @import("framer.zig").Framer;
 const sm = @import("string_map.zig");
 
 pub const QueryParameters = struct {
@@ -32,7 +31,7 @@ pub const QueryParameters = struct {
     const FlagWithKeyspace: u32 = 0x0080;
     const FlagWithNowInSeconds: u32 = 0x100;
 
-    pub fn read(allocator: *mem.Allocator, comptime FramerType: type, framer: *FramerType) !QueryParameters {
+    pub fn read(allocator: *mem.Allocator, header: FrameHeader, pr: *PrimitiveReader) !QueryParameters {
         var params = QueryParameters{
             .consistency_level = undefined,
             .values = null,
@@ -44,20 +43,20 @@ pub const QueryParameters = struct {
             .now_in_seconds = null,
         };
 
-        params.consistency_level = try framer.readConsistency();
+        params.consistency_level = try pr.readConsistency();
 
         // The remaining data in the frame depends on the flags
 
         // The size of the flags bitmask depends on the protocol version.
         var flags: u32 = 0;
-        if (framer.header.version == ProtocolVersion.V5) {
-            flags = try framer.readInt(u32);
+        if (header.version == ProtocolVersion.V5) {
+            flags = try pr.readInt(u32);
         } else {
-            flags = try framer.readInt(u8);
+            flags = try pr.readInt(u8);
         }
 
         if (flags & FlagWithValues == FlagWithValues) {
-            const n = try framer.readInt(u16);
+            const n = try pr.readInt(u16);
 
             if (flags & FlagWithNamedValues == FlagWithNamedValues) {
                 var list = std.ArrayList(NamedValue).init(allocator);
@@ -66,8 +65,8 @@ pub const QueryParameters = struct {
                 var i: usize = 0;
                 while (i < @as(usize, n)) : (i += 1) {
                     const nm = NamedValue{
-                        .name = try framer.readString(),
-                        .value = try framer.readValue(),
+                        .name = try pr.readString(),
+                        .value = try pr.readValue(),
                     };
                     _ = try list.append(nm);
                 }
@@ -79,7 +78,7 @@ pub const QueryParameters = struct {
 
                 var i: usize = 0;
                 while (i < @as(usize, n)) : (i += 1) {
-                    const value = try framer.readValue();
+                    const value = try pr.readValue();
                     _ = try list.append(value);
                 }
 
@@ -90,36 +89,36 @@ pub const QueryParameters = struct {
             // Nothing to do
         }
         if (flags & FlagWithPageSize == FlagWithPageSize) {
-            params.page_size = try framer.readInt(u32);
+            params.page_size = try pr.readInt(u32);
         }
         if (flags & FlagWithPagingState == FlagWithPagingState) {
-            params.paging_state = try framer.readBytes();
+            params.paging_state = try pr.readBytes();
         }
         if (flags & FlagWithSerialConsistency == FlagWithSerialConsistency) {
-            const consistency_level = try framer.readConsistency();
+            const consistency_level = try pr.readConsistency();
             if (consistency_level != .Serial and consistency_level != .LocalSerial) {
                 return error.InvalidSerialConsistency;
             }
             params.serial_consistency_level = consistency_level;
         }
         if (flags & FlagWithDefaultTimestamp == FlagWithDefaultTimestamp) {
-            const timestamp = try framer.readInt(u64);
+            const timestamp = try pr.readInt(u64);
             if (timestamp < 0) {
                 return error.InvalidNegativeTimestamp;
             }
             params.timestamp = timestamp;
         }
 
-        if (framer.header.version != ProtocolVersion.V5) {
+        if (header.version != ProtocolVersion.V5) {
             return params;
         }
 
         // The following flags are only valid with protocol v5
         if (flags & FlagWithKeyspace == FlagWithKeyspace) {
-            params.keyspace = try framer.readString();
+            params.keyspace = try pr.readString();
         }
         if (flags & FlagWithNowInSeconds == FlagWithNowInSeconds) {
-            params.now_in_seconds = try framer.readInt(u32);
+            params.now_in_seconds = try pr.readInt(u32);
         }
 
         return params;

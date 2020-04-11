@@ -4,7 +4,7 @@ const meta = std.meta;
 const net = std.net;
 const ArrayList = std.ArrayList;
 
-const Framer = @import("../framer.zig").Framer;
+usingnamespace @import("../frame.zig");
 usingnamespace @import("../primitive_types.zig");
 const testing = @import("../testing.zig");
 
@@ -14,12 +14,11 @@ const testing = @import("../testing.zig");
 const OptionsFrame = struct {};
 
 test "options frame" {
+    var arena = testing.arenaAllocator();
+    defer arena.deinit();
+
     const data = "\x04\x00\x00\x05\x05\x00\x00\x00\x00";
-    var fbs = std.io.fixedBufferStream(data);
-    var in_stream = fbs.inStream();
+    const raw_frame = try testing.readRawFrame(&arena.allocator, data);
 
-    var framer = Framer(@TypeOf(in_stream)).init(testing.allocator, in_stream);
-    _ = try framer.readHeader();
-
-    checkHeader(Opcode.Options, data.len, framer.header);
+    checkHeader(Opcode.Options, data.len, raw_frame.header);
 }

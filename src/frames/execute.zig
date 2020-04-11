@@ -3,7 +3,7 @@ const mem = std.mem;
 const meta = std.meta;
 const net = std.net;
 
-const Framer = @import("../framer.zig").Framer;
+usingnamespace @import("../frame.zig");
 usingnamespace @import("../primitive_types.zig");
 usingnamespace @import("../query_parameters.zig");
 const testing = @import("../testing.zig");
@@ -18,18 +18,18 @@ const ExecuteFrame = struct {
     result_metadata_id: ?[]const u8,
     query_parameters: QueryParameters,
 
-    pub fn read(allocator: *mem.Allocator, comptime FramerType: type, framer: *FramerType) !Self {
+    pub fn read(allocator: *mem.Allocator, header: FrameHeader, pr: *PrimitiveReader) !Self {
         var frame = Self{
             .query_id = undefined,
             .result_metadata_id = null,
             .query_parameters = undefined,
         };
 
-        frame.query_id = (try framer.readShortBytes()) orelse &[_]u8{};
-        if (framer.header.version == ProtocolVersion.V5) {
-            frame.result_metadata_id = try framer.readShortBytes();
+        frame.query_id = (try pr.readShortBytes()) orelse &[_]u8{};
+        if (header.version == ProtocolVersion.V5) {
+            frame.result_metadata_id = try pr.readShortBytes();
         }
-        frame.query_parameters = try QueryParameters.read(allocator, FramerType, framer);
+        frame.query_parameters = try QueryParameters.read(allocator, header, pr);
 
         return frame;
     }
@@ -40,15 +40,14 @@ test "execute frame" {
     defer arena.deinit();
 
     const data = "\x04\x00\x01\x00\x0a\x00\x00\x00\x37\x00\x10\x97\x97\x95\x6d\xfe\xb2\x4c\x99\x86\x8e\xd3\x84\xff\x6f\xd9\x4c\x00\x04\x27\x00\x01\x00\x00\x00\x10\xeb\x11\xc9\x1e\xd8\xcc\x48\x4d\xaf\x55\xe9\x9f\x5c\xd9\xec\x4a\x00\x00\x13\x88\x00\x05\xa2\x41\x4c\x1b\x06\x4c";
-    var fbs = std.io.fixedBufferStream(data);
-    var in_stream = fbs.inStream();
+    const raw_frame = try testing.readRawFrame(&arena.allocator, data);
 
-    var framer = Framer(@TypeOf(in_stream)).init(&arena.allocator, in_stream);
-    _ = try framer.readHeader();
+    checkHeader(Opcode.Execute, data.len, raw_frame.header);
 
-    checkHeader(Opcode.Execute, data.len, framer.header);
+    var pr = PrimitiveReader.init(&arena.allocator);
+    pr.reset(raw_frame.body);
 
-    const frame = try ExecuteFrame.read(&arena.allocator, @TypeOf(framer), &framer);
+    const frame = try ExecuteFrame.read(&arena.allocator, raw_frame.header, &pr);
 
     const exp_query_id = "\x97\x97\x95\x6d\xfe\xb2\x4c\x99\x86\x8e\xd3\x84\xff\x6f\xd9\x4c";
     testing.expectEqualSlices(u8, exp_query_id, frame.query_id);
