@@ -729,7 +729,9 @@ test "iterator scan: set/list" {
 
     const Row = struct {
         set: []u32,
-        // list: []u32,
+        list: []u32,
+        set_of_uuid: [][16]u8,
+        list_of_uuid: [][16]u8,
     };
     var row: Row = undefined;
 
@@ -737,11 +739,15 @@ test "iterator scan: set/list" {
 
     const column_specs = &[_]ColumnSpec{
         columnSpecWithValue(.Set, Value{ .Set = "\x00\x14" }),
-        // columnSpecWithValue(.List),
+        columnSpecWithValue(.List, Value{ .Set = "\x00\x14" }),
+        columnSpecWithValue(.Set, Value{ .Set = "\x00\x0c" }),
+        columnSpecWithValue(.List, Value{ .Set = "\x00\x0c" }),
     };
     const test_data = &[_][]const u8{
         "\x00\x00\x00\x02\x00\x00\x00\x04\x21\x22\x23\x24\x00\x00\x00\x04\x31\x32\x33\x34",
-        // "\x00\x00\x00\x02\x00\x00\x00\x04\x41\x42\x43\x44\x00\x00\x00\x04\x51\x52\x53\x54",
+        "\x00\x00\x00\x02\x00\x00\x00\x04\x41\x42\x43\x44\x00\x00\x00\x04\x51\x52\x53\x54",
+        "\x00\x00\x00\x02\x00\x00\x00\x10\x14\x2d\x6b\x2d\x2c\xe6\x45\x80\x95\x53\x15\x87\xa9\x6d\xec\x94\x00\x00\x00\x10\x8a\xa8\xc1\x37\xd0\x53\x41\x12\xbf\xee\x5f\x96\x28\x7e\xe5\x1a",
+        "\x00\x00\x00\x02\x00\x00\x00\x10\x14\x2d\x6b\x2d\x2c\xe6\x45\x80\x95\x53\x15\x87\xa9\x6d\xec\x94\x00\x00\x00\x10\x8a\xa8\xc1\x37\xd0\x53\x41\x12\xbf\xee\x5f\x96\x28\x7e\xe5\x1a",
     };
 
     try testIteratorScan(&arena.allocator, column_specs, test_data, &row);
@@ -749,4 +755,16 @@ test "iterator scan: set/list" {
     testing.expectEqual(@as(usize, 2), row.set.len);
     testing.expectEqual(@as(u32, 0x21222324), row.set[0]);
     testing.expectEqual(@as(u32, 0x31323334), row.set[1]);
+
+    testing.expectEqual(@as(usize, 2), row.list.len);
+    testing.expectEqual(@as(u32, 0x21222324), row.list[0]);
+    testing.expectEqual(@as(u32, 0x31323334), row.list[1]);
+
+    testing.expectEqual(@as(usize, 2), row.set_of_uuid.len);
+    testing.expectEqualSlices(u8, "\x14\x2d\x6b\x2d\x2c\xe6\x45\x80\x95\x53\x15\x87\xa9\x6d\xec\x94", &row.set_of_uuid[0]);
+    testing.expectEqualSlices(u8, "\x8a\xa8\xc1\x37\xd0\x53\x41\x12\xbf\xee\x5f\x96\x28\x7e\xe5\x1a", &row.set_of_uuid[1]);
+
+    testing.expectEqual(@as(usize, 2), row.list_of_uuid.len);
+    testing.expectEqualSlices(u8, "\x14\x2d\x6b\x2d\x2c\xe6\x45\x80\x95\x53\x15\x87\xa9\x6d\xec\x94", &row.list_of_uuid[0]);
+    testing.expectEqualSlices(u8, "\x8a\xa8\xc1\x37\xd0\x53\x41\x12\xbf\xee\x5f\x96\x28\x7e\xe5\x1a", &row.list_of_uuid[1]);
 }
