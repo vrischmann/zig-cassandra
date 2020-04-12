@@ -9,3 +9,4 @@ TODO
 ====
 
 * Force the use of an arena where possible
+* Use proper error sets for stuff
