@@ -321,6 +321,9 @@ pub const PrimitiveReader = struct {
         if (len < 0) {
             return null;
         }
+        if (len == 0) {
+            return &[_]u8{};
+        }
 
         const buf = try self.allocator.alloc(u8, @intCast(usize, len));
 
