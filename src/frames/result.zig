@@ -20,7 +20,7 @@ const Rows = struct {
     metadata: RowsMetadata,
     data: []RowData,
 
-    pub fn read(allocator: *mem.Allocator, pr: *PrimitiveReader) !Rows {
+    pub fn read(allocator: *mem.Allocator, pr: *PrimitiveReader) !Self {
         var rows = Self{
             .metadata = undefined,
             .data = undefined,
@@ -63,7 +63,32 @@ const Rows = struct {
     }
 };
 
-const Prepared = struct {};
+const Prepared = struct {
+    const Self = @This();
+
+    query_id: []const u8,
+    result_metadata_id: ?[]const u8,
+    metadata: PreparedMetadata,
+    rows_metadata: RowsMetadata,
+
+    pub fn read(allocator: *mem.Allocator, header: FrameHeader, pr: *PrimitiveReader) !Self {
+        var prepared = Self{
+            .query_id = undefined,
+            .result_metadata_id = null,
+            .metadata = undefined,
+            .rows_metadata = undefined,
+        };
+
+        prepared.query_id = (try pr.readShortBytes()) orelse return error.NoQueryIDInPreparedFrame;
+        if (header.version == ProtocolVersion.V5) {
+            prepared.result_metadata_id = (try pr.readShortBytes()) orelse return error.NoResultMetadataIDInPreparedFrame;
+        }
+        prepared.metadata = try PreparedMetadata.read(allocator, pr);
+        prepared.rows_metadata = try RowsMetadata.read(allocator, pr);
+
+        return prepared;
+    }
+};
 
 const Result = union(ResultKind) {
     Void: void,
@@ -81,7 +106,7 @@ const ResultFrame = struct {
 
     result: Result,
 
-    pub fn read(allocator: *mem.Allocator, pr: *PrimitiveReader) !ResultFrame {
+    pub fn read(allocator: *mem.Allocator, header: FrameHeader, pr: *PrimitiveReader) !ResultFrame {
         var frame = Self{
             .result = undefined,
         };
@@ -98,7 +123,10 @@ const ResultFrame = struct {
                 const keyspace = try pr.readString();
                 frame.result = Result{ .SetKeyspace = keyspace };
             },
-            .Prepared => unreachable,
+            .Prepared => {
+                const prepared = try Prepared.read(allocator, header, pr);
+                frame.result = Result{ .Prepared = prepared };
+            },
             .SchemaChange => {
                 const schema_change = try SchemaChange.read(allocator, pr);
                 frame.result = Result{ .SchemaChange = schema_change };
@@ -121,7 +149,7 @@ test "result frame: void" {
     var pr = PrimitiveReader.init(&arena.allocator);
     pr.reset(raw_frame.body);
 
-    const frame = try ResultFrame.read(&arena.allocator, &pr);
+    const frame = try ResultFrame.read(&arena.allocator, raw_frame.header, &pr);
 
     testing.expect(frame.result == .Void);
 }
@@ -138,7 +166,7 @@ test "result frame: rows" {
     var pr = PrimitiveReader.init(&arena.allocator);
     pr.reset(raw_frame.body);
 
-    const frame = try ResultFrame.read(&arena.allocator, &pr);
+    const frame = try ResultFrame.read(&arena.allocator, raw_frame.header, &pr);
 
     testing.expect(frame.result == .Rows);
 
@@ -194,8 +222,105 @@ test "result frame: set keyspace" {
     var pr = PrimitiveReader.init(&arena.allocator);
     pr.reset(raw_frame.body);
 
-    const frame = try ResultFrame.read(&arena.allocator, &pr);
+    const frame = try ResultFrame.read(&arena.allocator, raw_frame.header, &pr);
 
     testing.expect(frame.result == .SetKeyspace);
     testing.expectEqualString("foobar", frame.result.SetKeyspace);
+}
+
+test "result frame: prepared insert" {
+    var arena = testing.arenaAllocator();
+    defer arena.deinit();
+
+    const data = "\x84\x00\x00\x80\x08\x00\x00\x00\x4f\x00\x00\x00\x04\x00\x10\x63\x7c\x1c\x1f\xd0\x13\x4a\xb8\xfc\x94\xca\x67\xf2\x88\xb2\xa3\x00\x00\x00\x01\x00\x00\x00\x03\x00\x00\x00\x01\x00\x00\x00\x06\x66\x6f\x6f\x62\x61\x72\x00\x04\x75\x73\x65\x72\x00\x02\x69\x64\x00\x0c\x00\x03\x61\x67\x65\x00\x14\x00\x04\x6e\x61\x6d\x65\x00\x0d\x00\x00\x00\x04\x00\x00\x00\x00";
+    const raw_frame = try testing.readRawFrame(&arena.allocator, data);
+
+    checkHeader(Opcode.Result, data.len, raw_frame.header);
+
+    var pr = PrimitiveReader.init(&arena.allocator);
+    pr.reset(raw_frame.body);
+
+    const frame = try ResultFrame.read(&arena.allocator, raw_frame.header, &pr);
+
+    testing.expect(frame.result == .Prepared);
+
+    // check prepared metadata
+
+    {
+        const metadata = frame.result.Prepared.metadata;
+        testing.expectEqualString("foobar", metadata.global_table_spec.?.keyspace);
+        testing.expectEqualString("user", metadata.global_table_spec.?.table);
+        testing.expectEqual(@as(usize, 1), metadata.pk_indexes.len);
+        testing.expectEqual(@as(u16, 0), metadata.pk_indexes[0]);
+        testing.expectEqual(@as(usize, 3), metadata.column_specs.len);
+
+        const col1 = metadata.column_specs[0];
+        testing.expectEqualString("id", col1.name);
+        testing.expectEqual(OptionID.UUID, col1.option.id);
+        const col2 = metadata.column_specs[1];
+        testing.expectEqualString("age", col2.name);
+        testing.expectEqual(OptionID.Tinyint, col2.option.id);
+        const col3 = metadata.column_specs[2];
+        testing.expectEqualString("name", col3.name);
+        testing.expectEqual(OptionID.Varchar, col3.option.id);
+    }
+
+    // check rows metadata
+
+    {
+        const metadata = frame.result.Prepared.rows_metadata;
+        testing.expect(metadata.global_table_spec == null);
+        testing.expectEqual(@as(usize, 0), metadata.column_specs.len);
+    }
+}
+
+test "result frame: prepared select" {
+    var arena = testing.arenaAllocator();
+    defer arena.deinit();
+
+    const data = "\x84\x00\x00\xc0\x08\x00\x00\x00\x63\x00\x00\x00\x04\x00\x10\x3b\x2e\x8d\x03\x43\xf4\x3b\xfc\xad\xa1\x78\x9c\x27\x0e\xcf\xee\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x06\x66\x6f\x6f\x62\x61\x72\x00\x04\x75\x73\x65\x72\x00\x02\x69\x64\x00\x0c\x00\x00\x00\x01\x00\x00\x00\x03\x00\x06\x66\x6f\x6f\x62\x61\x72\x00\x04\x75\x73\x65\x72\x00\x02\x69\x64\x00\x0c\x00\x03\x61\x67\x65\x00\x14\x00\x04\x6e\x61\x6d\x65\x00\x0d";
+    const raw_frame = try testing.readRawFrame(&arena.allocator, data);
+
+    checkHeader(Opcode.Result, data.len, raw_frame.header);
+
+    var pr = PrimitiveReader.init(&arena.allocator);
+    pr.reset(raw_frame.body);
+
+    const frame = try ResultFrame.read(&arena.allocator, raw_frame.header, &pr);
+
+    testing.expect(frame.result == .Prepared);
+
+    // check prepared metadata
+
+    {
+        const metadata = frame.result.Prepared.metadata;
+        testing.expectEqualString("foobar", metadata.global_table_spec.?.keyspace);
+        testing.expectEqualString("user", metadata.global_table_spec.?.table);
+        testing.expectEqual(@as(usize, 1), metadata.pk_indexes.len);
+        testing.expectEqual(@as(u16, 0), metadata.pk_indexes[0]);
+        testing.expectEqual(@as(usize, 1), metadata.column_specs.len);
+
+        const col1 = metadata.column_specs[0];
+        testing.expectEqualString("id", col1.name);
+        testing.expectEqual(OptionID.UUID, col1.option.id);
+    }
+
+    // check rows metadata
+
+    {
+        const metadata = frame.result.Prepared.rows_metadata;
+        testing.expectEqualString("foobar", metadata.global_table_spec.?.keyspace);
+        testing.expectEqualString("user", metadata.global_table_spec.?.table);
+        testing.expectEqual(@as(usize, 3), metadata.column_specs.len);
+
+        const col1 = metadata.column_specs[0];
+        testing.expectEqualString("id", col1.name);
+        testing.expectEqual(OptionID.UUID, col1.option.id);
+        const col2 = metadata.column_specs[1];
+        testing.expectEqualString("age", col2.name);
+        testing.expectEqual(OptionID.Tinyint, col2.option.id);
+        const col3 = metadata.column_specs[2];
+        testing.expectEqualString("name", col3.name);
+        testing.expectEqual(OptionID.Varchar, col3.option.id);
+    }
 }

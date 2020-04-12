@@ -233,14 +233,12 @@ pub const RowsMetadata = struct {
                 metadata.global_table_spec = spec;
             }
 
-            var column_specs = std.ArrayList(ColumnSpec).init(allocator);
+            var column_specs = try allocator.alloc(ColumnSpec, columns_count);
             var i: usize = 0;
             while (i < columns_count) : (i += 1) {
-                const column_spec = try ColumnSpec.read(allocator, pr, metadata.global_table_spec != null);
-                _ = try column_specs.append(column_spec);
+                column_specs[i] = try ColumnSpec.read(allocator, pr, metadata.global_table_spec != null);
             }
-
-            metadata.column_specs = column_specs.toOwnedSlice();
+            metadata.column_specs = column_specs;
         }
 
         return metadata;
@@ -257,6 +255,63 @@ pub const ColumnData = struct {
 /// RowData is a wrapper around a slice of ColumnData.
 pub const RowData = struct {
     slice: []const ColumnData,
+};
+
+/// PreparedMetadata in the protocol spec at §4.2.5.4.
+pub const PreparedMetadata = struct {
+    const Self = @This();
+
+    global_table_spec: ?GlobalTableSpec,
+    pk_indexes: []const u16,
+    column_specs: []const ColumnSpec,
+
+    const FlagGlobalTablesSpec = 0x0001;
+
+    pub fn read(allocator: *mem.Allocator, pr: *PrimitiveReader) !Self {
+        var metadata = Self{
+            .global_table_spec = null,
+            .pk_indexes = undefined,
+            .column_specs = undefined,
+        };
+
+        const flags = try pr.readInt(u32);
+        const columns_count = @as(usize, try pr.readInt(u32));
+        const pk_count = @as(usize, try pr.readInt(u32));
+
+        // Read the partition key indexes
+
+        var pk_indexes = try allocator.alloc(u16, pk_count);
+        errdefer allocator.free(pk_indexes);
+
+        var i: usize = 0;
+        while (i < pk_count) : (i += 1) {
+            pk_indexes[i] = try pr.readInt(u16);
+        }
+        metadata.pk_indexes = pk_indexes;
+
+        // Next are the table spec and column spec
+
+        if (flags & FlagGlobalTablesSpec == FlagGlobalTablesSpec) {
+            const spec = GlobalTableSpec{
+                .keyspace = try pr.readString(),
+                .table = try pr.readString(),
+            };
+            metadata.global_table_spec = spec;
+        }
+
+        // Read the column specs
+
+        var column_specs = try allocator.alloc(ColumnSpec, columns_count);
+        errdefer allocator.free(column_specs);
+
+        i = 0;
+        while (i < columns_count) : (i += 1) {
+            column_specs[i] = try ColumnSpec.read(allocator, pr, metadata.global_table_spec != null);
+        }
+        metadata.column_specs = column_specs;
+
+        return metadata;
+    }
 };
 
 pub fn checkHeader(opcode: Opcode, data_len: usize, header: FrameHeader) void {
