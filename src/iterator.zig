@@ -737,8 +737,6 @@ test "iterator scan: set/list" {
     };
     var row: Row = undefined;
 
-    // TODO(vincent): need to test with real values so we can decode properly
-
     const column_specs = &[_]ColumnSpec{
         columnSpecWithValue(.Set, Value{ .Set = "\x00\x14" }),
         columnSpecWithValue(.List, Value{ .Set = "\x00\x14" }),
@@ -759,8 +757,8 @@ test "iterator scan: set/list" {
     testing.expectEqual(@as(u32, 0x31323334), row.set[1]);
 
     testing.expectEqual(@as(usize, 2), row.list.len);
-    testing.expectEqual(@as(u32, 0x21222324), row.list[0]);
-    testing.expectEqual(@as(u32, 0x31323334), row.list[1]);
+    testing.expectEqual(@as(u32, 0x41424344), row.list[0]);
+    testing.expectEqual(@as(u32, 0x51525354), row.list[1]);
 
     testing.expectEqual(@as(usize, 2), row.set_of_uuid.len);
     testing.expectEqualSlices(u8, "\x14\x2d\x6b\x2d\x2c\xe6\x45\x80\x95\x53\x15\x87\xa9\x6d\xec\x94", row.set_of_uuid[0]);
