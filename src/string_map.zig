@@ -61,23 +61,6 @@ pub const Multimap = struct {
         value: EntryList,
     };
 
-    // TODO(vincent): probably can remove this since the multimap
-    // is only used in the SupportedFrame and we know the keys beforehand
-    const Iterator = struct {
-        map_it: MapType.Iterator,
-
-        pub fn next(it: *Iterator) ?KV {
-            if (it.map_it.next()) |entry| {
-                return KV{
-                    .key = entry.key,
-                    .value = entry.value,
-                };
-            }
-
-            return null;
-        }
-    };
-
     pub fn init(allocator: *std.mem.Allocator) Self {
         return Self{
             .map = std.StringHashMap(EntryList).init(allocator),
@@ -98,12 +81,6 @@ pub const Multimap = struct {
 
     pub fn count(self: Self) usize {
         return self.map.count();
-    }
-
-    pub fn iterator(self: Self) Iterator {
-        return Iterator{
-            .map_it = self.map.iterator(),
-        };
     }
 };
 
@@ -161,15 +138,6 @@ test "multimap" {
     }
 
     testing.expectEqual(@as(usize, 2), m.count());
-
-    var it = m.iterator();
-    while (it.next()) |entry| {
-        testing.expect(std.mem.eql(u8, "foo", entry.key) or std.mem.eql(u8, "fou", entry.key));
-
-        const slice = entry.value.span();
-        testing.expectEqualString("bar", slice[0]);
-        testing.expectEqualString("baz", slice[1]);
-    }
 
     const slice = m.get("foo").?;
     testing.expectEqualString("bar", slice[0]);

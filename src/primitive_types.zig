@@ -788,16 +788,7 @@ test "primitive reader: read string multimap" {
     var result = try pr.readStringMultimap();
     testing.expectEqual(@as(usize, 1), result.count());
 
-    var it = result.iterator();
-    if (it.next()) |entry| {
-        testing.expect(std.mem.eql(u8, "foo", entry.key));
-
-        const slice = entry.value.span();
-
-        testing.expectEqual(@as(usize, 2), slice.len);
-        testing.expectEqualString("bar", slice[0]);
-        testing.expectEqualString("baz", slice[1]);
-    } else {
-        std.debug.panic("expected bytes to not be null", .{});
-    }
+    const slice = result.get("foo").?;
+    testing.expectEqualString("bar", slice[0]);
+    testing.expectEqualString("baz", slice[1]);
 }
