@@ -51,7 +51,6 @@ test "startup frame" {
     var arena = testing.arenaAllocator();
     defer arena.deinit();
 
-    // from cqlsh exported via Wireshark
     const data = "\x04\x00\x00\x00\x01\x00\x00\x00\x16\x00\x01\x00\x0b\x43\x51\x4c\x5f\x56\x45\x52\x53\x49\x4f\x4e\x00\x05\x33\x2e\x30\x2e\x30";
     const raw_frame = try testing.readRawFrame(&arena.allocator, data);
 
@@ -62,5 +61,6 @@ test "startup frame" {
 
     const frame = try StartupFrame.read(&arena.allocator, &pr);
 
-    // TODO(vincent): checks
+    testing.expectEqualString("3.0.0", frame.cql_version);
+    testing.expect(frame.compression == null);
 }
