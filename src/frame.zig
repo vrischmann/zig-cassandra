@@ -451,4 +451,7 @@ test "" {
     _ = @import("frames/register.zig");
     _ = @import("frames/event.zig");
     _ = @import("frames/batch.zig");
+
+    _ = @import("primitive/reader.zig");
+    _ = @import("primitive/writer.zig");
 }
