@@ -243,4 +243,33 @@ test "result frame: prepared" {
     const frame = try ResultFrame.read(&arena.allocator, raw_frame.header, &pr);
 
     testing.expect(frame.result == .Prepared);
+
+    // check prepared metadata
+
+    {
+        const metadata = frame.result.Prepared.metadata;
+        testing.expectEqualString("foobar", metadata.global_table_spec.?.keyspace);
+        testing.expectEqualString("user", metadata.global_table_spec.?.table);
+        testing.expectEqual(@as(usize, 1), metadata.pk_indexes.len);
+        testing.expectEqual(@as(u16, 0), metadata.pk_indexes[0]);
+        testing.expectEqual(@as(usize, 3), metadata.column_specs.len);
+
+        const col1 = metadata.column_specs[0];
+        testing.expectEqualString("id", col1.name);
+        testing.expectEqual(OptionID.UUID, col1.option.id);
+        const col2 = metadata.column_specs[1];
+        testing.expectEqualString("age", col2.name);
+        testing.expectEqual(OptionID.Tinyint, col2.option.id);
+        const col3 = metadata.column_specs[2];
+        testing.expectEqualString("name", col3.name);
+        testing.expectEqual(OptionID.Varchar, col3.option.id);
+    }
+
+    // check rows metadata
+
+    {
+        const metadata = frame.result.Prepared.rows_metadata;
+        testing.expect(metadata.global_table_spec == null);
+        testing.expectEqual(@as(usize, 0), metadata.column_specs.len);
+    }
 }
