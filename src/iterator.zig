@@ -250,6 +250,10 @@ const Iterator = struct {
                 }
             },
             else => {
+                if (@typeInfo(ChildType) == .Array) {
+                    @compileError("cannot read a slice of arrays, use a slice instead as the element type");
+                }
+
                 switch (id) {
                     .List, .Set => {
                         // A list or set is a complex type.
