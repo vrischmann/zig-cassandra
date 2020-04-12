@@ -163,30 +163,6 @@ pub const ColumnSpec = struct {
         spec.name = try pr.readString();
         spec.option = try Option.read(pr);
 
-        switch (spec.option.id) {
-            .Custom => {
-                // TODO(vincent): test this
-                unreachable;
-            },
-            .List, .Set => {
-                // TODO(vincent): test this
-                unreachable;
-            },
-            .Map => {
-                // TODO(vincent): test this
-                unreachable;
-            },
-            .UDT => {
-                // TODO(vincent): test this
-                unreachable;
-            },
-            .Tuple => {
-                // TODO(vincent): test this
-                unreachable;
-            },
-            else => {},
-        }
-
         return spec;
     }
 };

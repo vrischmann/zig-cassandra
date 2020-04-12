@@ -108,8 +108,6 @@ const Iterator = struct {
     fn readIntFromSlice(comptime Type: type, slice: []const u8) Type {
         var r: Type = 0;
 
-        // TODO(vincent): should we optimize for u8/i8 ?
-
         // Compute the number of bytes needed for the integer type we're trying to read.
         comptime const len = @divExact(Type.bit_count, 8);
 
