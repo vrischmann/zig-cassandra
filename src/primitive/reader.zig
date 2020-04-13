@@ -33,12 +33,12 @@ pub const PrimitiveReader = struct {
         self.in_stream = self.source.inStream();
     }
 
-    /// Read either a short, a int or a long from the stream.
+    /// Read either a short, a int or a long from the buffer.
     pub fn readInt(self: *Self, comptime T: type) !T {
         return self.in_stream.readIntBig(T);
     }
 
-    /// Read a single byte from the stream
+    /// Read a single byte from the buffer.
     pub fn readByte(self: *Self) !u8 {
         return self.in_stream.readByte();
     }
@@ -230,8 +230,6 @@ test "primitive reader: read int" {
 
     var pr = PrimitiveReader.init(&arena.allocator);
 
-    // read all int types
-
     pr.reset("\x00\x20\x11\x00");
     testing.expectEqual(@as(i32, 2101504), try pr.readInt(i32));
 
@@ -251,19 +249,18 @@ test "primitive reader: read strings and bytes" {
 
     var pr = PrimitiveReader.init(&arena.allocator);
 
-    // short string
     {
+        // short string
         pr.reset("\x00\x06foobar");
         testing.expectEqualString("foobar", try pr.readString());
 
         // long string
-
         pr.reset("\x00\x00\x00\x06foobar");
         testing.expectEqualString("foobar", try pr.readLongString());
     }
 
-    // int32 + bytes
     {
+        // int32 + bytes
         pr.reset("\x00\x00\x00\x0A123456789A");
         testing.expectEqualString("123456789A", (try pr.readBytes()).?);
 
@@ -274,8 +271,8 @@ test "primitive reader: read strings and bytes" {
         testing.expect((try pr.readBytes()) == null);
     }
 
-    // int16 + bytes
     {
+        // int16 + bytes
         pr.reset("\x00\x0A123456789A");
         testing.expectEqualString("123456789A", (try pr.readShortBytes()).?);
 
