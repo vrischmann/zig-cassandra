@@ -101,8 +101,8 @@ pub const PrimitiveReader = struct {
         _ = try self.in_stream.readAll(&buf);
         return buf;
     }
-
     /// Read a list of string from the stream.
+    // TODO(vincent): use a slice instead of a array list
     pub fn readStringList(self: *Self) !std.ArrayList([]const u8) {
         const len = @as(usize, try self.readInt(u16));
 

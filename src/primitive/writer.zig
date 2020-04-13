@@ -67,6 +67,19 @@ pub const PrimitiveWriter = struct {
     pub fn writeLongString(self: *Self, value: []const u8) !void {
         return self.writeBytesGeneric(i32, value);
     }
+
+    /// Write a UUID to the buffer.
+    pub fn writeUUID(self: *Self, uuid: [16]u8) !void {
+        return self.out_stream.writeAll(&uuid);
+    }
+
+    /// Write a list of string to the buffer.
+    pub fn writeStringList(self: *Self, list: []const []const u8) !void {
+        _ = try self.out_stream.writeIntBig(u16, @intCast(u16, list.len));
+        for (list) |value| {
+            _ = try self.writeString(value);
+        }
+    }
 };
 
 test "primitive writer: write int" {
@@ -95,35 +108,58 @@ test "primitive writer: write strings and bytes" {
     {
         // short string
         _ = try pw.writeString("foobar");
-        testing.expectEqualString("\x00\x06foobar", buf[0..8]);
+        testing.expectEqualSlices(u8, "\x00\x06foobar", buf[0..8]);
 
         // long string
 
         _ = try pw.writeLongString("foobar");
-        testing.expectEqualString("\x00\x00\x00\x06foobar", buf[8..18]);
+        testing.expectEqualSlices(u8, "\x00\x00\x00\x06foobar", buf[8..18]);
     }
 
-    // // int32 + bytes
-    // {
-    //     pr.reset("\x00\x00\x00\x0A123456789A");
-    //     testing.expectEqualString("123456789A", (try pr.readBytes()).?);
+    {
+        // int32 + bytes
+        _ = try pw.writeBytes("123456789A");
+        testing.expectEqualSlices(u8, "\x00\x00\x00\x0A123456789A", buf[18..32]);
 
-    //     pr.reset("\x00\x00\x00\x00");
-    //     testing.expectEqualString("", (try pr.readBytes()).?);
+        _ = try pw.writeBytes("");
+        testing.expectEqualSlices(u8, "\x00\x00\x00\x00", buf[32..36]);
 
-    //     pr.reset("\xff\xff\xff\xff");
-    //     testing.expect((try pr.readBytes()) == null);
-    // }
+        _ = try pw.writeBytes(null);
+        testing.expectEqualSlices(u8, "\xff\xff\xff\xff", buf[36..40]);
+    }
 
-    // // int16 + bytes
-    // {
-    //     pr.reset("\x00\x0A123456789A");
-    //     testing.expectEqualString("123456789A", (try pr.readShortBytes()).?);
+    {
+        // int16 + bytes
+        _ = try pw.writeShortBytes("123456789A");
+        testing.expectEqualSlices(u8, "\x00\x0A123456789A", buf[40..52]);
 
-    //     pr.reset("\x00\x00");
-    //     testing.expectEqualString("", (try pr.readShortBytes()).?);
+        _ = try pw.writeShortBytes("");
+        testing.expectEqualSlices(u8, "\x00\x00", buf[52..54]);
 
-    //     pr.reset("\xff\xff");
-    //     testing.expect((try pr.readShortBytes()) == null);
-    // }
+        _ = try pw.writeShortBytes(null);
+        testing.expectEqualSlices(u8, "\xff\xff", buf[54..56]);
+    }
+}
+
+test "primitive writer: write uuid" {
+    var buf: [1024]u8 = undefined;
+    var pw = PrimitiveWriter.init();
+    pw.reset(&buf);
+
+    var uuid: [16]u8 = undefined;
+    try std.os.getrandom(&uuid);
+
+    _ = try pw.writeUUID(uuid);
+    testing.expectEqualSlices(u8, &uuid, buf[0..16]);
+}
+
+test "primitive writer: write string list" {
+    var buf: [1024]u8 = undefined;
+    var pw = PrimitiveWriter.init();
+    pw.reset(&buf);
+
+    const list = &[_][]const u8{ "foo", "bar" };
+
+    _ = try pw.writeStringList(list);
+    testing.expectEqualSlices(u8, "\x00\x02\x00\x03foo\x00\x03bar", buf[0..12]);
 }
