@@ -1,6 +1,9 @@
 const std = @import("std");
 const io = std.io;
 
+usingnamespace @import("../primitive_types.zig");
+const sm = @import("../string_map.zig");
+
 const testing = @import("../testing.zig");
 
 pub const PrimitiveWriter = struct {
@@ -79,6 +82,18 @@ pub const PrimitiveWriter = struct {
         for (list) |value| {
             _ = try self.writeString(value);
         }
+    }
+
+    /// Write a value to the buffer.
+    pub fn writeValue(self: *Self, value: Value) !void {
+        return switch (value) {
+            .Null => self.out_stream.writeIntBig(i32, @as(i32, -1)),
+            .NotSet => self.out_stream.writeIntBig(i32, @as(i32, -2)),
+            .Set => |data| {
+                _ = try self.out_stream.writeIntBig(i32, @intCast(i32, data.len));
+                return self.out_stream.writeAll(data);
+            },
+        };
     }
 };
 
@@ -162,4 +177,22 @@ test "primitive writer: write string list" {
 
     _ = try pw.writeStringList(list);
     testing.expectEqualSlices(u8, "\x00\x02\x00\x03foo\x00\x03bar", buf[0..12]);
+}
+
+test "primitive writer: write value" {
+    var buf: [1024]u8 = undefined;
+    var pw = PrimitiveWriter.init();
+    pw.reset(&buf);
+
+    // Normal value
+    _ = try pw.writeValue(Value{ .Set = "ab" });
+    testing.expectEqualSlices(u8, "\x00\x00\x00\x02\x61\x62", buf[0..6]);
+
+    // Null value
+    _ = try pw.writeValue(Value{ .Null = {} });
+    testing.expectEqualSlices(u8, "\xff\xff\xff\xff", buf[6..10]);
+
+    // "Not set" value
+    _ = try pw.writeValue(Value{ .NotSet = {} });
+    testing.expectEqualSlices(u8, "\xff\xff\xff\xfe", buf[10..14]);
 }
