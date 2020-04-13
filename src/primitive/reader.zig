@@ -43,31 +43,21 @@ pub const PrimitiveReader = struct {
         return self.in_stream.readByte();
     }
 
-    const BytesType = enum {
-        Short,
-        Long,
-    };
-
     /// Read a length-prefixed byte slice from the stream. The length is 2 bytes.
     /// The slice can be null.
     pub fn readShortBytes(self: *Self) !?[]const u8 {
-        return self.readBytesGeneric(.Short);
+        return self.readBytesGeneric(i16);
     }
 
     /// Read a length-prefixed byte slice from the stream. The length is 4 bytes.
     /// The slice can be null.
     pub fn readBytes(self: *Self) !?[]const u8 {
-        return self.readBytesGeneric(.Long);
+        return self.readBytesGeneric(i32);
     }
 
     /// Read bytes from the stream in a generic way.
-    fn readBytesGeneric(self: *Self, comptime T: BytesType) !?[]const u8 {
-        const len = switch (T) {
-            .Short => @as(i32, try self.readInt(i16)),
-            .Long => @as(i32, try self.readInt(i32)),
-            else => @compileError("invalid bytes length type " ++ @typeName(IntType)),
-        };
-
+    fn readBytesGeneric(self: *Self, comptime LenType: type) !?[]const u8 {
+        const len = try self.readInt(LenType);
         if (len < 0) {
             return null;
         }
@@ -88,7 +78,7 @@ pub const PrimitiveReader = struct {
     /// Read a length-prefixed string from the stream. The length is 2 bytes.
     /// The string can't be null.
     pub fn readString(self: *Self) ![]const u8 {
-        if (try self.readBytesGeneric(.Short)) |v| {
+        if (try self.readBytesGeneric(i16)) |v| {
             return v;
         } else {
             return error.UnexpectedEOF;
@@ -98,7 +88,7 @@ pub const PrimitiveReader = struct {
     /// Read a length-prefixed string from the stream. The length is 4 bytes.
     /// The string can't be null.
     pub fn readLongString(self: *Self) ![]const u8 {
-        if (try self.readBytesGeneric(.Long)) |v| {
+        if (try self.readBytesGeneric(i32)) |v| {
             return v;
         } else {
             return error.UnexpectedEOF;
