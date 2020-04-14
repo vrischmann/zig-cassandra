@@ -120,7 +120,6 @@ pub const PrimitiveReader = struct {
     }
 
     /// Read a value from the stream.
-    /// A value can be null.
     pub fn readValue(self: *Self) !Value {
         const len = try self.readInt(i32);
 
@@ -280,8 +279,6 @@ test "primitive reader: read uuid" {
 
     var pr = PrimitiveReader.init(&arena.allocator);
 
-    // read UUID
-
     var uuid: [16]u8 = undefined;
     try std.os.getrandom(&uuid);
     pr.reset(&uuid);
@@ -294,8 +291,6 @@ test "primitive reader: read string list" {
     defer arena.deinit();
 
     var pr = PrimitiveReader.init(&arena.allocator);
-
-    // read string lists
 
     pr.reset("\x00\x02\x00\x03foo\x00\x03bar");
 
