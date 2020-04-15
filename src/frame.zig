@@ -34,9 +34,9 @@ pub const FrameHeader = packed struct {
     opcode: Opcode,
     body_len: u32,
 
-    pub fn write(self: @This(), comptime OutStreamType: type, out: OutStreamType) !void {
+    pub fn write(frame_header: @This(), comptime OutStreamType: type, out: OutStreamType) !void {
         var serializer = std.io.serializer(std.builtin.Endian.Big, std.io.Packing.Bit, out);
-        _ = try serializer.serialize(self);
+        _ = try serializer.serialize(frame_header);
     }
 
     pub fn read(comptime InStreamType: type, in: InStreamType) !FrameHeader {
@@ -80,6 +80,25 @@ pub fn RawFrameReader(comptime InStreamType: type) type {
                 .header = header,
                 .body = body,
             };
+        }
+    };
+}
+
+pub fn RawFrameWriter(comptime OutStreamType: type) type {
+    return struct {
+        const Self = @This();
+
+        out_stream: OutStreamType,
+
+        pub fn init(out: OutStreamType) Self {
+            return Self{
+                .out_stream = out,
+            };
+        }
+
+        pub fn write(self: *Self, raw_frame: RawFrame) !void {
+            _ = try FrameHeader.write(raw_frame.header, OutStreamType, self.out_stream);
+            _ = try self.out_stream.writeAll(raw_frame.body);
         }
     };
 }
