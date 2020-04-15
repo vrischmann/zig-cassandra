@@ -24,6 +24,10 @@ pub const PrimitiveWriter = struct {
         };
     }
 
+    pub fn getWritten(self: *Self) []u8 {
+        return self.source.buffer.getWritten();
+    }
+
     pub fn reset(self: *Self, wbuf: []u8) void {
         self.wbuf = wbuf;
         self.source = io.StreamSource{ .buffer = io.fixedBufferStream(wbuf) };
@@ -166,6 +170,13 @@ pub const PrimitiveWriter = struct {
             _ = try self.writeString(kv.key);
             _ = try self.writeStringList(kv.value);
         }
+    }
+
+    pub fn startStringMap(self: *Self, size: usize) !void {
+        _ = try self.out_stream.writeIntBig(u16, @intCast(u16, size));
+    }
+    pub fn startStringMultimap(self: *Self, size: usize) !void {
+        _ = try self.out_stream.writeIntBig(u16, @intCast(u16, size));
     }
 };
 
