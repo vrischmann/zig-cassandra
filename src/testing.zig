@@ -7,8 +7,10 @@ pub const expectError = std.testing.expectError;
 pub const expectEqual = std.testing.expectEqual;
 pub const expectEqualSlices = std.testing.expectEqualSlices;
 
+const FrameHeader = @import("frame.zig").FrameHeader;
 const RawFrame = @import("frame.zig").RawFrame;
 const RawFrameReader = @import("frame.zig").RawFrameReader;
+const RawFrameWriter = @import("frame.zig").RawFrameWriter;
 
 // Temporary function while waiting for Zig to have something like this.
 pub fn expectEqualString(a: []const u8, b: []const u8) void {
@@ -39,4 +41,19 @@ pub fn readRawFrame(_allocator: *std.mem.Allocator, data: []const u8) !RawFrame 
     var fr = RawFrameReader(@TypeOf(in_stream)).init(_allocator, in_stream);
 
     return fr.read();
+}
+
+pub fn writeRawFrame(_allocator: *std.mem.Allocator, header: FrameHeader, body: []const u8) ![]u8 {
+    var buf = try _allocator.alloc(u8, @sizeOf(FrameHeader) + body.len);
+
+    var source = io.StreamSource{ .buffer = io.fixedBufferStream(buf) };
+    var out_stream = source.outStream();
+    var fw = RawFrameWriter(@TypeOf(out_stream)).init(out_stream);
+
+    _ = try fw.write(RawFrame{
+        .header = header,
+        .body = body,
+    });
+
+    return buf;
 }
