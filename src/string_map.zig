@@ -47,7 +47,7 @@ pub const Entry = struct {
     value: []const u8,
 };
 
-const EntryList = std.ArrayList([]const u8);
+const EntryList = []const []const u8;
 
 pub const Multimap = struct {
     const Self = @This();
@@ -61,8 +61,6 @@ pub const Multimap = struct {
         value: EntryList,
     };
 
-    // TODO(vincent): probably can remove this since the multimap
-    // is only used in the SupportedFrame and we know the keys beforehand
     const Iterator = struct {
         map_it: MapType.Iterator,
 
@@ -84,13 +82,14 @@ pub const Multimap = struct {
         };
     }
 
-    pub fn put(self: *Self, key: []const u8, values: std.ArrayList([]const u8)) !void {
+    // TODO(vincent): change this to take a slice
+    pub fn put(self: *Self, key: []const u8, values: []const []const u8) !void {
         _ = try self.map.put(key, values);
     }
 
-    pub fn get(self: Self, key: []const u8) ?[][]const u8 {
+    pub fn get(self: Self, key: []const u8) ?[]const []const u8 {
         if (self.map.get(key)) |entry| {
-            return entry.value.span();
+            return entry.value;
         } else {
             return null;
         }
@@ -146,17 +145,13 @@ test "multimap" {
 
     {
         const k1 = try dupe(allocator, u8, "foo");
-        var v1 = std.ArrayList([]const u8).init(allocator);
-        _ = try v1.append(try dupe(allocator, u8, "bar"));
-        _ = try v1.append(try dupe(allocator, u8, "baz"));
+        const v1 = &[_][]const u8{ "bar", "baz" };
         _ = try m.put(k1, v1);
     }
 
     {
         const k2 = try dupe(allocator, u8, "fou");
-        var v2 = std.ArrayList([]const u8).init(allocator);
-        _ = try v2.append(try dupe(allocator, u8, "bar"));
-        _ = try v2.append(try dupe(allocator, u8, "baz"));
+        const v2 = &[_][]const u8{ "bar", "baz" };
         _ = try m.put(k2, v2);
     }
 
@@ -166,7 +161,7 @@ test "multimap" {
     while (it.next()) |entry| {
         testing.expect(std.mem.eql(u8, "foo", entry.key) or std.mem.eql(u8, "fou", entry.key));
 
-        const slice = entry.value.span();
+        const slice = entry.value;
         testing.expectEqualString("bar", slice[0]);
         testing.expectEqualString("baz", slice[1]);
     }

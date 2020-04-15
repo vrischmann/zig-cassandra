@@ -101,9 +101,9 @@ pub const PrimitiveReader = struct {
         _ = try self.in_stream.readAll(&buf);
         return buf;
     }
+
     /// Read a list of string from the stream.
-    // TODO(vincent): use a slice instead of a array list
-    pub fn readStringList(self: *Self) !std.ArrayList([]const u8) {
+    pub fn readStringList(self: *Self) ![]const []const u8 {
         const len = @as(usize, try self.readInt(u16));
 
         var list = try std.ArrayList([]const u8).initCapacity(self.allocator, len);
@@ -116,7 +116,7 @@ pub const PrimitiveReader = struct {
             i += 1;
         }
 
-        return list;
+        return list.toOwnedSlice();
     }
 
     /// Read a value from the stream.
@@ -294,10 +294,7 @@ test "primitive reader: read string list" {
 
     pr.reset("\x00\x02\x00\x03foo\x00\x03bar");
 
-    var list = try pr.readStringList();
-    defer list.deinit();
-
-    var result = list.toOwnedSlice();
+    var result = try pr.readStringList();
     testing.expectEqual(@as(usize, 2), result.len);
 
     var tmp = result[0];

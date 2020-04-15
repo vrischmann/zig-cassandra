@@ -319,7 +319,7 @@ pub const SchemaChangeTarget = enum {
 pub const SchemaChangeOptions = struct {
     keyspace: []const u8,
     object_name: []const u8,
-    arguments: ?[][]const u8,
+    arguments: ?[]const []const u8,
 
     pub fn init() SchemaChangeOptions {
         return SchemaChangeOptions{
@@ -370,7 +370,7 @@ pub const SchemaChange = struct {
             .FUNCTION, .AGGREGATE => {
                 change.options.keyspace = try pr.readString();
                 change.options.object_name = try pr.readString();
-                change.options.arguments = (try pr.readStringList()).toOwnedSlice();
+                change.options.arguments = try pr.readStringList();
             },
         }
 

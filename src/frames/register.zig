@@ -11,11 +11,11 @@ const testing = @import("../testing.zig");
 ///
 /// Described in the protocol spec at §4.1.8
 const RegisterFrame = struct {
-    event_types: [][]const u8,
+    event_types: []const []const u8,
 
     pub fn read(allocator: *mem.Allocator, pr: *PrimitiveReader) !RegisterFrame {
         return RegisterFrame{
-            .event_types = (try pr.readStringList()).toOwnedSlice(),
+            .event_types = try pr.readStringList(),
         };
     }
 };
