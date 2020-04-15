@@ -142,15 +142,15 @@ pub const PrimitiveReader = struct {
         unreachable;
     }
 
-    pub fn readInetaddr(self: *Self) !net.Address {
+    pub inline fn readInetaddr(self: *Self) !net.Address {
         return self.readInetGeneric(false);
     }
 
-    pub fn readInet(self: *Self) !net.Address {
+    pub inline fn readInet(self: *Self) !net.Address {
         return self.readInetGeneric(true);
     }
 
-    fn readInetGeneric(self: *Self, with_port: bool) !net.Address {
+    fn readInetGeneric(self: *Self, comptime with_port: bool) !net.Address {
         const n = try self.readByte();
 
         return switch (n) {
@@ -352,7 +352,7 @@ test "primitive reader: read inet and inetaddr" {
 
     result = try pr.readInet();
     testing.expectEqual(@as(u16, os.AF_INET6), result.any.family);
-    testing.expectEqualSlices(u8, "\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff", &result.in6.addr);
+    testing.expectEqualSlices(u8, &[_]u8{0xff} ** 16, &result.in6.addr);
     testing.expectEqual(@as(u16, 34), result.getPort());
 
     // IPv4 without port
@@ -368,7 +368,7 @@ test "primitive reader: read inet and inetaddr" {
 
     result = try pr.readInetaddr();
     testing.expectEqual(@as(u16, os.AF_INET6), result.any.family);
-    testing.expectEqualSlices(u8, "\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff", &result.in6.addr);
+    testing.expectEqualSlices(u8, &[_]u8{0xff} ** 16, &result.in6.addr);
     testing.expectEqual(@as(u16, 0), result.getPort());
 }
 

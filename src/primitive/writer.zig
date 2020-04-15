@@ -1,5 +1,8 @@
 const std = @import("std");
 const io = std.io;
+const mem = std.mem;
+const net = std.net;
+const os = std.os;
 
 usingnamespace @import("../primitive_types.zig");
 const sm = @import("../string_map.zig");
@@ -94,6 +97,50 @@ pub const PrimitiveWriter = struct {
                 return self.out_stream.writeAll(data);
             },
         };
+    }
+
+    pub inline fn writeInetaddr(self: *Self, inet: net.Address) !void {
+        return self.writeInetGeneric(inet, false);
+    }
+    pub inline fn writeInet(self: *Self, inet: net.Address) !void {
+        return self.writeInetGeneric(inet, true);
+    }
+
+    /// Write a net address to the buffer.
+    fn writeInetGeneric(self: *Self, inet: net.Address, comptime with_port: bool) !void {
+        switch (inet.any.family) {
+            os.AF_INET => {
+                const addr = mem.bigToNative(u32, inet.in.addr);
+
+                if (with_port) {
+                    var buf: [9]u8 = undefined;
+                    buf[0] = 4;
+                    mem.copy(u8, buf[1..5], @ptrCast(*const [4]u8, &addr));
+                    mem.writeIntBig(u32, buf[5..9], inet.getPort());
+                    return self.out_stream.writeAll(&buf);
+                } else {
+                    var buf: [5]u8 = undefined;
+                    buf[0] = 4;
+                    mem.copy(u8, buf[1..5], @ptrCast(*const [4]u8, &addr));
+                    return self.out_stream.writeAll(&buf);
+                }
+            },
+            os.AF_INET6 => {
+                if (with_port) {
+                    var buf: [21]u8 = undefined;
+                    buf[0] = 16;
+                    mem.copy(u8, buf[1..17], &inet.in6.addr);
+                    mem.writeIntBig(u32, buf[17..21], inet.getPort());
+                    return self.out_stream.writeAll(&buf);
+                } else {
+                    var buf: [17]u8 = undefined;
+                    buf[0] = 16;
+                    mem.copy(u8, buf[1..17], &inet.in6.addr);
+                    return self.out_stream.writeAll(&buf);
+                }
+            },
+            else => |af| std.debug.panic("invalid address family {}\n", .{af}),
+        }
     }
 };
 
@@ -195,4 +242,27 @@ test "primitive writer: write value" {
     // "Not set" value
     _ = try pw.writeValue(Value{ .NotSet = {} });
     testing.expectEqualSlices(u8, "\xff\xff\xff\xfe", buf[10..14]);
+}
+
+test "primitive writer: write inet and inetaddr" {
+    var buf: [1024]u8 = undefined;
+    var pw = PrimitiveWriter.init();
+    pw.reset(&buf);
+
+    // IPv4
+    _ = try pw.writeInet(net.Address.initIp4([_]u8{ 0x78, 0x56, 0x34, 0x12 }, 34));
+    testing.expectEqualSlices(u8, "\x04\x12\x34\x56\x78\x00\x00\x00\x22", buf[0..9]);
+
+    // IPv6
+    _ = try pw.writeInet(net.Address.initIp6([_]u8{0xff} ** 16, 34, 0, 0));
+    testing.expectEqualSlices(u8, "\x10\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\x00\x00\x00\x22", buf[9..30]);
+
+    // IPv4 without port
+    _ = try pw.writeInetaddr(net.Address.initIp4([_]u8{ 0x78, 0x56, 0x34, 0x12 }, 34));
+    testing.expectEqualSlices(u8, "\x04\x12\x34\x56\x78\xaa\xaa", buf[30 .. 35 + 2]);
+
+    // IPv6 without port
+    _ = try pw.writeInetaddr(net.Address.initIp6([_]u8{0xff} ** 16, 34, 0, 0));
+    testing.expectEqualSlices(u8, "\x10\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff", buf[35..52]);
+    // pr.reset("\x10\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff");
 }
