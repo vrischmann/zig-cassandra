@@ -157,6 +157,16 @@ pub const PrimitiveWriter = struct {
             _ = try self.writeString(kv.value);
         }
     }
+
+    pub fn writeStringMultimap(self: *Self, map: sm.Multimap) !void {
+        _ = try self.out_stream.writeIntBig(u16, @intCast(u16, map.count()));
+
+        var iterator = map.iterator();
+        while (iterator.next()) |kv| {
+            _ = try self.writeString(kv.key);
+            _ = try self.writeStringList(kv.value);
+        }
+    }
 };
 
 test "primitive writer: write int" {
@@ -317,10 +327,10 @@ test "primitive writer: write stringmap" {
     var pw = PrimitiveWriter.init();
     pw.reset(&buf);
 
-    // 2 elements string map
-
     var arena = testing.arenaAllocator();
     defer arena.deinit();
+
+    // 2 elements string map
 
     var map = sm.Map.init(&arena.allocator);
 
@@ -329,4 +339,22 @@ test "primitive writer: write stringmap" {
 
     _ = try pw.writeStringMap(map);
     testing.expectEqualSlices(u8, "\x00\x02\x00\x03foo\x00\x03baz\x00\x03bar\x00\x03baz", buf[0..22]);
+}
+
+test "primitive writer: write string multimap" {
+    var buf: [1024]u8 = undefined;
+    var pw = PrimitiveWriter.init();
+    pw.reset(&buf);
+
+    var arena = testing.arenaAllocator();
+    defer arena.deinit();
+
+    // 1 key, 2 values multimap
+
+    var map = sm.Multimap.init(&arena.allocator);
+
+    _ = try map.put("foo", &[_][]const u8{ "bar", "baz" });
+
+    _ = try pw.writeStringMultimap(map);
+    testing.expectEqualSlices(u8, "\x00\x01\x00\x03foo\x00\x02\x00\x03bar\x00\x03baz", buf[0..19]);
 }
