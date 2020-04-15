@@ -142,6 +142,11 @@ pub const PrimitiveWriter = struct {
             else => |af| std.debug.panic("invalid address family {}\n", .{af}),
         }
     }
+
+    pub fn writeConsistency(self: *Self, consistency: Consistency) !void {
+        const n = @intCast(u16, @enumToInt(consistency));
+        return self.out_stream.writeIntBig(u16, n);
+    }
 };
 
 test "primitive writer: write int" {
@@ -265,4 +270,34 @@ test "primitive writer: write inet and inetaddr" {
     _ = try pw.writeInetaddr(net.Address.initIp6([_]u8{0xff} ** 16, 34, 0, 0));
     testing.expectEqualSlices(u8, "\x10\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff", buf[35..52]);
     // pr.reset("\x10\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff");
+}
+
+test "primitive writer: write consistency" {
+    var buf: [1024]u8 = undefined;
+    var pw = PrimitiveWriter.init();
+
+    const testCase = struct {
+        consistency: Consistency,
+        exp: []const u8,
+    };
+
+    const testCases = [_]testCase{
+        testCase{ .consistency = Consistency.Any, .exp = "\x00\x00" },
+        testCase{ .consistency = Consistency.One, .exp = "\x00\x01" },
+        testCase{ .consistency = Consistency.Two, .exp = "\x00\x02" },
+        testCase{ .consistency = Consistency.Three, .exp = "\x00\x03" },
+        testCase{ .consistency = Consistency.Quorum, .exp = "\x00\x04" },
+        testCase{ .consistency = Consistency.All, .exp = "\x00\x05" },
+        testCase{ .consistency = Consistency.LocalQuorum, .exp = "\x00\x06" },
+        testCase{ .consistency = Consistency.EachQuorum, .exp = "\x00\x07" },
+        testCase{ .consistency = Consistency.Serial, .exp = "\x00\x08" },
+        testCase{ .consistency = Consistency.LocalSerial, .exp = "\x00\x09" },
+        testCase{ .consistency = Consistency.LocalOne, .exp = "\x00\x0A" },
+    };
+
+    for (testCases) |tc| {
+        pw.reset(&buf);
+        _ = try pw.writeConsistency(tc.consistency);
+        testing.expectEqualSlices(u8, tc.exp, buf[0..2]);
+    }
 }
