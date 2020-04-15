@@ -147,6 +147,16 @@ pub const PrimitiveWriter = struct {
         const n = @intCast(u16, @enumToInt(consistency));
         return self.out_stream.writeIntBig(u16, n);
     }
+
+    pub fn writeStringMap(self: *Self, map: sm.Map) !void {
+        _ = try self.out_stream.writeIntBig(u16, @intCast(u16, map.count()));
+
+        var iterator = map.iterator();
+        while (iterator.next()) |kv| {
+            _ = try self.writeString(kv.key);
+            _ = try self.writeString(kv.value);
+        }
+    }
 };
 
 test "primitive writer: write int" {
@@ -300,4 +310,23 @@ test "primitive writer: write consistency" {
         _ = try pw.writeConsistency(tc.consistency);
         testing.expectEqualSlices(u8, tc.exp, buf[0..2]);
     }
+}
+
+test "primitive writer: write stringmap" {
+    var buf: [1024]u8 = undefined;
+    var pw = PrimitiveWriter.init();
+    pw.reset(&buf);
+
+    // 2 elements string map
+
+    var arena = testing.arenaAllocator();
+    defer arena.deinit();
+
+    var map = sm.Map.init(&arena.allocator);
+
+    _ = try map.put("foo", "baz");
+    _ = try map.put("bar", "baz");
+
+    _ = try pw.writeStringMap(map);
+    testing.expectEqualSlices(u8, "\x00\x02\x00\x03foo\x00\x03baz\x00\x03bar\x00\x03baz", buf[0..22]);
 }
