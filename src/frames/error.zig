@@ -40,7 +40,7 @@ const UnavailableReplicasError = struct {
 const FunctionFailureError = struct {
     keyspace: []const u8,
     function: []const u8,
-    arg_types: [][]const u8,
+    arg_types: []const []const u8,
 };
 
 const WriteError = struct {
@@ -166,7 +166,7 @@ const ErrorFrame = struct {
                 frame.function_failure = FunctionFailureError{
                     .keyspace = try pr.readString(),
                     .function = try pr.readString(),
-                    .arg_types = (try pr.readStringList()).toOwnedSlice(),
+                    .arg_types = try pr.readStringList(),
                 };
             },
             .WriteTimeout => {

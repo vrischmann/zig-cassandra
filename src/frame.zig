@@ -6,6 +6,8 @@ const os = std.os;
 const net = std.net;
 
 usingnamespace @import("primitive_types.zig");
+pub const PrimitiveReader = @import("primitive/reader.zig").PrimitiveReader;
+pub const PrimitiveWriter = @import("primitive/writer.zig").PrimitiveWriter;
 
 // Ordered by Opcode
 
@@ -290,6 +292,104 @@ pub const PreparedMetadata = struct {
     }
 };
 
+pub const TopologyChangeType = enum {
+    NEW_NODE,
+    REMOVED_NODE,
+};
+
+pub const StatusChangeType = enum {
+    UP,
+    DOWN,
+};
+
+pub const SchemaChangeType = enum {
+    CREATED,
+    UPDATED,
+    DROPPED,
+};
+
+pub const SchemaChangeTarget = enum {
+    KEYSPACE,
+    TABLE,
+    TYPE,
+    FUNCTION,
+    AGGREGATE,
+};
+
+pub const SchemaChangeOptions = struct {
+    keyspace: []const u8,
+    object_name: []const u8,
+    arguments: ?[]const []const u8,
+
+    pub fn init() SchemaChangeOptions {
+        return SchemaChangeOptions{
+            .keyspace = &[_]u8{},
+            .object_name = &[_]u8{},
+            .arguments = null,
+        };
+    }
+};
+
+pub const TopologyChange = struct {
+    type: TopologyChangeType,
+    node_address: net.Address,
+};
+
+pub const StatusChange = struct {
+    type: StatusChangeType,
+    node_address: net.Address,
+};
+
+pub const SchemaChange = struct {
+    const Self = @This();
+
+    type: SchemaChangeType,
+    target: SchemaChangeTarget,
+    options: SchemaChangeOptions,
+
+    pub fn read(allocator: *mem.Allocator, pr: *PrimitiveReader) !Self {
+        var change = Self{
+            .type = undefined,
+            .target = undefined,
+            .options = undefined,
+        };
+
+        change.type = std.meta.stringToEnum(SchemaChangeType, (try pr.readString())) orelse return error.InvalidSchemaChangeType;
+        change.target = std.meta.stringToEnum(SchemaChangeTarget, (try pr.readString())) orelse return error.InvalidSchemaChangeTarget;
+
+        change.options = SchemaChangeOptions.init();
+
+        switch (change.target) {
+            .KEYSPACE => {
+                change.options.keyspace = try pr.readString();
+            },
+            .TABLE, .TYPE => {
+                change.options.keyspace = try pr.readString();
+                change.options.object_name = try pr.readString();
+            },
+            .FUNCTION, .AGGREGATE => {
+                change.options.keyspace = try pr.readString();
+                change.options.object_name = try pr.readString();
+                change.options.arguments = try pr.readStringList();
+            },
+        }
+
+        return change;
+    }
+};
+
+pub const EventType = enum {
+    TOPOLOGY_CHANGE,
+    STATUS_CHANGE,
+    SCHEMA_CHANGE,
+};
+
+pub const Event = union(EventType) {
+    TOPOLOGY_CHANGE: TopologyChange,
+    STATUS_CHANGE: StatusChange,
+    SCHEMA_CHANGE: SchemaChange,
+};
+
 pub fn checkHeader(opcode: Opcode, data_len: usize, header: FrameHeader) void {
     // We can only use v4 for now
     testing.expectEqual(ProtocolVersion.V4, header.version);
@@ -321,6 +421,22 @@ test "frame header: read and write" {
     _ = try header.write(@TypeOf(new_fbs.outStream()), new_fbs.outStream());
 }
 
+test "schema change options" {
+    var arena = testing.arenaAllocator();
+    defer arena.deinit();
+
+    var options = SchemaChangeOptions.init();
+
+    options.keyspace = try mem.dupe(&arena.allocator, u8, "foobar");
+    options.object_name = try mem.dupe(&arena.allocator, u8, "barbaz");
+    var arguments = try arena.allocator.alloc([]const u8, 4);
+    var i: usize = 0;
+    while (i < arguments.len) : (i += 1) {
+        arguments[i] = try mem.dupe(&arena.allocator, u8, "hello");
+    }
+    options.arguments = arguments;
+}
+
 test "" {
     _ = @import("frames/error.zig");
     _ = @import("frames/startup.zig");
@@ -335,4 +451,7 @@ test "" {
     _ = @import("frames/register.zig");
     _ = @import("frames/event.zig");
     _ = @import("frames/batch.zig");
+
+    _ = @import("primitive/reader.zig");
+    _ = @import("primitive/writer.zig");
 }
