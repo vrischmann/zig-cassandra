@@ -15,7 +15,7 @@ const StartupFrame = struct {
     cql_version: []const u8,
     compression: ?CompressionAlgorithm,
 
-    pub fn write(self: *Self, pw: *PrimitiveWriter) !void {
+    pub fn write(self: Self, pw: *PrimitiveWriter) !void {
         if (self.compression) |c| {
             // Always 2 keys
             _ = try pw.startStringMap(2);
@@ -68,14 +68,16 @@ const StartupFrame = struct {
     }
 };
 
-test "startup frame: read" {
+test "startup frame" {
     var arena = testing.arenaAllocator();
     defer arena.deinit();
 
-    const data = "\x04\x00\x00\x00\x01\x00\x00\x00\x16\x00\x01\x00\x0b\x43\x51\x4c\x5f\x56\x45\x52\x53\x49\x4f\x4e\x00\x05\x33\x2e\x30\x2e\x30";
-    const raw_frame = try testing.readRawFrame(&arena.allocator, data);
+    // read
 
-    checkHeader(Opcode.Startup, data.len, raw_frame.header);
+    const exp = "\x04\x00\x00\x00\x01\x00\x00\x00\x16\x00\x01\x00\x0b\x43\x51\x4c\x5f\x56\x45\x52\x53\x49\x4f\x4e\x00\x05\x33\x2e\x30\x2e\x30";
+    const raw_frame = try testing.readRawFrame(&arena.allocator, exp);
+
+    checkHeader(Opcode.Startup, exp.len, raw_frame.header);
 
     var pr = PrimitiveReader.init(&arena.allocator);
     pr.reset(raw_frame.body);
@@ -84,35 +86,15 @@ test "startup frame: read" {
 
     testing.expectEqualString("3.0.0", frame.cql_version);
     testing.expect(frame.compression == null);
-}
 
-test "startup frame: write" {
-    var arena = testing.arenaAllocator();
-    defer arena.deinit();
-
-    var frame = StartupFrame{
-        .cql_version = "3.0.0",
-        .compression = null,
-        // .compression = CompressionAlgorithm.LZ4,
-    };
-
-    // TODO(vincent): broken
+    // write
 
     var buf: [1024]u8 = undefined;
     var pw = PrimitiveWriter.init();
     pw.reset(&buf);
 
-    _ = try StartupFrame.write(&frame, &pw);
+    _ = try frame.write(&pw);
 
-    const header = FrameHeader{
-        .version = .{ .version = 4 },
-        .flags = 0x08,
-        .stream = 20000,
-        .opcode = Opcode.Startup,
-        .body_len = @intCast(u32, pw.getWritten().len),
-    };
-
-    const out = try testing.writeRawFrame(&arena.allocator, header, pw.getWritten());
-    const exp = "\x04\x08\x4e\x20\x01\x00\x00\x00\x16\x00\x01\x00\x0b\x43\x51\x4c\x5f\x56\x45\x52\x53\x49\x4f\x4e\x00\x05\x33\x2e\x30\x2e\x30";
+    const out = try testing.writeRawFrame(&arena.allocator, raw_frame.header, pw.getWritten());
     testing.expectEqualSlices(u8, exp, out);
 }
