@@ -15,6 +15,22 @@ const EventFrame = struct {
 
     event: Event,
 
+    pub fn write(self: Self, pw: *PrimitiveWriter) !void {
+        _ = try pw.writeString(meta.tagName(self.event));
+        return switch (self.event) {
+            .TOPOLOGY_CHANGE => |change| {
+                _ = try pw.writeString(meta.tagName(change.type));
+                _ = try pw.writeInet(change.node_address);
+            },
+            .STATUS_CHANGE => {
+                unreachable;
+            },
+            .SCHEMA_CHANGE => {
+                unreachable;
+            },
+        };
+    }
+
     pub fn read(allocator: *mem.Allocator, pr: *PrimitiveReader) !Self {
         var frame = Self{
             .event = undefined,
@@ -62,10 +78,12 @@ test "event frame: topology change" {
     var arena = testing.arenaAllocator();
     defer arena.deinit();
 
-    const data = "\x84\x00\xff\xff\x0c\x00\x00\x00\x24\x00\x0f\x54\x4f\x50\x4f\x4c\x4f\x47\x59\x5f\x43\x48\x41\x4e\x47\x45\x00\x08\x4e\x45\x57\x5f\x4e\x4f\x44\x45\x04\x7f\x00\x00\x04\x00\x00\x23\x52";
-    const raw_frame = try testing.readRawFrame(&arena.allocator, data);
+    // read
 
-    checkHeader(Opcode.Event, data.len, raw_frame.header);
+    const exp = "\x84\x00\xff\xff\x0c\x00\x00\x00\x24\x00\x0f\x54\x4f\x50\x4f\x4c\x4f\x47\x59\x5f\x43\x48\x41\x4e\x47\x45\x00\x08\x4e\x45\x57\x5f\x4e\x4f\x44\x45\x04\x7f\x00\x00\x04\x00\x00\x23\x52";
+    const raw_frame = try testing.readRawFrame(&arena.allocator, exp);
+
+    checkHeader(Opcode.Event, exp.len, raw_frame.header);
 
     var pr = PrimitiveReader.init(&arena.allocator);
     pr.reset(raw_frame.body);
@@ -79,6 +97,10 @@ test "event frame: topology change" {
 
     const localhost = net.Address.initIp4([4]u8{ 0x7f, 0x00, 0x00, 0x04 }, 9042);
     testing.expect(net.Address.eql(localhost, topology_change.node_address));
+
+    // write
+
+    testing.expectSameRawFrame(frame, raw_frame.header, exp);
 }
 
 test "event frame: status change" {
