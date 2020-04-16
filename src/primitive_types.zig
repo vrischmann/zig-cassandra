@@ -66,6 +66,14 @@ pub const CQLVersion = struct {
 
         return version;
     }
+
+    pub fn print(self: @This(), buf: []u8) ![]u8 {
+        return std.fmt.bufPrint(buf, "{}.{}.{}", .{
+            self.major,
+            self.minor,
+            self.patch,
+        });
+    }
 };
 
 pub const ProtocolVersion = packed struct {
