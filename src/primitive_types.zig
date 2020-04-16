@@ -77,10 +77,10 @@ pub const ProtocolVersion = packed struct {
         return self.version & 0x7 == @as(u8, version);
     }
     pub fn is_request(self: Self) bool {
-        return self.version & 0x7 == 0;
+        return self.version & 0x0f == self.version;
     }
     pub fn is_response(self: Self) bool {
-        return self.version & 0x7 == 0x7;
+        return self.version & 0xf0 == 0x80;
     }
 
     pub fn fromString(s: []const u8) !ProtocolVersion {
@@ -223,8 +223,11 @@ test "protocol version: serialize and deserialize" {
         if (tc.err) |err| {
             testing.expectError(err, d.deserialize(ProtocolVersion));
         } else {
-            testing.expect((try d.deserialize(ProtocolVersion)).is(tc.exp));
-            testing.expect((try d.deserialize(ProtocolVersion)).is(tc.exp));
+            var v1 = try d.deserialize(ProtocolVersion);
+            var v2 = try d.deserialize(ProtocolVersion);
+            testing.expect(v1.is(tc.exp));
+            testing.expect(v1.is_request());
+            testing.expect(v2.is_response());
         }
     }
 }
