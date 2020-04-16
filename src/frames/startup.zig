@@ -89,12 +89,5 @@ test "startup frame" {
 
     // write
 
-    var buf: [1024]u8 = undefined;
-    var pw = PrimitiveWriter.init();
-    pw.reset(&buf);
-
-    _ = try frame.write(&pw);
-
-    const out = try testing.writeRawFrame(&arena.allocator, raw_frame.header, pw.getWritten());
-    testing.expectEqualSlices(u8, exp, out);
+    testing.expectSameRawFrame(frame, raw_frame.header, exp);
 }

@@ -14,6 +14,10 @@ const testing = @import("../testing.zig");
 const AuthenticateFrame = struct {
     authenticator: []const u8,
 
+    pub fn write(self: @This(), pw: *PrimitiveWriter) !void {
+        return pw.writeString(self.authenticator);
+    }
+
     pub fn read(allocator: *mem.Allocator, pr: *PrimitiveReader) !AuthenticateFrame {
         return AuthenticateFrame{
             .authenticator = try pr.readString(),
@@ -26,6 +30,10 @@ const AuthenticateFrame = struct {
 /// Described in the protocol spec at §4.1.2.
 const AuthResponseFrame = struct {
     token: ?[]const u8,
+
+    pub fn write(self: @This(), pw: *PrimitiveWriter) !void {
+        return pw.writeBytes(self.token);
+    }
 
     pub fn read(allocator: *mem.Allocator, pr: *PrimitiveReader) !AuthResponseFrame {
         return AuthResponseFrame{
@@ -40,6 +48,10 @@ const AuthResponseFrame = struct {
 const AuthChallengeFrame = struct {
     token: ?[]const u8,
 
+    pub fn write(self: @This(), pw: *PrimitiveWriter) !void {
+        return pw.writeBytes(self.token);
+    }
+
     pub fn read(allocator: *mem.Allocator, pr: *PrimitiveReader) !AuthChallengeFrame {
         return AuthChallengeFrame{
             .token = try pr.readBytes(),
@@ -53,6 +65,10 @@ const AuthChallengeFrame = struct {
 const AuthSuccessFrame = struct {
     token: ?[]const u8,
 
+    pub fn write(self: @This(), pw: *PrimitiveWriter) !void {
+        return pw.writeBytes(self.token);
+    }
+
     pub fn read(allocator: *mem.Allocator, pr: *PrimitiveReader) !AuthSuccessFrame {
         return AuthSuccessFrame{
             .token = try pr.readBytes(),
@@ -64,10 +80,12 @@ test "authenticate frame" {
     var arena = testing.arenaAllocator();
     defer arena.deinit();
 
-    const data = "\x84\x00\x00\x00\x03\x00\x00\x00\x31\x00\x2f\x6f\x72\x67\x2e\x61\x70\x61\x63\x68\x65\x2e\x63\x61\x73\x73\x61\x6e\x64\x72\x61\x2e\x61\x75\x74\x68\x2e\x50\x61\x73\x73\x77\x6f\x72\x64\x41\x75\x74\x68\x65\x6e\x74\x69\x63\x61\x74\x6f\x72";
-    const raw_frame = try testing.readRawFrame(&arena.allocator, data);
+    // read
 
-    checkHeader(Opcode.Authenticate, data.len, raw_frame.header);
+    const exp = "\x84\x00\x00\x00\x03\x00\x00\x00\x31\x00\x2f\x6f\x72\x67\x2e\x61\x70\x61\x63\x68\x65\x2e\x63\x61\x73\x73\x61\x6e\x64\x72\x61\x2e\x61\x75\x74\x68\x2e\x50\x61\x73\x73\x77\x6f\x72\x64\x41\x75\x74\x68\x65\x6e\x74\x69\x63\x61\x74\x6f\x72";
+    const raw_frame = try testing.readRawFrame(&arena.allocator, exp);
+
+    checkHeader(Opcode.Authenticate, exp.len, raw_frame.header);
 
     var pr = PrimitiveReader.init(&arena.allocator);
     pr.reset(raw_frame.body);
@@ -75,6 +93,10 @@ test "authenticate frame" {
     const frame = try AuthenticateFrame.read(&arena.allocator, &pr);
 
     testing.expectEqualString("org.apache.cassandra.auth.PasswordAuthenticator", frame.authenticator);
+
+    // write
+
+    testing.expectSameRawFrame(frame, raw_frame.header, exp);
 }
 
 test "auth challenge frame" {
@@ -85,10 +107,12 @@ test "auth response frame" {
     var arena = testing.arenaAllocator();
     defer arena.deinit();
 
-    const data = "\x04\x00\x00\x02\x0f\x00\x00\x00\x18\x00\x00\x00\x14\x00\x63\x61\x73\x73\x61\x6e\x64\x72\x61\x00\x63\x61\x73\x73\x61\x6e\x64\x72\x61";
-    const raw_frame = try testing.readRawFrame(&arena.allocator, data);
+    // read
 
-    checkHeader(Opcode.AuthResponse, data.len, raw_frame.header);
+    const exp = "\x04\x00\x00\x02\x0f\x00\x00\x00\x18\x00\x00\x00\x14\x00\x63\x61\x73\x73\x61\x6e\x64\x72\x61\x00\x63\x61\x73\x73\x61\x6e\x64\x72\x61";
+    const raw_frame = try testing.readRawFrame(&arena.allocator, exp);
+
+    checkHeader(Opcode.AuthResponse, exp.len, raw_frame.header);
 
     var pr = PrimitiveReader.init(&arena.allocator);
     pr.reset(raw_frame.body);
@@ -97,16 +121,22 @@ test "auth response frame" {
 
     const exp_token = "\x00cassandra\x00cassandra";
     testing.expectEqualSlices(u8, exp_token, frame.token.?);
+
+    // write
+
+    testing.expectSameRawFrame(frame, raw_frame.header, exp);
 }
 
 test "auth success frame" {
     var arena = testing.arenaAllocator();
     defer arena.deinit();
 
-    const data = "\x84\x00\x00\x02\x10\x00\x00\x00\x04\xff\xff\xff\xff";
-    const raw_frame = try testing.readRawFrame(&arena.allocator, data);
+    // read
 
-    checkHeader(Opcode.AuthSuccess, data.len, raw_frame.header);
+    const exp = "\x84\x00\x00\x02\x10\x00\x00\x00\x04\xff\xff\xff\xff";
+    const raw_frame = try testing.readRawFrame(&arena.allocator, exp);
+
+    checkHeader(Opcode.AuthSuccess, exp.len, raw_frame.header);
 
     var pr = PrimitiveReader.init(&arena.allocator);
     pr.reset(raw_frame.body);
@@ -114,4 +144,8 @@ test "auth success frame" {
     const frame = try AuthSuccessFrame.read(&arena.allocator, &pr);
 
     testing.expect(frame.token == null);
+
+    // write
+
+    testing.expectSameRawFrame(frame, raw_frame.header, exp);
 }
