@@ -26,6 +26,26 @@ pub fn expectInDelta(a: var, b: var, delta: @TypeOf(a)) void {
     }
 }
 
+pub fn printHRBytes(data: []const u8) void {
+    const hextable = "0123456789abcdef";
+
+    var buffer = std.testing.allocator.alloc(u8, data.len * 4) catch |err| {
+        std.debug.panic("can't allocate buffer. err: {}\n", .{err});
+    };
+    var j: usize = 0;
+    for (data) |c| {
+        buffer[j] = '\\';
+        buffer[j + 1] = 'x';
+        buffer[j + 2] = hextable[(c & 0xF0) >> 4];
+        buffer[j + 3] = hextable[c & 0x0F];
+        j += 4;
+    }
+
+    std.debug.getStderrStream().print("\n", .{}) catch unreachable;
+    std.debug.getStderrStream().writeAll(buffer) catch unreachable;
+    std.debug.getStderrStream().print("\n", .{}) catch unreachable;
+}
+
 /// Creates an arena allocator backed by the testing allocator.
 /// Only intended to be used for tests.
 pub fn arenaAllocator() std.heap.ArenaAllocator {
@@ -43,6 +63,8 @@ pub fn readRawFrame(_allocator: *std.mem.Allocator, data: []const u8) !RawFrame 
     return fr.read();
 }
 
+/// Write a raw frame to a buffer and return it.
+/// Only intended to be used for tests.
 pub fn writeRawFrame(_allocator: *std.mem.Allocator, header: FrameHeader, body: []const u8) ![]u8 {
     var buf = try _allocator.alloc(u8, @sizeOf(FrameHeader) + body.len);
 
