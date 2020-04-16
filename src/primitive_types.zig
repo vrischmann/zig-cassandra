@@ -103,6 +103,18 @@ pub const ProtocolVersion = packed struct {
         }
     }
 
+    pub fn toString(self: Self) ![]const u8 {
+        if (self.is(3)) {
+            return "3/v3";
+        } else if (self.is(4)) {
+            return "4/v4";
+        } else if (self.is(5)) {
+            return "5/v5-beta";
+        } else {
+            return error.InvalidProtocolVersion;
+        }
+    }
+
     pub fn serialize(self: @This(), serializer: var) !void {
         return serializer.serialize(self.version);
     }
@@ -154,6 +166,13 @@ pub const CompressionAlgorithm = enum {
         } else {
             return error.InvalidCompressionAlgorithm;
         }
+    }
+
+    pub fn toString(self: @This()) []const u8 {
+        return switch (self) {
+            .LZ4 => "lz4",
+            .Snappy => "snappy",
+        };
     }
 };
 
