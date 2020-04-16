@@ -420,7 +420,7 @@ test "frame header: read and write" {
 
     var deserializer = io.deserializer(.Big, io.Packing.Bit, fbs.inStream());
     const header = try deserializer.deserialize(FrameHeader);
-    testing.expect(header.version.is(3));
+    testing.expect(header.version.is(4));
     testing.expect(header.version.is_request());
     testing.expectEqual(@as(u8, 0), header.flags);
     testing.expectEqual(@as(i16, 215), header.stream);
