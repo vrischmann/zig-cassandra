@@ -27,26 +27,24 @@ pub fn expectInDelta(a: var, b: var, delta: @TypeOf(a)) void {
     }
 }
 
-pub fn printHRBytes(data: []const u8) void {
+pub fn printHRBytes(comptime fmt: []const u8, exp: []const u8, args: var) void {
     const hextable = "0123456789abcdef";
 
-    var buffer = std.testing.allocator.alloc(u8, data.len * 4) catch |err| {
-        std.debug.panic("can't allocate buffer. err: {}\n", .{err});
-    };
-    defer std.testing.allocator.free(buffer);
+    var buffer = std.ArrayList(u8).init(std.testing.allocator);
+    defer buffer.deinit();
 
-    var j: usize = 0;
-    for (data) |c| {
-        buffer[j] = '\\';
-        buffer[j + 1] = 'x';
-        buffer[j + 2] = hextable[(c & 0xF0) >> 4];
-        buffer[j + 3] = hextable[c & 0x0F];
-        j += 4;
+    for (exp) |c| {
+        if (std.ascii.isAlNum(c)) {
+            buffer.append(c) catch unreachable;
+        } else {
+            buffer.appendSlice("\\x") catch unreachable;
+            buffer.append(hextable[(c & 0xF0) >> 4]) catch unreachable;
+            buffer.append(hextable[(c & 0x0F)]) catch unreachable;
+        }
     }
 
-    std.debug.getStderrStream().print("\n", .{}) catch unreachable;
-    std.debug.getStderrStream().writeAll(buffer) catch unreachable;
-    std.debug.getStderrStream().print("\n", .{}) catch unreachable;
+    var span = buffer.span();
+    std.debug.warn(fmt, .{span} ++ args);
 }
 
 /// Creates an arena allocator backed by the testing allocator.
@@ -92,5 +90,9 @@ pub fn expectSameRawFrame(frame: var, header: FrameHeader, exp: []const u8) void
         std.debug.panic("unable to write raw frame. err: {}\n", .{err});
     };
 
-    std.testing.expectEqualSlices(u8, exp, source.buffer.getWritten());
+    if (!std.mem.eql(u8, exp, source.buffer.getWritten())) {
+        printHRBytes("\nexp   : {}\n", exp, .{});
+        printHRBytes("source: {}\n", source.buffer.getWritten(), .{});
+        std.debug.panic("frames are different\n", .{});
+    }
 }
