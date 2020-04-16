@@ -436,9 +436,6 @@ test "frame header: read and write" {
     var serializer = io.serializer(.Big, io.Packing.Bit, new_fbs.outStream());
     _ = try serializer.serialize(header);
 
-    testing.printHRBytes(exp);
-    testing.printHRBytes(new_fbs.getWritten());
-
     testing.expectEqualSlices(u8, exp, new_fbs.getWritten());
 }
 
