@@ -30,8 +30,7 @@ const StartupFrame = struct {
             }
         } else {
             // Always 1 key
-            _ = try pw.startStringMap(2);
-
+            _ = try pw.startStringMap(1);
             _ = try pw.writeString("CQL_VERSION");
             _ = try pw.writeString("3.0.0");
         }
@@ -107,16 +106,13 @@ test "startup frame: write" {
 
     const header = FrameHeader{
         .version = .{ .version = 4 },
-        .flags = 0,
-        .stream = 200,
+        .flags = 0x08,
+        .stream = 20000,
         .opcode = Opcode.Startup,
         .body_len = @intCast(u32, pw.getWritten().len),
     };
 
     const out = try testing.writeRawFrame(&arena.allocator, header, pw.getWritten());
-    testing.printHRBytes(out);
-
-    const exp = "\x04\x00\x00\x00\x01\x00\x00\x00\x16\x00\x01\x00\x0b\x43\x51\x4c\x5f\x56\x45\x52\x53\x49\x4f\x4e\x00\x05\x33\x2e\x30\x2e\x30";
-    testing.printHRBytes(exp);
+    const exp = "\x04\x08\x4e\x20\x01\x00\x00\x00\x16\x00\x01\x00\x0b\x43\x51\x4c\x5f\x56\x45\x52\x53\x49\x4f\x4e\x00\x05\x33\x2e\x30\x2e\x30";
     testing.expectEqualSlices(u8, exp, out);
 }
