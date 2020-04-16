@@ -34,7 +34,7 @@ pub fn printHRBytes(comptime fmt: []const u8, exp: []const u8, args: var) void {
     defer buffer.deinit();
 
     for (exp) |c| {
-        if (std.ascii.isAlNum(c)) {
+        if (std.ascii.isAlNum(c) or c == '_') {
             buffer.append(c) catch unreachable;
         } else {
             buffer.appendSlice("\\x") catch unreachable;
