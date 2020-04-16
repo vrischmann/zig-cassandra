@@ -114,18 +114,16 @@ pub const PrimitiveWriter = struct {
     fn writeInetGeneric(self: *Self, inet: net.Address, comptime with_port: bool) !void {
         switch (inet.any.family) {
             os.AF_INET => {
-                const addr = mem.bigToNative(u32, inet.in.addr);
-
                 if (with_port) {
                     var buf: [9]u8 = undefined;
                     buf[0] = 4;
-                    mem.copy(u8, buf[1..5], @ptrCast(*const [4]u8, &addr));
+                    mem.writeIntNative(u32, buf[1..5], inet.in.addr);
                     mem.writeIntBig(u32, buf[5..9], inet.getPort());
                     return self.out_stream.writeAll(&buf);
                 } else {
                     var buf: [5]u8 = undefined;
                     buf[0] = 4;
-                    mem.copy(u8, buf[1..5], @ptrCast(*const [4]u8, &addr));
+                    mem.writeIntNative(u32, buf[1..5], inet.in.addr);
                     return self.out_stream.writeAll(&buf);
                 }
             },
@@ -287,7 +285,7 @@ test "primitive writer: write inet and inetaddr" {
 
     // IPv4
     _ = try pw.writeInet(net.Address.initIp4([_]u8{ 0x78, 0x56, 0x34, 0x12 }, 34));
-    testing.expectEqualSlices(u8, "\x04\x12\x34\x56\x78\x00\x00\x00\x22", buf[0..9]);
+    testing.expectEqualSlices(u8, "\x04\x78\x56\x34\x12\x00\x00\x00\x22", buf[0..9]);
 
     // IPv6
     _ = try pw.writeInet(net.Address.initIp6([_]u8{0xff} ** 16, 34, 0, 0));
@@ -295,7 +293,7 @@ test "primitive writer: write inet and inetaddr" {
 
     // IPv4 without port
     _ = try pw.writeInetaddr(net.Address.initIp4([_]u8{ 0x78, 0x56, 0x34, 0x12 }, 34));
-    testing.expectEqualSlices(u8, "\x04\x12\x34\x56\x78\xaa\xaa", buf[30 .. 35 + 2]);
+    testing.expectEqualSlices(u8, "\x04\x78\x56\x34\x12\xaa\xaa", buf[30 .. 35 + 2]);
 
     // IPv6 without port
     _ = try pw.writeInetaddr(net.Address.initIp6([_]u8{0xff} ** 16, 34, 0, 0));
