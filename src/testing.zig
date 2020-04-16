@@ -7,6 +7,7 @@ pub const expectError = std.testing.expectError;
 pub const expectEqual = std.testing.expectEqual;
 pub const expectEqualSlices = std.testing.expectEqualSlices;
 
+const PrimitiveWriter = @import("primitive/writer.zig").PrimitiveWriter;
 const FrameHeader = @import("frame.zig").FrameHeader;
 const RawFrame = @import("frame.zig").RawFrame;
 const RawFrameReader = @import("frame.zig").RawFrameReader;
@@ -65,19 +66,31 @@ pub fn readRawFrame(_allocator: *std.mem.Allocator, data: []const u8) !RawFrame 
     return fr.read();
 }
 
-/// Write a raw frame to a buffer and return it.
-/// Only intended to be used for tests.
-pub fn writeRawFrame(_allocator: *std.mem.Allocator, header: FrameHeader, body: []const u8) ![]u8 {
-    var buf = try _allocator.alloc(u8, @sizeOf(FrameHeader) + body.len);
+pub fn expectSameRawFrame(frame: var, header: FrameHeader, exp: []const u8) void {
+    // Write frame body
+    var buf: [1024]u8 = undefined;
+    var pw = PrimitiveWriter.init();
+    pw.reset(&buf);
 
-    var source = io.StreamSource{ .buffer = io.fixedBufferStream(buf) };
+    frame.write(&pw) catch |err| {
+        std.debug.panic("unable to write frame. err: {}\n", .{err});
+    };
+
+    // Write raw frame
+
+    const raw_frame = RawFrame{
+        .header = header,
+        .body = pw.getWritten(),
+    };
+
+    var buf2: [1024]u8 = undefined;
+    var source = io.StreamSource{ .buffer = io.fixedBufferStream(&buf2) };
     var out_stream = source.outStream();
     var fw = RawFrameWriter(@TypeOf(out_stream)).init(out_stream);
 
-    _ = try fw.write(RawFrame{
-        .header = header,
-        .body = body,
-    });
+    fw.write(raw_frame) catch |err| {
+        std.debug.panic("unable to write raw frame. err: {}\n", .{err});
+    };
 
-    return buf;
+    std.testing.expectEqualSlices(u8, exp, source.buffer.getWritten());
 }
