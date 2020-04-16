@@ -32,6 +32,8 @@ pub fn printHRBytes(data: []const u8) void {
     var buffer = std.testing.allocator.alloc(u8, data.len * 4) catch |err| {
         std.debug.panic("can't allocate buffer. err: {}\n", .{err});
     };
+    defer std.testing.allocator.free(buffer);
+
     var j: usize = 0;
     for (data) |c| {
         buffer[j] = '\\';
