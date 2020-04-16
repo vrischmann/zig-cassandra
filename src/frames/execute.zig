@@ -26,7 +26,7 @@ const ExecuteFrame = struct {
         };
 
         frame.query_id = (try pr.readShortBytes()) orelse &[_]u8{};
-        if (header.version == ProtocolVersion.V5) {
+        if (header.version.is(5)) {
             frame.result_metadata_id = try pr.readShortBytes();
         }
         frame.query_parameters = try QueryParameters.read(allocator, header, pr);

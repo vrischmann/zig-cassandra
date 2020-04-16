@@ -68,32 +68,42 @@ pub const CQLVersion = struct {
     }
 };
 
-pub const ProtocolVersion = packed enum(u8) {
-    V3,
-    V4,
-    V5,
+pub const ProtocolVersion = packed struct {
+    const Self = @This();
+
+    version: u8,
+
+    pub fn is(self: Self, comptime version: comptime_int) bool {
+        return self.version & 0x7 == @as(u8, version);
+    }
+    pub fn is_request(self: Self) bool {
+        return self.version & 0x7 == 0;
+    }
+    pub fn is_response(self: Self) bool {
+        return self.version & 0x7 == 0x7;
+    }
 
     pub fn fromString(s: []const u8) !ProtocolVersion {
-        // NOTE(vincent): maybe this shouldn't be hardcoded like this but for now it's fine
         if (mem.startsWith(u8, s, "3/")) {
-            return ProtocolVersion.V3;
+            return ProtocolVersion{ .version = 3 };
         } else if (mem.startsWith(u8, s, "4/")) {
-            return ProtocolVersion.V4;
+            return ProtocolVersion{ .version = 4 };
         } else if (mem.startsWith(u8, s, "5/")) {
-            return ProtocolVersion.V5;
+            return ProtocolVersion{ .version = 5 };
         } else {
             return error.InvalidProtocolVersion;
         }
     }
 
+    pub fn serialize(self: @This(), serializer: var) !void {
+        return serializer.serialize(self.version);
+    }
+
     pub fn deserialize(self: *@This(), deserializer: var) !void {
-        const version = try deserializer.deserialize(u8);
-        return switch (version & 0x7) {
-            3 => self.* = .V3,
-            4 => self.* = .V4,
-            5 => self.* = .V5,
-            else => error.InvalidVersion,
-        };
+        self.version = try deserializer.deserialize(u8);
+        if ((self.version & 0x7) < 3 or (self.version & 0x7) > 5) {
+            return error.InvalidProtocolVersion;
+        }
     }
 };
 
@@ -167,45 +177,44 @@ test "cql version: fromString" {
 }
 
 test "protocol version: fromString" {
-    testing.expectEqual(ProtocolVersion.V3, try ProtocolVersion.fromString("3/v3"));
-    testing.expectEqual(ProtocolVersion.V4, try ProtocolVersion.fromString("4/v4"));
-    testing.expectEqual(ProtocolVersion.V5, try ProtocolVersion.fromString("5/v5"));
-    testing.expectEqual(ProtocolVersion.V5, try ProtocolVersion.fromString("5/v5-beta"));
-
+    testing.expect((try ProtocolVersion.fromString("3/v3")).is(3));
+    testing.expect((try ProtocolVersion.fromString("4/v4")).is(4));
+    testing.expect((try ProtocolVersion.fromString("5/v5")).is(5));
+    testing.expect((try ProtocolVersion.fromString("5/v5-betz")).is(5));
     testing.expectError(error.InvalidProtocolVersion, ProtocolVersion.fromString("lalal"));
 }
 
-test "protocol version: parse" {
+test "protocol version: serialize and deserialize" {
     const testCase = struct {
-        exp: ProtocolVersion,
+        exp: comptime_int,
         b: [2]u8,
         err: ?anyerror,
     };
 
     const testCases = [_]testCase{
         testCase{
-            .exp = ProtocolVersion.V3,
+            .exp = 3,
             .b = [2]u8{ 0x03, 0x83 },
             .err = null,
         },
         testCase{
-            .exp = ProtocolVersion.V4,
+            .exp = 4,
             .b = [2]u8{ 0x04, 0x84 },
             .err = null,
         },
         testCase{
-            .exp = ProtocolVersion.V5,
+            .exp = 5,
             .b = [2]u8{ 0x05, 0x85 },
             .err = null,
         },
         testCase{
-            .exp = ProtocolVersion.V5,
+            .exp = 0,
             .b = [2]u8{ 0x00, 0x00 },
-            .err = error.InvalidVersion,
+            .err = error.InvalidProtocolVersion,
         },
     };
 
-    for (testCases) |tc| {
+    inline for (testCases) |tc| {
         var version: ProtocolVersion = undefined;
 
         var in = std.io.fixedBufferStream(&tc.b);
@@ -214,8 +223,8 @@ test "protocol version: parse" {
         if (tc.err) |err| {
             testing.expectError(err, d.deserialize(ProtocolVersion));
         } else {
-            testing.expectEqual(tc.exp, try d.deserialize(ProtocolVersion));
-            testing.expectEqual(tc.exp, try d.deserialize(ProtocolVersion));
+            testing.expect((try d.deserialize(ProtocolVersion)).is(tc.exp));
+            testing.expect((try d.deserialize(ProtocolVersion)).is(tc.exp));
         }
     }
 }

@@ -33,16 +33,6 @@ pub const FrameHeader = packed struct {
     stream: i16,
     opcode: Opcode,
     body_len: u32,
-
-    pub fn write(frame_header: @This(), comptime OutStreamType: type, out: OutStreamType) !void {
-        var serializer = std.io.serializer(std.builtin.Endian.Big, std.io.Packing.Bit, out);
-        _ = try serializer.serialize(frame_header);
-    }
-
-    pub fn read(comptime InStreamType: type, in: InStreamType) !FrameHeader {
-        var deserializer = std.io.deserializer(std.builtin.Endian.Big, std.io.Packing.Bit, in);
-        return deserializer.deserialize(FrameHeader);
-    }
 };
 
 pub const RawFrame = struct {
@@ -57,16 +47,18 @@ pub fn RawFrameReader(comptime InStreamType: type) type {
         allocator: *mem.Allocator,
 
         in_stream: InStreamType,
+        deserializer: io.Deserializer(.Big, io.Packing.Bit, InStreamType),
 
         pub fn init(allocator: *mem.Allocator, in: InStreamType) Self {
             return Self{
                 .allocator = allocator,
                 .in_stream = in,
+                .deserializer = io.deserializer(std.builtin.Endian.Big, io.Packing.Bit, in),
             };
         }
 
         pub fn read(self: *Self) !RawFrame {
-            const header = try FrameHeader.read(InStreamType, self.in_stream);
+            const header = try self.deserializer.deserialize(FrameHeader);
 
             const len = @as(usize, header.body_len);
 
@@ -89,15 +81,17 @@ pub fn RawFrameWriter(comptime OutStreamType: type) type {
         const Self = @This();
 
         out_stream: OutStreamType,
+        serializer: io.Serializer(std.builtin.Endian.Big, io.Packing.Bit, OutStreamType),
 
         pub fn init(out: OutStreamType) Self {
             return Self{
                 .out_stream = out,
+                .serializer = io.serializer(std.builtin.Endian.Big, io.Packing.Bit, out),
             };
         }
 
         pub fn write(self: *Self, raw_frame: RawFrame) !void {
-            _ = try FrameHeader.write(raw_frame.header, OutStreamType, self.out_stream);
+            _ = try self.serializer.serialize(raw_frame.header);
             _ = try self.out_stream.writeAll(raw_frame.body);
         }
     };
@@ -411,7 +405,7 @@ pub const Event = union(EventType) {
 
 pub fn checkHeader(opcode: Opcode, data_len: usize, header: FrameHeader) void {
     // We can only use v4 for now
-    testing.expectEqual(ProtocolVersion.V4, header.version);
+    testing.expect(header.version.is(4));
     // Don't care about the flags here
     // Don't care about the stream
     testing.expectEqual(opcode, header.opcode);
@@ -420,12 +414,14 @@ pub fn checkHeader(opcode: Opcode, data_len: usize, header: FrameHeader) void {
 
 test "frame header: read and write" {
     const exp = "\x04\x00\x00\xd7\x05\x00\x00\x00\x00";
-    var fbs = std.io.fixedBufferStream(exp);
+    var fbs = io.fixedBufferStream(exp);
 
     // deserialize the header
 
-    var header = try FrameHeader.read(@TypeOf(fbs.inStream()), fbs.inStream());
-    testing.expectEqual(ProtocolVersion.V4, header.version);
+    var deserializer = io.deserializer(.Big, io.Packing.Bit, fbs.inStream());
+    const header = try deserializer.deserialize(FrameHeader);
+    testing.expect(header.version.is(3));
+    testing.expect(header.version.is_request());
     testing.expectEqual(@as(u8, 0), header.flags);
     testing.expectEqual(@as(i16, 215), header.stream);
     testing.expectEqual(Opcode.Options, header.opcode);
@@ -435,9 +431,15 @@ test "frame header: read and write" {
     // reserialize it
 
     var new_buf: [32]u8 = undefined;
-    var new_fbs = std.io.fixedBufferStream(&new_buf);
+    var new_fbs = io.fixedBufferStream(&new_buf);
 
-    _ = try header.write(@TypeOf(new_fbs.outStream()), new_fbs.outStream());
+    var serializer = io.serializer(.Big, io.Packing.Bit, new_fbs.outStream());
+    _ = try serializer.serialize(header);
+
+    testing.printHRBytes(exp);
+    testing.printHRBytes(new_fbs.getWritten());
+
+    testing.expectEqualSlices(u8, exp, new_fbs.getWritten());
 }
 
 test "schema change options" {

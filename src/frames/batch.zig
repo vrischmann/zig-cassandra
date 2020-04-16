@@ -104,7 +104,7 @@ const BatchFrame = struct {
 
         // The size of the flags bitmask depends on the protocol version.
         var flags: u32 = 0;
-        if (header.version == ProtocolVersion.V5) {
+        if (header.version.is(5)) {
             flags = try pr.readInt(u32);
         } else {
             flags = try pr.readInt(u8);
@@ -125,7 +125,7 @@ const BatchFrame = struct {
             frame.timestamp = timestamp;
         }
 
-        if (header.version != ProtocolVersion.V5) {
+        if (!header.version.is(5)) {
             return frame;
         }
 

@@ -80,7 +80,7 @@ const Prepared = struct {
         };
 
         prepared.query_id = (try pr.readShortBytes()) orelse return error.NoQueryIDInPreparedFrame;
-        if (header.version == ProtocolVersion.V5) {
+        if (header.version.is(5)) {
             prepared.result_metadata_id = (try pr.readShortBytes()) orelse return error.NoResultMetadataIDInPreparedFrame;
         }
         prepared.metadata = try PreparedMetadata.read(allocator, pr);

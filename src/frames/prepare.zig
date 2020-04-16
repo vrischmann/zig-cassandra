@@ -26,7 +26,7 @@ const PrepareFrame = struct {
 
         frame.query = try pr.readLongString();
 
-        if (header.version != ProtocolVersion.V5) {
+        if (!header.version.is(5)) {
             return frame;
         }
 

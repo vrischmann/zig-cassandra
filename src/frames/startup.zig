@@ -106,7 +106,7 @@ test "startup frame: write" {
     _ = try StartupFrame.write(&frame, &pw);
 
     const header = FrameHeader{
-        .version = ProtocolVersion.V4,
+        .version = .{ .version = 4 },
         .flags = 0,
         .stream = 200,
         .opcode = Opcode.Startup,
@@ -114,7 +114,9 @@ test "startup frame: write" {
     };
 
     const out = try testing.writeRawFrame(&arena.allocator, header, pw.getWritten());
+    testing.printHRBytes(out);
 
     const exp = "\x04\x00\x00\x00\x01\x00\x00\x00\x16\x00\x01\x00\x0b\x43\x51\x4c\x5f\x56\x45\x52\x53\x49\x4f\x4e\x00\x05\x33\x2e\x30\x2e\x30";
+    testing.printHRBytes(exp);
     testing.expectEqualSlices(u8, exp, out);
 }

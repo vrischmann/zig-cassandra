@@ -86,9 +86,9 @@ test "supported frame" {
     testing.expectEqual(CQLVersion{ .major = 3, .minor = 4, .patch = 4 }, frame.cql_versions[0]);
 
     testing.expectEqual(@as(usize, 3), frame.protocol_versions.len);
-    testing.expectEqual(ProtocolVersion.V3, frame.protocol_versions[0]);
-    testing.expectEqual(ProtocolVersion.V4, frame.protocol_versions[1]);
-    testing.expectEqual(ProtocolVersion.V5, frame.protocol_versions[2]);
+    testing.expect(frame.protocol_versions[0].is(3));
+    testing.expect(frame.protocol_versions[1].is(4));
+    testing.expect(frame.protocol_versions[2].is(5));
 
     testing.expectEqual(@as(usize, 2), frame.compression_algorithms.len);
     testing.expectEqual(CompressionAlgorithm.Snappy, frame.compression_algorithms[0]);
