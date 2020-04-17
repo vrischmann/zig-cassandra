@@ -15,22 +15,6 @@ const EventFrame = struct {
 
     event: Event,
 
-    pub fn write(self: Self, pw: *PrimitiveWriter) !void {
-        _ = try pw.writeString(meta.tagName(self.event));
-        return switch (self.event) {
-            .TOPOLOGY_CHANGE => |change| {
-                _ = try pw.writeString(meta.tagName(change.type));
-                _ = try pw.writeInet(change.node_address);
-            },
-            .STATUS_CHANGE => {
-                unreachable;
-            },
-            .SCHEMA_CHANGE => {
-                unreachable;
-            },
-        };
-    }
-
     pub fn read(allocator: *mem.Allocator, pr: *PrimitiveReader) !Self {
         var frame = Self{
             .event = undefined,
@@ -97,10 +81,6 @@ test "event frame: topology change" {
 
     const localhost = net.Address.initIp4([4]u8{ 0x7f, 0x00, 0x00, 0x04 }, 9042);
     testing.expect(net.Address.eql(localhost, topology_change.node_address));
-
-    // write
-
-    testing.expectSameRawFrame(frame, raw_frame.header, exp);
 }
 
 test "event frame: status change" {
