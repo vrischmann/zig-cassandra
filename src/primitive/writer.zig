@@ -170,13 +170,7 @@ pub const PrimitiveWriter = struct {
         }
     }
 
-    pub fn startStringList(self: *Self, size: usize) !void {
-        _ = try self.out_stream.writeIntBig(u16, @intCast(u16, size));
-    }
     pub fn startStringMap(self: *Self, size: usize) !void {
-        _ = try self.out_stream.writeIntBig(u16, @intCast(u16, size));
-    }
-    pub fn startStringMultimap(self: *Self, size: usize) !void {
         _ = try self.out_stream.writeIntBig(u16, @intCast(u16, size));
     }
 };
