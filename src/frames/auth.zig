@@ -14,10 +14,6 @@ const testing = @import("../testing.zig");
 const AuthenticateFrame = struct {
     authenticator: []const u8,
 
-    pub fn write(self: @This(), pw: *PrimitiveWriter) !void {
-        return pw.writeString(self.authenticator);
-    }
-
     pub fn read(allocator: *mem.Allocator, pr: *PrimitiveReader) !AuthenticateFrame {
         return AuthenticateFrame{
             .authenticator = try pr.readString(),
@@ -85,10 +81,6 @@ test "authenticate frame" {
     const frame = try AuthenticateFrame.read(&arena.allocator, &pr);
 
     testing.expectEqualString("org.apache.cassandra.auth.PasswordAuthenticator", frame.authenticator);
-
-    // write
-
-    testing.expectSameRawFrame(frame, raw_frame.header, exp);
 }
 
 test "auth challenge frame" {

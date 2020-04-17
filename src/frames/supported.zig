@@ -18,52 +18,6 @@ const SupportedFrame = struct {
     cql_versions: []CQLVersion,
     compression_algorithms: []CompressionAlgorithm,
 
-    pub fn write(self: Self, pw: *PrimitiveWriter) !void {
-        // Determine how many keys there are
-        var count: usize = 0;
-        if (self.protocol_versions.len > 0) {
-            count += 1;
-        }
-        if (self.cql_versions.len > 0) {
-            count += 1;
-        }
-        if (self.compression_algorithms.len > 0) {
-            count += 1;
-        }
-
-        // Protocol versions
-
-        _ = try pw.startStringMultimap(count);
-        if (self.protocol_versions.len > 0) {
-            _ = try pw.writeString("PROTOCOL_VERSIONS");
-            _ = try pw.startStringList(self.protocol_versions.len);
-            for (self.protocol_versions) |v| {
-                _ = try pw.writeString(try v.toString());
-            }
-        }
-
-        // Compression algorithms
-
-        if (self.compression_algorithms.len > 0) {
-            _ = try pw.writeString("COMPRESSION");
-            _ = try pw.startStringList(self.compression_algorithms.len);
-            for (self.compression_algorithms) |v| {
-                _ = try pw.writeString(v.toString());
-            }
-        }
-
-        // CQL versions
-
-        if (self.cql_versions.len > 0) {
-            _ = try pw.writeString("CQL_VERSION");
-            _ = try pw.startStringList(self.cql_versions.len);
-            for (self.cql_versions) |v| {
-                var buf: [64]u8 = undefined;
-                _ = try pw.writeString(try v.print(&buf));
-            }
-        }
-    }
-
     pub fn read(allocator: *mem.Allocator, pr: *PrimitiveReader) !Self {
         var frame = Self{
             .protocol_versions = &[_]ProtocolVersion{},
@@ -141,8 +95,4 @@ test "supported frame" {
     testing.expectEqual(@as(usize, 2), frame.compression_algorithms.len);
     testing.expectEqual(CompressionAlgorithm.Snappy, frame.compression_algorithms[0]);
     testing.expectEqual(CompressionAlgorithm.LZ4, frame.compression_algorithms[1]);
-
-    // write
-
-    testing.expectSameRawFrame(frame, raw_frame.header, exp);
 }
