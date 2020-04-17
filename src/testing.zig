@@ -70,9 +70,16 @@ pub fn expectSameRawFrame(frame: var, header: FrameHeader, exp: []const u8) void
     var pw = PrimitiveWriter.init();
     pw.reset(&buf);
 
-    frame.write(&pw) catch |err| {
-        std.debug.panic("unable to write frame. err: {}\n", .{err});
-    };
+    const function = @typeInfo(@TypeOf(frame.write)).BoundFn;
+    if (function.args.len == 2) {
+        frame.write(&pw) catch |err| {
+            std.debug.panic("unable to write frame. err: {}\n", .{err});
+        };
+    } else if (function.args.len == 3) {
+        frame.write(header, &pw) catch |err| {
+            std.debug.panic("unable to write frame. err: {}\n", .{err});
+        };
+    }
 
     // Write raw frame
 
