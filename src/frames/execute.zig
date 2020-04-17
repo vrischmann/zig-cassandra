@@ -18,6 +18,16 @@ const ExecuteFrame = struct {
     result_metadata_id: ?[]const u8,
     query_parameters: QueryParameters,
 
+    pub fn write(self: Self, header: FrameHeader, pw: *PrimitiveWriter) !void {
+        _ = try pw.writeShortBytes(self.query_id);
+        if (header.version.is(5)) {
+            if (self.result_metadata_id) |id| {
+                _ = try pw.writeShortBytes(id);
+            }
+        }
+        _ = try self.query_parameters.write(header, pw);
+    }
+
     pub fn read(allocator: *mem.Allocator, header: FrameHeader, pr: *PrimitiveReader) !Self {
         var frame = Self{
             .query_id = undefined,
@@ -39,10 +49,12 @@ test "execute frame" {
     var arena = testing.arenaAllocator();
     defer arena.deinit();
 
-    const data = "\x04\x00\x01\x00\x0a\x00\x00\x00\x37\x00\x10\x97\x97\x95\x6d\xfe\xb2\x4c\x99\x86\x8e\xd3\x84\xff\x6f\xd9\x4c\x00\x04\x27\x00\x01\x00\x00\x00\x10\xeb\x11\xc9\x1e\xd8\xcc\x48\x4d\xaf\x55\xe9\x9f\x5c\xd9\xec\x4a\x00\x00\x13\x88\x00\x05\xa2\x41\x4c\x1b\x06\x4c";
-    const raw_frame = try testing.readRawFrame(&arena.allocator, data);
+    // read
 
-    checkHeader(Opcode.Execute, data.len, raw_frame.header);
+    const exp = "\x04\x00\x01\x00\x0a\x00\x00\x00\x37\x00\x10\x97\x97\x95\x6d\xfe\xb2\x4c\x99\x86\x8e\xd3\x84\xff\x6f\xd9\x4c\x00\x04\x27\x00\x01\x00\x00\x00\x10\xeb\x11\xc9\x1e\xd8\xcc\x48\x4d\xaf\x55\xe9\x9f\x5c\xd9\xec\x4a\x00\x00\x13\x88\x00\x05\xa2\x41\x4c\x1b\x06\x4c";
+    const raw_frame = try testing.readRawFrame(&arena.allocator, exp);
+
+    checkHeader(Opcode.Execute, exp.len, raw_frame.header);
 
     var pr = PrimitiveReader.init(&arena.allocator);
     pr.reset(raw_frame.body);
@@ -63,4 +75,8 @@ test "execute frame" {
     testing.expectEqual(@as(u64, 1585776216966732), frame.query_parameters.timestamp.?);
     testing.expect(frame.query_parameters.keyspace == null);
     testing.expect(frame.query_parameters.now_in_seconds == null);
+
+    // write
+
+    testing.expectSameRawFrame(frame, raw_frame.header, exp);
 }
