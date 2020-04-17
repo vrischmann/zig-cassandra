@@ -33,7 +33,13 @@ pub fn printHRBytes(comptime fmt: []const u8, exp: []const u8, args: var) void {
     var buffer = std.ArrayList(u8).init(std.testing.allocator);
     defer buffer.deinit();
 
+    var column: usize = 0;
     for (exp) |c| {
+        if (column % 80 == 0) {
+            buffer.append('\n') catch unreachable;
+            column = 0;
+        }
+
         if (std.ascii.isAlNum(c) or c == '_') {
             buffer.append(c) catch unreachable;
         } else {
@@ -41,6 +47,8 @@ pub fn printHRBytes(comptime fmt: []const u8, exp: []const u8, args: var) void {
             buffer.append(hextable[(c & 0xF0) >> 4]) catch unreachable;
             buffer.append(hextable[(c & 0x0F)]) catch unreachable;
         }
+
+        column += 1;
     }
 
     var span = buffer.span();
@@ -98,8 +106,8 @@ pub fn expectSameRawFrame(frame: var, header: FrameHeader, exp: []const u8) void
     };
 
     if (!std.mem.eql(u8, exp, source.buffer.getWritten())) {
-        printHRBytes("\nexp   : {}\n", exp, .{});
-        printHRBytes("source: {}\n", source.buffer.getWritten(), .{});
+        printHRBytes("\n==> exp   : {}\n", exp, .{});
+        printHRBytes("==> source: {}\n", source.buffer.getWritten(), .{});
         std.debug.panic("frames are different\n", .{});
     }
 }
