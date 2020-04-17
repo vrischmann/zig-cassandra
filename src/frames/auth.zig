@@ -48,10 +48,6 @@ const AuthResponseFrame = struct {
 const AuthChallengeFrame = struct {
     token: ?[]const u8,
 
-    pub fn write(self: @This(), pw: *PrimitiveWriter) !void {
-        return pw.writeBytes(self.token);
-    }
-
     pub fn read(allocator: *mem.Allocator, pr: *PrimitiveReader) !AuthChallengeFrame {
         return AuthChallengeFrame{
             .token = try pr.readBytes(),
@@ -64,10 +60,6 @@ const AuthChallengeFrame = struct {
 /// Described in the protocol spec at §4.2.8.
 const AuthSuccessFrame = struct {
     token: ?[]const u8,
-
-    pub fn write(self: @This(), pw: *PrimitiveWriter) !void {
-        return pw.writeBytes(self.token);
-    }
 
     pub fn read(allocator: *mem.Allocator, pr: *PrimitiveReader) !AuthSuccessFrame {
         return AuthSuccessFrame{
@@ -117,7 +109,7 @@ test "auth response frame" {
     var pr = PrimitiveReader.init(&arena.allocator);
     pr.reset(raw_frame.body);
 
-    const frame = try AuthSuccessFrame.read(&arena.allocator, &pr);
+    const frame = try AuthResponseFrame.read(&arena.allocator, &pr);
 
     const exp_token = "\x00cassandra\x00cassandra";
     testing.expectEqualSlices(u8, exp_token, frame.token.?);
@@ -144,8 +136,4 @@ test "auth success frame" {
     const frame = try AuthSuccessFrame.read(&arena.allocator, &pr);
 
     testing.expect(frame.token == null);
-
-    // write
-
-    testing.expectSameRawFrame(frame, raw_frame.header, exp);
 }
