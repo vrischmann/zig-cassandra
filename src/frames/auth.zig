@@ -11,7 +11,7 @@ const testing = @import("../testing.zig");
 /// AUTHENTICATE is sent by a node in response to a STARTUP frame if authentication is required.
 ///
 /// Described in the protocol spec at §4.2.3.
-const AuthenticateFrame = struct {
+pub const AuthenticateFrame = struct {
     authenticator: []const u8,
 
     pub fn read(allocator: *mem.Allocator, pr: *PrimitiveReader) !AuthenticateFrame {

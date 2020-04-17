@@ -123,6 +123,8 @@ const UnpreparedError = struct {
 const ErrorFrame = struct {
     const Self = @This();
 
+    // TODO(vincent): extract this for use by the client
+
     error_code: ErrorCode,
     message: []const u8,
 

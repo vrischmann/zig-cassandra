@@ -9,7 +9,7 @@ const testing = @import("../testing.zig");
 /// STARTUP is sent to a node to initialize a connection.
 ///
 /// Described in the protocol spec at §4.1.1.
-const StartupFrame = struct {
+pub const StartupFrame = struct {
     const Self = @This();
 
     cql_version: []const u8,

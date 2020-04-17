@@ -11,7 +11,7 @@ const testing = @import("../testing.zig");
 /// SUPPORTED is sent by a node in response to a OPTIONS frame.
 ///
 /// Described in the protocol spec at §4.2.4.
-const SupportedFrame = struct {
+pub const SupportedFrame = struct {
     const Self = @This();
 
     protocol_versions: []ProtocolVersion,
