@@ -4,6 +4,8 @@ const meta = std.meta;
 const net = std.net;
 const ArrayList = std.ArrayList;
 
+pub const Client = @import("conn.zig").Client;
+
 const testing = @import("testing.zig");
 
 test "" {
