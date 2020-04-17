@@ -14,6 +14,7 @@ pub const QueryParameters = struct {
 
     consistency_level: Consistency,
     values: ?Values,
+    skip_metadata: bool,
     page_size: ?u32,
     paging_state: ?[]const u8, // NOTE(vincent): not a string
     serial_consistency_level: ?Consistency,
@@ -31,10 +32,101 @@ pub const QueryParameters = struct {
     const FlagWithKeyspace: u32 = 0x0080;
     const FlagWithNowInSeconds: u32 = 0x100;
 
+    pub fn write(self: Self, header: FrameHeader, pw: *PrimitiveWriter) !void {
+        _ = try pw.writeConsistency(self.consistency_level);
+
+        // Build the flags value
+
+        var flags: u32 = 0;
+        if (self.values) |v| {
+            flags |= FlagWithValues;
+            if (v == .Named) {
+                flags |= FlagWithNamedValues;
+            }
+        }
+        if (self.skip_metadata) {
+            flags |= FlagSkipMetadata;
+        }
+        if (self.page_size != null) {
+            flags |= FlagWithPageSize;
+        }
+        if (self.paging_state != null) {
+            flags |= FlagWithPagingState;
+        }
+        if (self.serial_consistency_level != null) {
+            flags |= FlagWithSerialConsistency;
+        }
+        if (self.timestamp != null) {
+            flags |= FlagWithDefaultTimestamp;
+        }
+
+        if (header.version.is(5)) {
+            if (self.keyspace != null) {
+                flags |= FlagWithKeyspace;
+            }
+            if (self.now_in_seconds != null) {
+                flags |= FlagWithNowInSeconds;
+            }
+        }
+
+        if (header.version.is(5)) {
+            _ = try pw.writeInt(u32, flags);
+        } else {
+            _ = try pw.writeInt(u8, @intCast(u8, flags));
+        }
+
+        // Write the remaining body
+
+        if (self.values) |values| {
+            switch (values) {
+                .Normal => |normal_values| {
+                    _ = try pw.writeInt(u16, @intCast(u16, normal_values.len));
+                    for (normal_values) |value| {
+                        _ = try pw.writeValue(value);
+                    }
+                },
+                .Named => |named_values| {
+                    _ = try pw.writeInt(u16, @intCast(u16, named_values.len));
+                    for (named_values) |v| {
+                        _ = try pw.writeString(v.name);
+                        _ = try pw.writeValue(v.value);
+                    }
+                },
+            }
+        }
+
+        if (self.page_size) |ps| {
+            _ = try pw.writeInt(u32, ps);
+        }
+        if (self.paging_state) |ps| {
+            _ = try pw.writeBytes(ps);
+        }
+        if (self.serial_consistency_level) |consistency| {
+            _ = try pw.writeConsistency(consistency);
+        }
+        if (self.timestamp) |ts| {
+            _ = try pw.writeInt(u64, ts);
+        }
+
+        if (!header.version.is(5)) {
+            return;
+        }
+
+        // The following flags are only valid with protocol v5
+
+        if (self.keyspace) |ks| {
+            _ = try pw.writeString(ks);
+        }
+        if (self.now_in_seconds) |s| {
+            _ = try pw.writeInt(u32, s);
+        }
+    }
+
     pub fn read(allocator: *mem.Allocator, header: FrameHeader, pr: *PrimitiveReader) !QueryParameters {
         var params = QueryParameters{
             .consistency_level = undefined,
             .values = null,
+            .skip_metadata = false,
             .page_size = null,
             .paging_state = null,
             .serial_consistency_level = null,
@@ -86,7 +178,7 @@ pub const QueryParameters = struct {
             }
         }
         if (flags & FlagSkipMetadata == FlagSkipMetadata) {
-            // Nothing to do
+            params.skip_metadata = true;
         }
         if (flags & FlagWithPageSize == FlagWithPageSize) {
             params.page_size = try pr.readInt(u32);
@@ -114,6 +206,7 @@ pub const QueryParameters = struct {
         }
 
         // The following flags are only valid with protocol v5
+
         if (flags & FlagWithKeyspace == FlagWithKeyspace) {
             params.keyspace = try pr.readString();
         }

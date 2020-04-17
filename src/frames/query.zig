@@ -18,6 +18,11 @@ const QueryFrame = struct {
     query: []const u8,
     query_parameters: QueryParameters,
 
+    pub fn write(self: Self, header: FrameHeader, pw: *PrimitiveWriter) !void {
+        _ = try pw.writeLongString(self.query);
+        _ = try self.query_parameters.write(header, pw);
+    }
+
     pub fn read(allocator: *mem.Allocator, header: FrameHeader, pr: *PrimitiveReader) !Self {
         return Self{
             .query = try pr.readLongString(),
@@ -30,10 +35,12 @@ test "query frame: no values, no paging state" {
     var arena = testing.arenaAllocator();
     defer arena.deinit();
 
-    const data = "\x04\x00\x00\x08\x07\x00\x00\x00\x30\x00\x00\x00\x1b\x53\x45\x4c\x45\x43\x54\x20\x2a\x20\x46\x52\x4f\x4d\x20\x66\x6f\x6f\x62\x61\x72\x2e\x75\x73\x65\x72\x20\x3b\x00\x01\x34\x00\x00\x00\x64\x00\x08\x00\x05\xa2\x2c\xf0\x57\x3e\x3f";
-    const raw_frame = try testing.readRawFrame(&arena.allocator, data);
+    // read
 
-    checkHeader(Opcode.Query, data.len, raw_frame.header);
+    const exp = "\x04\x00\x00\x08\x07\x00\x00\x00\x30\x00\x00\x00\x1b\x53\x45\x4c\x45\x43\x54\x20\x2a\x20\x46\x52\x4f\x4d\x20\x66\x6f\x6f\x62\x61\x72\x2e\x75\x73\x65\x72\x20\x3b\x00\x01\x34\x00\x00\x00\x64\x00\x08\x00\x05\xa2\x2c\xf0\x57\x3e\x3f";
+    const raw_frame = try testing.readRawFrame(&arena.allocator, exp);
+
+    checkHeader(Opcode.Query, exp.len, raw_frame.header);
 
     var pr = PrimitiveReader.init(&arena.allocator);
     pr.reset(raw_frame.body);
@@ -49,4 +56,8 @@ test "query frame: no values, no paging state" {
     testing.expectEqual(@as(u64, 1585688778063423), frame.query_parameters.timestamp.?);
     testing.expect(frame.query_parameters.keyspace == null);
     testing.expect(frame.query_parameters.now_in_seconds == null);
+
+    // write
+
+    testing.expectSameRawFrame(frame, raw_frame.header, exp);
 }
