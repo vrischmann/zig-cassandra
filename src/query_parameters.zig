@@ -59,7 +59,6 @@ pub const QueryParameters = struct {
         if (self.timestamp != null) {
             flags |= FlagWithDefaultTimestamp;
         }
-
         if (header.version.is(5)) {
             if (self.keyspace != null) {
                 flags |= FlagWithKeyspace;

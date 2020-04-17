@@ -20,6 +20,32 @@ const BatchQuery = struct {
 
     values: Values,
 
+    pub fn write(self: Self, pw: *PrimitiveWriter) !void {
+        if (self.query_string) |query_string| {
+            _ = try pw.writeByte(0);
+            _ = try pw.writeLongString(query_string);
+        } else if (self.query_id) |query_id| {
+            _ = try pw.writeByte(1);
+            _ = try pw.writeShortBytes(query_id);
+        }
+
+        switch (self.values) {
+            .Normal => |normal_values| {
+                _ = try pw.writeInt(u16, @intCast(u16, normal_values.len));
+                for (normal_values) |value| {
+                    _ = try pw.writeValue(value);
+                }
+            },
+            .Named => |named_values| {
+                _ = try pw.writeInt(u16, @intCast(u16, named_values.len));
+                for (named_values) |v| {
+                    _ = try pw.writeString(v.name);
+                    _ = try pw.writeValue(v.value);
+                }
+            },
+        }
+    }
+
     pub fn read(allocator: *mem.Allocator, pr: *PrimitiveReader) !BatchQuery {
         var query = Self{
             .query_string = null,
@@ -66,11 +92,52 @@ const BatchFrame = struct {
 
     const FlagWithSerialConsistency: u32 = 0x0010;
     const FlagWithDefaultTimestamp: u32 = 0x0020;
-    const FlagWithNamedValues: u32 = 0x0040; // NOTE(vincent): the spec says this is broker so it's not implemented
+    const FlagWithNamedValues: u32 = 0x0040; // NOTE(vincent): the spec says this is broken so it's not implemented
     const FlagWithKeyspace: u32 = 0x0080;
     const FlagWithNowInSeconds: u32 = 0x100;
 
-    pub fn read(allocator: *mem.Allocator, pr: *PrimitiveReader, header: FrameHeader) !Self {
+    pub fn write(self: Self, header: FrameHeader, pw: *PrimitiveWriter) !void {
+        _ = try pw.writeInt(u8, @intCast(u8, @enumToInt(self.batch_type)));
+
+        // Write the queries
+
+        _ = try pw.writeInt(u16, @intCast(u16, self.queries.len));
+        for (self.queries) |query| {
+            _ = try query.write(pw);
+        }
+
+        // Write the consistency
+
+        _ = try pw.writeConsistency(self.consistency_level);
+
+        // Build the flags value
+
+        var flags: u32 = 0;
+        if (self.serial_consistency_level != null) {
+            flags |= FlagWithSerialConsistency;
+        }
+        if (self.timestamp != null) {
+            flags |= FlagWithDefaultTimestamp;
+        }
+        if (header.version.is(5)) {
+            if (self.keyspace != null) {
+                flags |= FlagWithKeyspace;
+            }
+            if (self.now_in_seconds != null) {
+                flags |= FlagWithNowInSeconds;
+            }
+        }
+
+        if (header.version.is(5)) {
+            _ = try pw.writeInt(u32, flags);
+        } else {
+            _ = try pw.writeInt(u8, @intCast(u8, flags));
+        }
+
+        // Write the remaining body
+    }
+
+    pub fn read(allocator: *mem.Allocator, header: FrameHeader, pr: *PrimitiveReader) !Self {
         var frame = Self{
             .batch_type = undefined,
             .queries = undefined,
@@ -145,22 +212,24 @@ test "batch frame: query type string" {
     var arena = testing.arenaAllocator();
     defer arena.deinit();
 
-    const data = "\x04\x00\x00\xc0\x0d\x00\x00\x00\xcc\x00\x00\x03\x00\x00\x00\x00\x3b\x49\x4e\x53\x45\x52\x54\x20\x49\x4e\x54\x4f\x20\x66\x6f\x6f\x62\x61\x72\x2e\x75\x73\x65\x72\x28\x69\x64\x2c\x20\x6e\x61\x6d\x65\x29\x20\x76\x61\x6c\x75\x65\x73\x28\x75\x75\x69\x64\x28\x29\x2c\x20\x27\x76\x69\x6e\x63\x65\x6e\x74\x27\x29\x00\x00\x00\x00\x00\x00\x3b\x49\x4e\x53\x45\x52\x54\x20\x49\x4e\x54\x4f\x20\x66\x6f\x6f\x62\x61\x72\x2e\x75\x73\x65\x72\x28\x69\x64\x2c\x20\x6e\x61\x6d\x65\x29\x20\x76\x61\x6c\x75\x65\x73\x28\x75\x75\x69\x64\x28\x29\x2c\x20\x27\x76\x69\x6e\x63\x65\x6e\x74\x27\x29\x00\x00\x00\x00\x00\x00\x3b\x49\x4e\x53\x45\x52\x54\x20\x49\x4e\x54\x4f\x20\x66\x6f\x6f\x62\x61\x72\x2e\x75\x73\x65\x72\x28\x69\x64\x2c\x20\x6e\x61\x6d\x65\x29\x20\x76\x61\x6c\x75\x65\x73\x28\x75\x75\x69\x64\x28\x29\x2c\x20\x27\x76\x69\x6e\x63\x65\x6e\x74\x27\x29\x00\x00\x00\x00\x00";
-    const raw_frame = try testing.readRawFrame(&arena.allocator, data);
+    // read
 
-    checkHeader(Opcode.Batch, data.len, raw_frame.header);
+    const exp = "\x04\x00\x00\xc0\x0d\x00\x00\x00\xcc\x00\x00\x03\x00\x00\x00\x00\x3b\x49\x4e\x53\x45\x52\x54\x20\x49\x4e\x54\x4f\x20\x66\x6f\x6f\x62\x61\x72\x2e\x75\x73\x65\x72\x28\x69\x64\x2c\x20\x6e\x61\x6d\x65\x29\x20\x76\x61\x6c\x75\x65\x73\x28\x75\x75\x69\x64\x28\x29\x2c\x20\x27\x76\x69\x6e\x63\x65\x6e\x74\x27\x29\x00\x00\x00\x00\x00\x00\x3b\x49\x4e\x53\x45\x52\x54\x20\x49\x4e\x54\x4f\x20\x66\x6f\x6f\x62\x61\x72\x2e\x75\x73\x65\x72\x28\x69\x64\x2c\x20\x6e\x61\x6d\x65\x29\x20\x76\x61\x6c\x75\x65\x73\x28\x75\x75\x69\x64\x28\x29\x2c\x20\x27\x76\x69\x6e\x63\x65\x6e\x74\x27\x29\x00\x00\x00\x00\x00\x00\x3b\x49\x4e\x53\x45\x52\x54\x20\x49\x4e\x54\x4f\x20\x66\x6f\x6f\x62\x61\x72\x2e\x75\x73\x65\x72\x28\x69\x64\x2c\x20\x6e\x61\x6d\x65\x29\x20\x76\x61\x6c\x75\x65\x73\x28\x75\x75\x69\x64\x28\x29\x2c\x20\x27\x76\x69\x6e\x63\x65\x6e\x74\x27\x29\x00\x00\x00\x00\x00";
+    const raw_frame = try testing.readRawFrame(&arena.allocator, exp);
+
+    checkHeader(Opcode.Batch, exp.len, raw_frame.header);
 
     var pr = PrimitiveReader.init(&arena.allocator);
     pr.reset(raw_frame.body);
 
-    const frame = try BatchFrame.read(&arena.allocator, &pr, raw_frame.header);
+    const frame = try BatchFrame.read(&arena.allocator, raw_frame.header, &pr);
 
     testing.expectEqual(BatchType.Logged, frame.batch_type);
 
     testing.expectEqual(@as(usize, 3), frame.queries.len);
     for (frame.queries) |query| {
-        const exp = "INSERT INTO foobar.user(id, name) values(uuid(), 'vincent')";
-        testing.expectEqualString(exp, query.query_string.?);
+        const exp_query = "INSERT INTO foobar.user(id, name) values(uuid(), 'vincent')";
+        testing.expectEqualString(exp_query, query.query_string.?);
         testing.expect(query.query_id == null);
         testing.expect(query.values == .Normal);
         testing.expectEqual(@as(usize, 0), query.values.Normal.len);
@@ -171,21 +240,27 @@ test "batch frame: query type string" {
     testing.expect(frame.timestamp == null);
     testing.expect(frame.keyspace == null);
     testing.expect(frame.now_in_seconds == null);
+
+    // write
+
+    testing.expectSameRawFrame(frame, raw_frame.header, exp);
 }
 
 test "batch frame: query type prepared" {
     var arena = testing.arenaAllocator();
     defer arena.deinit();
 
-    const data = "\x04\x00\x01\x00\x0d\x00\x00\x00\xa2\x00\x00\x03\x01\x00\x10\x88\xb7\xd6\x81\x8b\x2d\x8d\x97\xfc\x41\xc1\x34\x7b\x27\xde\x65\x00\x02\x00\x00\x00\x10\x3a\x9a\xab\x41\x68\x24\x4a\xef\x9d\xf5\x72\xc7\x84\xab\xa2\x57\x00\x00\x00\x07\x56\x69\x6e\x63\x65\x6e\x74\x01\x00\x10\x88\xb7\xd6\x81\x8b\x2d\x8d\x97\xfc\x41\xc1\x34\x7b\x27\xde\x65\x00\x02\x00\x00\x00\x10\xed\x54\xb0\x6d\xcc\xb2\x43\x51\x96\x51\x74\x5e\xee\xae\xd2\xfe\x00\x00\x00\x07\x56\x69\x6e\x63\x65\x6e\x74\x01\x00\x10\x88\xb7\xd6\x81\x8b\x2d\x8d\x97\xfc\x41\xc1\x34\x7b\x27\xde\x65\x00\x02\x00\x00\x00\x10\x79\xdf\x8a\x28\x5a\x60\x47\x19\x9b\x42\x84\xea\x69\x10\x1a\xe6\x00\x00\x00\x07\x56\x69\x6e\x63\x65\x6e\x74\x00\x00\x00";
-    const raw_frame = try testing.readRawFrame(&arena.allocator, data);
+    // read
 
-    checkHeader(Opcode.Batch, data.len, raw_frame.header);
+    const exp = "\x04\x00\x01\x00\x0d\x00\x00\x00\xa2\x00\x00\x03\x01\x00\x10\x88\xb7\xd6\x81\x8b\x2d\x8d\x97\xfc\x41\xc1\x34\x7b\x27\xde\x65\x00\x02\x00\x00\x00\x10\x3a\x9a\xab\x41\x68\x24\x4a\xef\x9d\xf5\x72\xc7\x84\xab\xa2\x57\x00\x00\x00\x07\x56\x69\x6e\x63\x65\x6e\x74\x01\x00\x10\x88\xb7\xd6\x81\x8b\x2d\x8d\x97\xfc\x41\xc1\x34\x7b\x27\xde\x65\x00\x02\x00\x00\x00\x10\xed\x54\xb0\x6d\xcc\xb2\x43\x51\x96\x51\x74\x5e\xee\xae\xd2\xfe\x00\x00\x00\x07\x56\x69\x6e\x63\x65\x6e\x74\x01\x00\x10\x88\xb7\xd6\x81\x8b\x2d\x8d\x97\xfc\x41\xc1\x34\x7b\x27\xde\x65\x00\x02\x00\x00\x00\x10\x79\xdf\x8a\x28\x5a\x60\x47\x19\x9b\x42\x84\xea\x69\x10\x1a\xe6\x00\x00\x00\x07\x56\x69\x6e\x63\x65\x6e\x74\x00\x00\x00";
+    const raw_frame = try testing.readRawFrame(&arena.allocator, exp);
+
+    checkHeader(Opcode.Batch, exp.len, raw_frame.header);
 
     var pr = PrimitiveReader.init(&arena.allocator);
     pr.reset(raw_frame.body);
 
-    const frame = try BatchFrame.read(&arena.allocator, &pr, raw_frame.header);
+    const frame = try BatchFrame.read(&arena.allocator, raw_frame.header, &pr);
 
     testing.expectEqual(BatchType.Logged, frame.batch_type);
 
@@ -219,4 +294,8 @@ test "batch frame: query type prepared" {
     testing.expect(frame.timestamp == null);
     testing.expect(frame.keyspace == null);
     testing.expect(frame.now_in_seconds == null);
+
+    // write
+
+    testing.expectSameRawFrame(frame, raw_frame.header, exp);
 }
