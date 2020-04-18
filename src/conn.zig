@@ -41,13 +41,12 @@ pub const Client = struct {
         const socket_in_stream = socket.inStream();
         const socket_out_stream = socket.outStream();
 
-        // var raw_conn = RawConnType.init(allocator, socket_in_stream, socket_out_stream);
+        var raw_conn = RawConnType.init(allocator, socket_in_stream, socket_out_stream);
         var client = Client{
             .username = null,
             .password = null,
             .socket = socket,
-            // .raw_conn = raw_conn,
-            .raw_conn = undefined,
+            .raw_conn = raw_conn,
         };
 
         _ = try client.handshake();
@@ -140,7 +139,6 @@ const AuthResult = struct {
 fn RawConn(comptime InStreamType: type, comptime OutStreamType: type) type {
     const RawFrameReaderType = RawFrameReader(InStreamType);
     const RawFrameWriterType = RawFrameWriter(OutStreamType);
-
     return struct {
         const Self = @This();
 
@@ -198,14 +196,11 @@ fn RawConn(comptime InStreamType: type, comptime OutStreamType: type) type {
             {
                 const raw_frame = try self.raw_frame_reader.read();
                 self.primitive_reader.reset(raw_frame.body);
-
                 return try SupportedFrame.read(&self.arena.allocator, &self.primitive_reader);
             }
         }
 
-        fn writeStartup(
-            self: *Self,
-        ) !StartupResponse {
+        fn writeStartup(self: *Self) !StartupResponse {
             // Write STARTUP
             {
                 // Encode body
