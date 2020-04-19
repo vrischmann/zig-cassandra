@@ -60,8 +60,6 @@ pub const SupportedFrame = struct {
             }
 
             frame.protocol_versions = list.toOwnedSlice();
-        } else {
-            return error.NoProtocolVersions;
         }
 
         return frame;
