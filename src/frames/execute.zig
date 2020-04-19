@@ -35,9 +35,9 @@ const ExecuteFrame = struct {
             .query_parameters = undefined,
         };
 
-        frame.query_id = (try pr.readShortBytes()) orelse &[_]u8{};
+        frame.query_id = (try pr.readShortBytes(allocator)) orelse &[_]u8{};
         if (protocol_version.is(5)) {
-            frame.result_metadata_id = try pr.readShortBytes();
+            frame.result_metadata_id = try pr.readShortBytes(allocator);
         }
         frame.query_parameters = try QueryParameters.read(allocator, protocol_version, pr);
 
@@ -56,7 +56,7 @@ test "execute frame" {
 
     checkHeader(Opcode.Execute, exp.len, raw_frame.header);
 
-    var pr = PrimitiveReader.init(&arena.allocator);
+    var pr = PrimitiveReader.init();
     pr.reset(raw_frame.body);
 
     const frame = try ExecuteFrame.read(&arena.allocator, raw_frame.header.version, &pr);

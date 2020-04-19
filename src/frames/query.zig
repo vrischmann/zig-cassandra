@@ -25,7 +25,7 @@ pub const QueryFrame = struct {
 
     pub fn read(allocator: *mem.Allocator, protocol_version: ProtocolVersion, pr: *PrimitiveReader) !Self {
         return Self{
-            .query = try pr.readLongString(),
+            .query = try pr.readLongString(allocator),
             .query_parameters = try QueryParameters.read(allocator, protocol_version, pr),
         };
     }
@@ -42,7 +42,7 @@ test "query frame: no values, no paging state" {
 
     checkHeader(Opcode.Query, exp.len, raw_frame.header);
 
-    var pr = PrimitiveReader.init(&arena.allocator);
+    var pr = PrimitiveReader.init();
     pr.reset(raw_frame.body);
 
     const frame = try QueryFrame.read(&arena.allocator, raw_frame.header.version, &pr);

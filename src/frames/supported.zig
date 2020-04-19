@@ -25,7 +25,7 @@ pub const SupportedFrame = struct {
             .compression_algorithms = &[_]CompressionAlgorithm{},
         };
 
-        const options = try pr.readStringMultimap();
+        const options = try pr.readStringMultimap(allocator);
 
         if (options.get("CQL_VERSION")) |values| {
             var list = std.ArrayList(CQLVersion).init(allocator);
@@ -77,7 +77,7 @@ test "supported frame" {
 
     checkHeader(Opcode.Supported, exp.len, raw_frame.header);
 
-    var pr = PrimitiveReader.init(&arena.allocator);
+    var pr = PrimitiveReader.init();
     pr.reset(raw_frame.body);
 
     const frame = try SupportedFrame.read(&arena.allocator, &pr);

@@ -154,7 +154,7 @@ pub const ErrorFrame = struct {
         };
 
         frame.error_code = @intToEnum(ErrorCode, try pr.readInt(u32));
-        frame.message = try pr.readString();
+        frame.message = try pr.readString(allocator);
 
         switch (frame.error_code) {
             .UnavailableReplicas => {
@@ -166,9 +166,9 @@ pub const ErrorFrame = struct {
             },
             .FunctionFailure => {
                 frame.function_failure = FunctionFailureError{
-                    .keyspace = try pr.readString(),
-                    .function = try pr.readString(),
-                    .arg_types = try pr.readStringList(),
+                    .keyspace = try pr.readString(allocator),
+                    .function = try pr.readString(allocator),
+                    .arg_types = try pr.readStringList(allocator),
                 };
             },
             .WriteTimeout => {
@@ -180,7 +180,7 @@ pub const ErrorFrame = struct {
                     .contentions = null,
                 };
 
-                const write_type_string = try pr.readString();
+                const write_type_string = try pr.readString(allocator);
                 defer allocator.free(write_type_string);
 
                 write_timeout.write_type = meta.stringToEnum(WriteError.WriteType, write_type_string) orelse return error.InvalidWriteType;
@@ -225,7 +225,7 @@ pub const ErrorFrame = struct {
 
                 // Read the rest
 
-                const write_type_string = try pr.readString();
+                const write_type_string = try pr.readString(allocator);
                 defer allocator.free(write_type_string);
 
                 write_failure.write_type = meta.stringToEnum(WriteError.WriteType, write_type_string) orelse return error.InvalidWriteType;
@@ -272,12 +272,12 @@ pub const ErrorFrame = struct {
             },
             .AlreadyExists => {
                 frame.already_exists = AlreadyExistsError{
-                    .keyspace = try pr.readString(),
-                    .table = try pr.readString(),
+                    .keyspace = try pr.readString(allocator),
+                    .table = try pr.readString(allocator),
                 };
             },
             .Unprepared => {
-                if (try pr.readShortBytes()) |statement_id| {
+                if (try pr.readShortBytes(allocator)) |statement_id| {
                     frame.unprepared = UnpreparedError{
                         .statement_id = statement_id,
                     };
@@ -302,7 +302,7 @@ test "error frame: invalid query, no keyspace specified" {
 
     checkHeader(Opcode.Error, data.len, raw_frame.header);
 
-    var pr = PrimitiveReader.init(&arena.allocator);
+    var pr = PrimitiveReader.init();
     pr.reset(raw_frame.body);
 
     const frame = try ErrorFrame.read(&arena.allocator, &pr);
@@ -320,7 +320,7 @@ test "error frame: already exists" {
 
     checkHeader(Opcode.Error, data.len, raw_frame.header);
 
-    var pr = PrimitiveReader.init(&arena.allocator);
+    var pr = PrimitiveReader.init();
     pr.reset(raw_frame.body);
 
     const frame = try ErrorFrame.read(&arena.allocator, &pr);
@@ -341,7 +341,7 @@ test "error frame: syntax error" {
 
     checkHeader(Opcode.Error, data.len, raw_frame.header);
 
-    var pr = PrimitiveReader.init(&arena.allocator);
+    var pr = PrimitiveReader.init();
     pr.reset(raw_frame.body);
 
     const frame = try ErrorFrame.read(&arena.allocator, &pr);

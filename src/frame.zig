@@ -22,6 +22,10 @@ pub const FrameHeader = packed struct {
 pub const RawFrame = struct {
     header: FrameHeader,
     body: []const u8,
+
+    pub fn deinit(self: @This(), allocator: *mem.Allocator) void {
+        allocator.free(self.body);
+    }
 };
 
 pub fn RawFrameReader(comptime InStreamType: type) type {
@@ -34,7 +38,6 @@ pub fn RawFrameReader(comptime InStreamType: type) type {
         deserializer: io.Deserializer(.Big, io.Packing.Bit, InStreamType),
 
         pub fn init(allocator: *mem.Allocator, in: InStreamType) Self {
-            // @breakpoint();
             return Self{
                 .allocator = allocator,
                 .in_stream = in,
@@ -115,7 +118,7 @@ pub const Option = struct {
     id: OptionID,
     value: ?Value,
 
-    pub fn read(pr: *PrimitiveReader) !Option {
+    pub fn read(allocator: *mem.Allocator, pr: *PrimitiveReader) !Option {
         var option = Option{
             .id = @intToEnum(OptionID, try pr.readInt(u16)),
             .value = null,
@@ -123,7 +126,7 @@ pub const Option = struct {
 
         switch (option.id) {
             .Custom, .List, .Map, .Set, .UDT, .Tuple => {
-                option.value = try pr.readValue();
+                option.value = try pr.readValue(allocator);
             },
             else => {},
         }
@@ -157,11 +160,11 @@ pub const ColumnSpec = struct {
         };
 
         if (!has_global_table_spec) {
-            spec.keyspace = try pr.readString();
-            spec.table = try pr.readString();
+            spec.keyspace = try pr.readString(allocator);
+            spec.table = try pr.readString(allocator);
         }
-        spec.name = try pr.readString();
-        spec.option = try Option.read(pr);
+        spec.name = try pr.readString(allocator);
+        spec.option = try Option.read(allocator, pr);
 
         return spec;
     }
@@ -193,18 +196,18 @@ pub const RowsMetadata = struct {
         const columns_count = @as(usize, try pr.readInt(u32));
 
         if (flags & FlagHasMorePages == FlagHasMorePages) {
-            metadata.paging_state = try pr.readBytes();
+            metadata.paging_state = try pr.readBytes(allocator);
         }
         // Only valid with Protocol v5
         if (flags & FlagMetadataChanged == FlagMetadataChanged) {
-            metadata.new_metadata_id = try pr.readShortBytes();
+            metadata.new_metadata_id = try pr.readShortBytes(allocator);
         }
 
         if (flags & FlagNoMetadata == 0) {
             if (flags & FlagGlobalTablesSpec == FlagGlobalTablesSpec) {
                 const spec = GlobalTableSpec{
-                    .keyspace = try pr.readString(),
-                    .table = try pr.readString(),
+                    .keyspace = try pr.readString(allocator),
+                    .table = try pr.readString(allocator),
                 };
                 metadata.global_table_spec = spec;
             }
@@ -269,8 +272,8 @@ pub const PreparedMetadata = struct {
 
         if (flags & FlagGlobalTablesSpec == FlagGlobalTablesSpec) {
             const spec = GlobalTableSpec{
-                .keyspace = try pr.readString(),
-                .table = try pr.readString(),
+                .keyspace = try pr.readString(allocator),
+                .table = try pr.readString(allocator),
             };
             metadata.global_table_spec = spec;
         }
@@ -352,23 +355,23 @@ pub const SchemaChange = struct {
             .options = undefined,
         };
 
-        change.type = std.meta.stringToEnum(SchemaChangeType, (try pr.readString())) orelse return error.InvalidSchemaChangeType;
-        change.target = std.meta.stringToEnum(SchemaChangeTarget, (try pr.readString())) orelse return error.InvalidSchemaChangeTarget;
+        change.type = std.meta.stringToEnum(SchemaChangeType, (try pr.readString(allocator))) orelse return error.InvalidSchemaChangeType;
+        change.target = std.meta.stringToEnum(SchemaChangeTarget, (try pr.readString(allocator))) orelse return error.InvalidSchemaChangeTarget;
 
         change.options = SchemaChangeOptions.init();
 
         switch (change.target) {
             .KEYSPACE => {
-                change.options.keyspace = try pr.readString();
+                change.options.keyspace = try pr.readString(allocator);
             },
             .TABLE, .TYPE => {
-                change.options.keyspace = try pr.readString();
-                change.options.object_name = try pr.readString();
+                change.options.keyspace = try pr.readString(allocator);
+                change.options.object_name = try pr.readString(allocator);
             },
             .FUNCTION, .AGGREGATE => {
-                change.options.keyspace = try pr.readString();
-                change.options.object_name = try pr.readString();
-                change.options.arguments = try pr.readStringList();
+                change.options.keyspace = try pr.readString(allocator);
+                change.options.object_name = try pr.readString(allocator);
+                change.options.arguments = try pr.readStringList(allocator);
             },
         }
 

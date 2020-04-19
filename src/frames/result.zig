@@ -45,7 +45,7 @@ const Rows = struct {
             while (j < rows.metadata.column_specs.len) : (j += 1) {
                 const column_spec = rows.metadata.column_specs[j];
                 // TODO(vincent): can this ever be null ?
-                const column_data = (try pr.readBytes()) orelse unreachable;
+                const column_data = (try pr.readBytes(allocator)) orelse unreachable;
 
                 _ = try row_data.append(ColumnData{
                     .slice = column_data,
@@ -79,9 +79,9 @@ const Prepared = struct {
             .rows_metadata = undefined,
         };
 
-        prepared.query_id = (try pr.readShortBytes()) orelse return error.NoQueryIDInPreparedFrame;
+        prepared.query_id = (try pr.readShortBytes(allocator)) orelse return error.NoQueryIDInPreparedFrame;
         if (protocol_version.is(5)) {
-            prepared.result_metadata_id = (try pr.readShortBytes()) orelse return error.NoResultMetadataIDInPreparedFrame;
+            prepared.result_metadata_id = (try pr.readShortBytes(allocator)) orelse return error.NoResultMetadataIDInPreparedFrame;
         }
         prepared.metadata = try PreparedMetadata.read(allocator, pr);
         prepared.rows_metadata = try RowsMetadata.read(allocator, pr);
@@ -120,7 +120,7 @@ pub const ResultFrame = struct {
                 frame.result = Result{ .Rows = rows };
             },
             .SetKeyspace => {
-                const keyspace = try pr.readString();
+                const keyspace = try pr.readString(allocator);
                 frame.result = Result{ .SetKeyspace = keyspace };
             },
             .Prepared => {
@@ -146,7 +146,7 @@ test "result frame: void" {
 
     checkHeader(Opcode.Result, data.len, raw_frame.header);
 
-    var pr = PrimitiveReader.init(&arena.allocator);
+    var pr = PrimitiveReader.init();
     pr.reset(raw_frame.body);
 
     const frame = try ResultFrame.read(&arena.allocator, raw_frame.header.version, &pr);
@@ -163,7 +163,7 @@ test "result frame: rows" {
 
     checkHeader(Opcode.Result, data.len, raw_frame.header);
 
-    var pr = PrimitiveReader.init(&arena.allocator);
+    var pr = PrimitiveReader.init();
     pr.reset(raw_frame.body);
 
     const frame = try ResultFrame.read(&arena.allocator, raw_frame.header.version, &pr);
@@ -219,7 +219,7 @@ test "result frame: set keyspace" {
 
     checkHeader(Opcode.Result, data.len, raw_frame.header);
 
-    var pr = PrimitiveReader.init(&arena.allocator);
+    var pr = PrimitiveReader.init();
     pr.reset(raw_frame.body);
 
     const frame = try ResultFrame.read(&arena.allocator, raw_frame.header.version, &pr);
@@ -237,7 +237,7 @@ test "result frame: prepared insert" {
 
     checkHeader(Opcode.Result, data.len, raw_frame.header);
 
-    var pr = PrimitiveReader.init(&arena.allocator);
+    var pr = PrimitiveReader.init();
     pr.reset(raw_frame.body);
 
     const frame = try ResultFrame.read(&arena.allocator, raw_frame.header.version, &pr);
@@ -283,7 +283,7 @@ test "result frame: prepared select" {
 
     checkHeader(Opcode.Result, data.len, raw_frame.header);
 
-    var pr = PrimitiveReader.init(&arena.allocator);
+    var pr = PrimitiveReader.init();
     pr.reset(raw_frame.body);
 
     const frame = try ResultFrame.read(&arena.allocator, raw_frame.header.version, &pr);

@@ -12,15 +12,12 @@ const testing = @import("../testing.zig");
 pub const PrimitiveReader = struct {
     const Self = @This();
 
-    allocator: *mem.Allocator,
-
     rbuf: []const u8,
     source: io.StreamSource,
     in_stream: io.StreamSource.InStream,
 
-    pub fn init(allocator: *mem.Allocator) Self {
+    pub fn init() Self {
         return Self{
-            .allocator = allocator,
             .rbuf = undefined,
             .source = undefined,
             .in_stream = undefined,
@@ -45,18 +42,18 @@ pub const PrimitiveReader = struct {
 
     /// Read a length-prefixed byte slice from the stream. The length is 2 bytes.
     /// The slice can be null.
-    pub fn readShortBytes(self: *Self) !?[]const u8 {
-        return self.readBytesGeneric(i16);
+    pub fn readShortBytes(self: *Self, allocator: *mem.Allocator) !?[]const u8 {
+        return self.readBytesGeneric(allocator, i16);
     }
 
     /// Read a length-prefixed byte slice from the stream. The length is 4 bytes.
     /// The slice can be null.
-    pub fn readBytes(self: *Self) !?[]const u8 {
-        return self.readBytesGeneric(i32);
+    pub fn readBytes(self: *Self, allocator: *mem.Allocator) !?[]const u8 {
+        return self.readBytesGeneric(allocator, i32);
     }
 
     /// Read bytes from the stream in a generic way.
-    fn readBytesGeneric(self: *Self, comptime LenType: type) !?[]const u8 {
+    fn readBytesGeneric(self: *Self, allocator: *mem.Allocator, comptime LenType: type) !?[]const u8 {
         const len = try self.readInt(LenType);
         if (len < 0) {
             return null;
@@ -65,7 +62,7 @@ pub const PrimitiveReader = struct {
             return &[_]u8{};
         }
 
-        const buf = try self.allocator.alloc(u8, @intCast(usize, len));
+        const buf = try allocator.alloc(u8, @intCast(usize, len));
 
         const n_read = try self.in_stream.readAll(buf);
         if (n_read != len) {
@@ -77,8 +74,8 @@ pub const PrimitiveReader = struct {
 
     /// Read a length-prefixed string from the stream. The length is 2 bytes.
     /// The string can't be null.
-    pub fn readString(self: *Self) ![]const u8 {
-        if (try self.readBytesGeneric(i16)) |v| {
+    pub fn readString(self: *Self, allocator: *mem.Allocator) ![]const u8 {
+        if (try self.readBytesGeneric(allocator, i16)) |v| {
             return v;
         } else {
             return error.UnexpectedEOF;
@@ -87,8 +84,8 @@ pub const PrimitiveReader = struct {
 
     /// Read a length-prefixed string from the stream. The length is 4 bytes.
     /// The string can't be null.
-    pub fn readLongString(self: *Self) ![]const u8 {
-        if (try self.readBytesGeneric(i32)) |v| {
+    pub fn readLongString(self: *Self, allocator: *mem.Allocator) ![]const u8 {
+        if (try self.readBytesGeneric(allocator, i32)) |v| {
             return v;
         } else {
             return error.UnexpectedEOF;
@@ -103,14 +100,14 @@ pub const PrimitiveReader = struct {
     }
 
     /// Read a list of string from the stream.
-    pub fn readStringList(self: *Self) ![]const []const u8 {
+    pub fn readStringList(self: *Self, allocator: *mem.Allocator) ![]const []const u8 {
         const len = @as(usize, try self.readInt(u16));
 
-        var list = try std.ArrayList([]const u8).initCapacity(self.allocator, len);
+        var list = try std.ArrayList([]const u8).initCapacity(allocator, len);
 
         var i: usize = 0;
         while (i < len) {
-            const tmp = try self.readString();
+            const tmp = try self.readString(allocator);
             try list.append(tmp);
 
             i += 1;
@@ -120,11 +117,11 @@ pub const PrimitiveReader = struct {
     }
 
     /// Read a value from the stream.
-    pub fn readValue(self: *Self) !Value {
+    pub fn readValue(self: *Self, allocator: *mem.Allocator) !Value {
         const len = try self.readInt(i32);
 
         if (len >= 0) {
-            const result = try self.allocator.alloc(u8, @intCast(usize, len));
+            const result = try allocator.alloc(u8, @intCast(usize, len));
             _ = try self.in_stream.readAll(result);
 
             return Value{ .Set = result };
@@ -180,15 +177,15 @@ pub const PrimitiveReader = struct {
         return @intToEnum(Consistency, n);
     }
 
-    pub fn readStringMap(self: *Self) !sm.Map {
+    pub fn readStringMap(self: *Self, allocator: *mem.Allocator) !sm.Map {
         const n = try self.readInt(u16);
 
-        var map = sm.Map.init(self.allocator);
+        var map = sm.Map.init(allocator);
 
         var i: usize = 0;
         while (i < n) : (i += 1) {
-            const k = try self.readString();
-            const v = try self.readString();
+            const k = try self.readString(allocator);
+            const v = try self.readString(allocator);
 
             _ = try map.put(k, v);
         }
@@ -196,15 +193,15 @@ pub const PrimitiveReader = struct {
         return map;
     }
 
-    pub fn readStringMultimap(self: *Self) !sm.Multimap {
+    pub fn readStringMultimap(self: *Self, allocator: *mem.Allocator) !sm.Multimap {
         const n = try self.readInt(u16);
 
-        var map = sm.Multimap.init(self.allocator);
+        var map = sm.Multimap.init(allocator);
 
         var i: usize = 0;
         while (i < n) : (i += 1) {
-            const k = try self.readString();
-            const list = try self.readStringList();
+            const k = try self.readString(allocator);
+            const list = try self.readStringList(allocator);
 
             _ = try map.put(k, list);
         }
@@ -214,10 +211,7 @@ pub const PrimitiveReader = struct {
 };
 
 test "primitive reader: read int" {
-    var arena = testing.arenaAllocator();
-    defer arena.deinit();
-
-    var pr = PrimitiveReader.init(&arena.allocator);
+    var pr = PrimitiveReader.init();
 
     pr.reset("\x00\x20\x11\x00");
     testing.expectEqual(@as(i32, 2101504), try pr.readInt(i32));
@@ -236,40 +230,40 @@ test "primitive reader: read strings and bytes" {
     var arena = testing.arenaAllocator();
     defer arena.deinit();
 
-    var pr = PrimitiveReader.init(&arena.allocator);
+    var pr = PrimitiveReader.init();
 
     {
         // short string
         pr.reset("\x00\x06foobar");
-        testing.expectEqualString("foobar", try pr.readString());
+        testing.expectEqualString("foobar", try pr.readString(&arena.allocator));
 
         // long string
         pr.reset("\x00\x00\x00\x06foobar");
-        testing.expectEqualString("foobar", try pr.readLongString());
+        testing.expectEqualString("foobar", try pr.readLongString(&arena.allocator));
     }
 
     {
         // int32 + bytes
         pr.reset("\x00\x00\x00\x0A123456789A");
-        testing.expectEqualString("123456789A", (try pr.readBytes()).?);
+        testing.expectEqualString("123456789A", (try pr.readBytes(&arena.allocator)).?);
 
         pr.reset("\x00\x00\x00\x00");
-        testing.expectEqualString("", (try pr.readBytes()).?);
+        testing.expectEqualString("", (try pr.readBytes(&arena.allocator)).?);
 
         pr.reset("\xff\xff\xff\xff");
-        testing.expect((try pr.readBytes()) == null);
+        testing.expect((try pr.readBytes(&arena.allocator)) == null);
     }
 
     {
         // int16 + bytes
         pr.reset("\x00\x0A123456789A");
-        testing.expectEqualString("123456789A", (try pr.readShortBytes()).?);
+        testing.expectEqualString("123456789A", (try pr.readShortBytes(&arena.allocator)).?);
 
         pr.reset("\x00\x00");
-        testing.expectEqualString("", (try pr.readShortBytes()).?);
+        testing.expectEqualString("", (try pr.readShortBytes(&arena.allocator)).?);
 
         pr.reset("\xff\xff");
-        testing.expect((try pr.readShortBytes()) == null);
+        testing.expect((try pr.readShortBytes(&arena.allocator)) == null);
     }
 }
 
@@ -277,7 +271,7 @@ test "primitive reader: read uuid" {
     var arena = testing.arenaAllocator();
     defer arena.deinit();
 
-    var pr = PrimitiveReader.init(&arena.allocator);
+    var pr = PrimitiveReader.init();
 
     var uuid: [16]u8 = undefined;
     try std.os.getrandom(&uuid);
@@ -290,11 +284,11 @@ test "primitive reader: read string list" {
     var arena = testing.arenaAllocator();
     defer arena.deinit();
 
-    var pr = PrimitiveReader.init(&arena.allocator);
+    var pr = PrimitiveReader.init();
 
     pr.reset("\x00\x02\x00\x03foo\x00\x03bar");
 
-    var result = try pr.readStringList();
+    var result = try pr.readStringList(&arena.allocator);
     testing.expectEqual(@as(usize, 2), result.len);
 
     var tmp = result[0];
@@ -308,25 +302,25 @@ test "primitive reader: read value" {
     var arena = testing.arenaAllocator();
     defer arena.deinit();
 
-    var pr = PrimitiveReader.init(&arena.allocator);
+    var pr = PrimitiveReader.init();
 
     // Normal value
     pr.reset("\x00\x00\x00\x02\x61\x62");
 
-    var value = try pr.readValue();
+    var value = try pr.readValue(&arena.allocator);
     testing.expect(value == .Set);
     testing.expectEqualString("ab", value.Set);
 
     // Null value
 
     pr.reset("\xff\xff\xff\xff");
-    var value2 = try pr.readValue();
+    var value2 = try pr.readValue(&arena.allocator);
     testing.expect(value2 == .Null);
 
     // "Not set" value
 
     pr.reset("\xff\xff\xff\xfe");
-    var value3 = try pr.readValue();
+    var value3 = try pr.readValue(&arena.allocator);
     testing.expect(value3 == .NotSet);
 }
 
@@ -334,7 +328,7 @@ test "primitive reader: read inet and inetaddr" {
     var arena = testing.arenaAllocator();
     defer arena.deinit();
 
-    var pr = PrimitiveReader.init(&arena.allocator);
+    var pr = PrimitiveReader.init();
 
     // IPv4
     pr.reset("\x04\x12\x34\x56\x78\x00\x00\x00\x22");
@@ -373,7 +367,7 @@ test "primitive reader: read consistency" {
     var arena = testing.arenaAllocator();
     defer arena.deinit();
 
-    var pr = PrimitiveReader.init(&arena.allocator);
+    var pr = PrimitiveReader.init();
 
     const testCase = struct {
         exp: Consistency,
@@ -405,13 +399,13 @@ test "primitive reader: read stringmap" {
     var arena = testing.arenaAllocator();
     defer arena.deinit();
 
-    var pr = PrimitiveReader.init(&arena.allocator);
+    var pr = PrimitiveReader.init();
 
     // 2 elements string map
 
     pr.reset("\x00\x02\x00\x03foo\x00\x03baz\x00\x03bar\x00\x03baz");
 
-    var result = try pr.readStringMap();
+    var result = try pr.readStringMap(&arena.allocator);
     testing.expectEqual(@as(usize, 2), result.count());
 
     var it = result.iterator();
@@ -425,13 +419,13 @@ test "primitive reader: read string multimap" {
     var arena = testing.arenaAllocator();
     defer arena.deinit();
 
-    var pr = PrimitiveReader.init(&arena.allocator);
+    var pr = PrimitiveReader.init();
 
     // 1 key, 2 values multimap
 
     pr.reset("\x00\x01\x00\x03foo\x00\x02\x00\x03bar\x00\x03baz");
 
-    var result = try pr.readStringMultimap();
+    var result = try pr.readStringMultimap(&arena.allocator);
     testing.expectEqual(@as(usize, 1), result.count());
 
     const slice = result.get("foo").?;

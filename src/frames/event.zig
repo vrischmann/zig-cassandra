@@ -20,7 +20,7 @@ const EventFrame = struct {
             .event = undefined,
         };
 
-        const event_type = meta.stringToEnum(EventType, try pr.readString()) orelse return error.InvalidEventType;
+        const event_type = meta.stringToEnum(EventType, try pr.readString(allocator)) orelse return error.InvalidEventType;
 
         switch (event_type) {
             .TOPOLOGY_CHANGE => {
@@ -29,7 +29,7 @@ const EventFrame = struct {
                     .node_address = undefined,
                 };
 
-                change.type = meta.stringToEnum(TopologyChangeType, try pr.readString()) orelse return error.InvalidTopologyChangeType;
+                change.type = meta.stringToEnum(TopologyChangeType, try pr.readString(allocator)) orelse return error.InvalidTopologyChangeType;
                 change.node_address = try pr.readInet();
 
                 frame.event = Event{ .TOPOLOGY_CHANGE = change };
@@ -42,7 +42,7 @@ const EventFrame = struct {
                     .node_address = undefined,
                 };
 
-                change.type = meta.stringToEnum(StatusChangeType, try pr.readString()) orelse return error.InvalidStatusChangeType;
+                change.type = meta.stringToEnum(StatusChangeType, try pr.readString(allocator)) orelse return error.InvalidStatusChangeType;
                 change.node_address = try pr.readInet();
 
                 frame.event = Event{ .STATUS_CHANGE = change };
@@ -69,7 +69,7 @@ test "event frame: topology change" {
 
     checkHeader(Opcode.Event, exp.len, raw_frame.header);
 
-    var pr = PrimitiveReader.init(&arena.allocator);
+    var pr = PrimitiveReader.init();
     pr.reset(raw_frame.body);
 
     const frame = try EventFrame.read(&arena.allocator, &pr);
@@ -92,7 +92,7 @@ test "event frame: status change" {
 
     checkHeader(Opcode.Event, data.len, raw_frame.header);
 
-    var pr = PrimitiveReader.init(&arena.allocator);
+    var pr = PrimitiveReader.init();
     pr.reset(raw_frame.body);
 
     const frame = try EventFrame.read(&arena.allocator, &pr);
@@ -115,7 +115,7 @@ test "event frame: schema change/keyspace" {
 
     checkHeader(Opcode.Event, data.len, raw_frame.header);
 
-    var pr = PrimitiveReader.init(&arena.allocator);
+    var pr = PrimitiveReader.init();
     pr.reset(raw_frame.body);
 
     const frame = try EventFrame.read(&arena.allocator, &pr);
@@ -141,7 +141,7 @@ test "event frame: schema change/table" {
 
     checkHeader(Opcode.Event, data.len, raw_frame.header);
 
-    var pr = PrimitiveReader.init(&arena.allocator);
+    var pr = PrimitiveReader.init();
     pr.reset(raw_frame.body);
 
     const frame = try EventFrame.read(&arena.allocator, &pr);
@@ -167,7 +167,7 @@ test "event frame: schema change/function" {
 
     checkHeader(Opcode.Event, data.len, raw_frame.header);
 
-    var pr = PrimitiveReader.init(&arena.allocator);
+    var pr = PrimitiveReader.init();
     pr.reset(raw_frame.body);
 
     const frame = try EventFrame.read(&arena.allocator, &pr);

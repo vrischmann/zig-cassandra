@@ -16,7 +16,7 @@ pub const AuthenticateFrame = struct {
 
     pub fn read(allocator: *mem.Allocator, pr: *PrimitiveReader) !AuthenticateFrame {
         return AuthenticateFrame{
-            .authenticator = try pr.readString(),
+            .authenticator = try pr.readString(allocator),
         };
     }
 };
@@ -33,7 +33,7 @@ const AuthResponseFrame = struct {
 
     pub fn read(allocator: *mem.Allocator, pr: *PrimitiveReader) !AuthResponseFrame {
         return AuthResponseFrame{
-            .token = try pr.readBytes(),
+            .token = try pr.readBytes(allocator),
         };
     }
 };
@@ -46,7 +46,7 @@ pub const AuthChallengeFrame = struct {
 
     pub fn read(allocator: *mem.Allocator, pr: *PrimitiveReader) !AuthChallengeFrame {
         return AuthChallengeFrame{
-            .token = try pr.readBytes(),
+            .token = try pr.readBytes(allocator),
         };
     }
 };
@@ -59,7 +59,7 @@ const AuthSuccessFrame = struct {
 
     pub fn read(allocator: *mem.Allocator, pr: *PrimitiveReader) !AuthSuccessFrame {
         return AuthSuccessFrame{
-            .token = try pr.readBytes(),
+            .token = try pr.readBytes(allocator),
         };
     }
 };
@@ -75,7 +75,7 @@ test "authenticate frame" {
 
     checkHeader(Opcode.Authenticate, exp.len, raw_frame.header);
 
-    var pr = PrimitiveReader.init(&arena.allocator);
+    var pr = PrimitiveReader.init();
     pr.reset(raw_frame.body);
 
     const frame = try AuthenticateFrame.read(&arena.allocator, &pr);
@@ -98,7 +98,7 @@ test "auth response frame" {
 
     checkHeader(Opcode.AuthResponse, exp.len, raw_frame.header);
 
-    var pr = PrimitiveReader.init(&arena.allocator);
+    var pr = PrimitiveReader.init();
     pr.reset(raw_frame.body);
 
     const frame = try AuthResponseFrame.read(&arena.allocator, &pr);
@@ -122,7 +122,7 @@ test "auth success frame" {
 
     checkHeader(Opcode.AuthSuccess, exp.len, raw_frame.header);
 
-    var pr = PrimitiveReader.init(&arena.allocator);
+    var pr = PrimitiveReader.init();
     pr.reset(raw_frame.body);
 
     const frame = try AuthSuccessFrame.read(&arena.allocator, &pr);

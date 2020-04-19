@@ -19,7 +19,7 @@ const RegisterFrame = struct {
 
     pub fn read(allocator: *mem.Allocator, pr: *PrimitiveReader) !RegisterFrame {
         return RegisterFrame{
-            .event_types = try pr.readStringList(),
+            .event_types = try pr.readStringList(allocator),
         };
     }
 };
@@ -35,7 +35,7 @@ test "register frame" {
 
     checkHeader(Opcode.Register, exp.len, raw_frame.header);
 
-    var pr = PrimitiveReader.init(&arena.allocator);
+    var pr = PrimitiveReader.init();
     pr.reset(raw_frame.body);
 
     const frame = try RegisterFrame.read(&arena.allocator, &pr);

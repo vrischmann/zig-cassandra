@@ -45,7 +45,7 @@ pub const StartupFrame = struct {
             .compression = null,
         };
 
-        const map = try pr.readStringMap();
+        const map = try pr.readStringMap(allocator);
 
         // CQL_VERSION is mandatory and the only version supported is 3.0.0 right now.
         if (map.get("CQL_VERSION")) |version| {
@@ -82,7 +82,7 @@ test "startup frame" {
 
     checkHeader(Opcode.Startup, exp.len, raw_frame.header);
 
-    var pr = PrimitiveReader.init(&arena.allocator);
+    var pr = PrimitiveReader.init();
     pr.reset(raw_frame.body);
 
     const frame = try StartupFrame.read(&arena.allocator, &pr);

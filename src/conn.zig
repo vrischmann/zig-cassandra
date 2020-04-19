@@ -43,31 +43,25 @@ pub const Client = struct {
     const OutStreamType = @TypeOf(std.fs.File.OutStream);
     const RawConnType = RawConn();
 
-    arena: heap.ArenaAllocator,
-
     username: ?[]const u8,
     password: ?[]const u8,
+    consistency: Consistency,
 
     socket: std.fs.File,
     raw_conn: RawConnType,
 
-    pub fn init(allocator: *mem.Allocator, seed_address: net.Address) !Client {
+    pub fn init(self: *Self, allocator: *mem.Allocator, seed_address: net.Address) !void {
         const socket = try net.tcpConnectToAddress(seed_address);
         const socket_in_stream = socket.inStream();
         const socket_out_stream = socket.outStream();
 
-        var client = Client{
-            .arena = heap.ArenaAllocator.init(allocator),
-            .username = null,
-            .password = null,
-            .socket = socket,
-            .raw_conn = undefined,
-        };
-        client.raw_conn = RawConnType.init(&client.arena.allocator, socket_in_stream, socket_out_stream);
+        self.username = null;
+        self.password = null;
+        self.consistency = .One;
+        self.socket = socket;
+        self.raw_conn.init(allocator, socket_in_stream, socket_out_stream);
 
-        _ = try client.handshake();
-
-        return client;
+        _ = try self.handshake();
     }
 
     pub fn setUsername(self: *Self, username: []const u8) void {
@@ -76,19 +70,33 @@ pub const Client = struct {
     pub fn setPassword(self: *Self, password: []const u8) void {
         self.password = password;
     }
+    pub fn setConsistency(self: *Self, consistency: Consistency) void {
+        self.consistency = consistency;
+    }
 
     // TODO(vincent): maybe add not comptime equivalent ?
     // TODO(vincent): return an iterator
     // TODO(vincent): parse the query string to match the args tuple
 
-    pub fn cquery(self: *Self, comptime query_string: []const u8, args: var) !QueryResult {
+    pub fn cquery(self: *Self, allocator: *mem.Allocator, comptime query_string: []const u8, args: var) !QueryResult {
         std.debug.assert(self.socket.handle > 0);
 
-        var parameters: QueryParameters = undefined;
-        var result = try self.raw_conn.writeQuery(query_string, parameters);
+        var parameters = QueryParameters{
+            .consistency_level = self.consistency,
+            .values = null,
+            .skip_metadata = false,
+            .page_size = null,
+            .paging_state = null,
+            .serial_consistency_level = null,
+            .timestamp = null,
+            .keyspace = null,
+            .now_in_seconds = null,
+        };
+
+        var result = try self.raw_conn.writeQuery(allocator, query_string, parameters);
         switch (result) {
             .Rows => |rows| {
-                var iter = Iterator.init(&self.arena.allocator, rows.metadata, rows.data);
+                var iter = Iterator.init(allocator, rows.metadata, rows.data);
                 return QueryResult{ .Iter = iter };
             },
             else => return QueryResult{ .None = .{} },
@@ -96,8 +104,6 @@ pub const Client = struct {
     }
 
     fn handshake(self: *Self) !void {
-        defer self.raw_conn.reset();
-
         // Sequence diagram to establish the connection:
         //
         // +---------+                 +---------+
@@ -119,14 +125,17 @@ pub const Client = struct {
         //      | AUTH_RESPONSE             |
         //      |-------------------------->|
         //      |                           |
-        try self.raw_conn.writeOptions();
+        var buffer: [512]u8 = undefined;
+        var fba = std.heap.FixedBufferAllocator.init(&buffer);
 
-        var startup_response = try self.raw_conn.writeStartup();
+        try self.raw_conn.writeOptions(&fba.allocator);
+
+        var startup_response = try self.raw_conn.writeStartup(&fba.allocator);
 
         switch (startup_response) {
             .Ready => return,
-            .Authenticate => {
-                var auth_result = try self.authenticate();
+            .Authenticate => |frame| {
+                var auth_result = try self.authenticate(frame.authenticator);
                 switch (auth_result) {
                     .Challenge => unreachable,
                     .Success => return,
@@ -138,7 +147,7 @@ pub const Client = struct {
         }
     }
 
-    fn authenticate(self: *Self) !AuthResult {
+    fn authenticate(self: *Self, authenticator: []const u8) !AuthResult {
         // TODO(vincent): handle authenticator classes
         // TODO(vincent): handle auth challenges
         if (self.username == null) {
@@ -183,7 +192,6 @@ fn RawConn() type {
         out_stream: OutStreamType,
 
         allocator: *mem.Allocator,
-        arena: heap.ArenaAllocator,
 
         raw_frame_reader: RawFrameReaderType,
         raw_frame_writer: RawFrameWriterType,
@@ -194,34 +202,19 @@ fn RawConn() type {
         protocol_version: ProtocolVersion,
         cql_version: CQLVersion,
 
-        pub fn deinit(self: *Self) void {
-            self.arena.deinit();
+        pub fn init(self: *Self, allocator: *mem.Allocator, in_stream: InStreamType, out_stream: OutStreamType) void {
+            self.allocator = allocator;
+            self.in_stream = in_stream;
+            self.out_stream = out_stream;
+            self.raw_frame_reader = RawFrameReaderType.init(allocator, in_stream);
+            self.raw_frame_writer = RawFrameWriterType.init(out_stream);
+            self.primitive_reader = PrimitiveReader.init();
+            self.primitive_writer = PrimitiveWriter.init();
+            self.protocol_version = undefined;
+            self.cql_version = undefined;
         }
 
-        pub fn init(allocator: *mem.Allocator, in_stream: InStreamType, out_stream: OutStreamType) Self {
-            var result = Self{
-                .allocator = allocator,
-                .arena = heap.ArenaAllocator.init(allocator),
-                .in_stream = in_stream,
-                .out_stream = out_stream,
-                .raw_frame_reader = undefined,
-                .raw_frame_writer = RawFrameWriterType.init(out_stream),
-                .primitive_reader = undefined,
-                .primitive_writer = PrimitiveWriter.init(),
-                .protocol_version = undefined,
-                .cql_version = undefined,
-            };
-            result.raw_frame_reader = RawFrameReaderType.init(&result.arena.allocator, in_stream);
-            result.primitive_reader = PrimitiveReader.init(&result.arena.allocator);
-
-            return result;
-        }
-
-        fn reset(self: *Self) void {
-            self.arena.deinit();
-        }
-
-        fn writeOptions(self: *Self) !void {
+        fn writeOptions(self: *Self, allocator: *mem.Allocator) !void {
             // Write OPTIONS
             {
                 const raw_frame = RawFrame{
@@ -239,9 +232,11 @@ fn RawConn() type {
 
             // Read SUPPORTED
             const raw_frame = try self.raw_frame_reader.read();
+            defer raw_frame.deinit(self.allocator);
+
             self.primitive_reader.reset(raw_frame.body);
 
-            var supported_frame = try SupportedFrame.read(&self.arena.allocator, &self.primitive_reader);
+            var supported_frame = try SupportedFrame.read(allocator, &self.primitive_reader);
 
             // TODO(vincent): handle compression
             if (supported_frame.protocol_versions.len > 0) {
@@ -252,7 +247,7 @@ fn RawConn() type {
             self.cql_version = supported_frame.cql_versions[0];
         }
 
-        fn writeStartup(self: *Self) !StartupResponse {
+        fn writeStartup(self: *Self, allocator: *mem.Allocator) !StartupResponse {
             // Write STARTUP
             {
                 var startup_frame = StartupFrame{
@@ -282,12 +277,14 @@ fn RawConn() type {
 
             // Read either READY or AUTHENTICATE
             const raw_frame = try self.raw_frame_reader.read();
+            defer raw_frame.deinit(self.allocator);
+
             self.primitive_reader.reset(raw_frame.body);
 
             return switch (raw_frame.header.opcode) {
                 .Ready => StartupResponse{ .Ready = .{} },
                 .Authenticate => StartupResponse{
-                    .Authenticate = try AuthenticateFrame.read(&self.arena.allocator, &self.primitive_reader),
+                    .Authenticate = try AuthenticateFrame.read(allocator, &self.primitive_reader),
                 },
                 else => error.InvalidResponseFrame,
             };
@@ -297,17 +294,17 @@ fn RawConn() type {
             unreachable;
         }
 
-        fn writeQuery(self: *Self, query: []const u8, query_parameters: QueryParameters) !Result {
-            @breakpoint();
+        fn writeQuery(self: *Self, allocator: *mem.Allocator, query: []const u8, query_parameters: QueryParameters) !Result {
             // Write QUERY
             {
                 var query_frame = QueryFrame{
                     .query = query,
                     .query_parameters = query_parameters,
                 };
+
                 // Encode body
 
-                // TODO(vincent): this sucks, will change later
+                // TODO(vincent): remove me
                 var buf: [4096]u8 = undefined;
                 self.primitive_writer.reset(&buf);
 
@@ -328,7 +325,6 @@ fn RawConn() type {
             }
 
             // Read RESULT
-            @breakpoint();
             const raw_frame = try self.raw_frame_reader.read();
             self.primitive_reader.reset(raw_frame.body);
 
@@ -336,7 +332,7 @@ fn RawConn() type {
                 return error.InvalidServerResponseOpcode;
             }
 
-            var result_frame = try ResultFrame.read(&self.arena.allocator, self.protocol_version, &self.primitive_reader);
+            var result_frame = try ResultFrame.read(allocator, self.protocol_version, &self.primitive_reader);
             return result_frame.result;
         }
     };

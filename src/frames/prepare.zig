@@ -36,7 +36,7 @@ const PrepareFrame = struct {
             .keyspace = null,
         };
 
-        frame.query = try pr.readLongString();
+        frame.query = try pr.readLongString(allocator);
 
         if (!protocol_version.is(5)) {
             return frame;
@@ -44,7 +44,7 @@ const PrepareFrame = struct {
 
         const flags = try pr.readInt(u32);
         if (flags & FlagWithKeyspace == FlagWithKeyspace) {
-            frame.keyspace = try pr.readString();
+            frame.keyspace = try pr.readString(allocator);
         }
 
         return frame;
@@ -62,7 +62,7 @@ test "prepare frame" {
 
     checkHeader(Opcode.Prepare, exp.len, raw_frame.header);
 
-    var pr = PrimitiveReader.init(&arena.allocator);
+    var pr = PrimitiveReader.init();
     pr.reset(raw_frame.body);
 
     const frame = try PrepareFrame.read(&arena.allocator, raw_frame.header.version, &pr);

@@ -55,8 +55,8 @@ const BatchQuery = struct {
 
         const kind = try pr.readByte();
         switch (kind) {
-            0 => query.query_string = try pr.readLongString(),
-            1 => query.query_id = try pr.readShortBytes(),
+            0 => query.query_string = try pr.readLongString(allocator),
+            1 => query.query_id = try pr.readShortBytes(allocator),
             else => return error.InvalidQueryKind,
         }
 
@@ -66,7 +66,7 @@ const BatchQuery = struct {
         const n_values = try pr.readInt(u16);
         var j: usize = 0;
         while (j < @as(usize, n_values)) : (j += 1) {
-            const value = try pr.readValue();
+            const value = try pr.readValue(allocator);
             _ = try list.append(value);
         }
 
@@ -198,7 +198,7 @@ const BatchFrame = struct {
 
         // The following flags are only valid with protocol v5
         if (flags & FlagWithKeyspace == FlagWithKeyspace) {
-            frame.keyspace = try pr.readString();
+            frame.keyspace = try pr.readString(allocator);
         }
         if (flags & FlagWithNowInSeconds == FlagWithNowInSeconds) {
             frame.now_in_seconds = try pr.readInt(u32);
@@ -219,7 +219,7 @@ test "batch frame: query type string" {
 
     checkHeader(Opcode.Batch, exp.len, raw_frame.header);
 
-    var pr = PrimitiveReader.init(&arena.allocator);
+    var pr = PrimitiveReader.init();
     pr.reset(raw_frame.body);
 
     const frame = try BatchFrame.read(&arena.allocator, raw_frame.header.version, &pr);
@@ -257,7 +257,7 @@ test "batch frame: query type prepared" {
 
     checkHeader(Opcode.Batch, exp.len, raw_frame.header);
 
-    var pr = PrimitiveReader.init(&arena.allocator);
+    var pr = PrimitiveReader.init();
     pr.reset(raw_frame.body);
 
     const frame = try BatchFrame.read(&arena.allocator, raw_frame.header.version, &pr);

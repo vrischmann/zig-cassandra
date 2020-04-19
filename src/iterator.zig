@@ -264,7 +264,7 @@ pub const Iterator = struct {
                             return error.InvalidCQLTypeData;
                         }
 
-                        var pr = PrimitiveReader.init(&self.arena.allocator);
+                        var pr = PrimitiveReader.init();
                         pr.reset(column_spec.option.value.?.Set);
 
                         // Define a temporary column spec for the list element so we can
@@ -274,7 +274,7 @@ pub const Iterator = struct {
                             .keyspace = null,
                             .table = null,
                             .name = "",
-                            .option = try Option.read(&pr),
+                            .option = try Option.read(&self.arena.allocator, &pr),
                         };
 
                         // Now decode the data
@@ -288,7 +288,7 @@ pub const Iterator = struct {
 
                         var i: usize = 0;
                         while (i < @as(usize, n)) : (i += 1) {
-                            const element_bytes = try pr.readBytes();
+                            const element_bytes = try pr.readBytes(&self.arena.allocator);
                             if (element_bytes == null) {
                                 return error.InvalidCQLData;
                             }

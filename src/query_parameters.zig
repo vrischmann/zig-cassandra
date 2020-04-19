@@ -156,8 +156,8 @@ pub const QueryParameters = struct {
                 var i: usize = 0;
                 while (i < @as(usize, n)) : (i += 1) {
                     const nm = NamedValue{
-                        .name = try pr.readString(),
-                        .value = try pr.readValue(),
+                        .name = try pr.readString(allocator),
+                        .value = try pr.readValue(allocator),
                     };
                     _ = try list.append(nm);
                 }
@@ -169,7 +169,7 @@ pub const QueryParameters = struct {
 
                 var i: usize = 0;
                 while (i < @as(usize, n)) : (i += 1) {
-                    const value = try pr.readValue();
+                    const value = try pr.readValue(allocator);
                     _ = try list.append(value);
                 }
 
@@ -183,7 +183,7 @@ pub const QueryParameters = struct {
             params.page_size = try pr.readInt(u32);
         }
         if (flags & FlagWithPagingState == FlagWithPagingState) {
-            params.paging_state = try pr.readBytes();
+            params.paging_state = try pr.readBytes(allocator);
         }
         if (flags & FlagWithSerialConsistency == FlagWithSerialConsistency) {
             const consistency_level = try pr.readConsistency();
@@ -207,7 +207,7 @@ pub const QueryParameters = struct {
         // The following flags are only valid with protocol v5
 
         if (flags & FlagWithKeyspace == FlagWithKeyspace) {
-            params.keyspace = try pr.readString();
+            params.keyspace = try pr.readString(allocator);
         }
         if (flags & FlagWithNowInSeconds == FlagWithNowInSeconds) {
             params.now_in_seconds = try pr.readInt(u32);
