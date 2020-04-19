@@ -125,8 +125,14 @@ pub const Option = struct {
         };
 
         switch (option.id) {
-            .Custom, .List, .Map, .Set, .UDT, .Tuple => {
+            .Custom => {
+                option.value = Value{ .Set = try pr.readString(allocator) };
+            },
+            .List, .Map, .Set => {
                 option.value = try pr.readValue(allocator);
+            },
+            .UDT, .Tuple => {
+                std.debug.panic("option {} not implemented yet", .{option.id});
             },
             else => {},
         }
@@ -148,8 +154,6 @@ pub const ColumnSpec = struct {
     name: []const u8,
 
     option: Option,
-
-    // TODO(vincent): Custom types
 
     pub fn read(allocator: *mem.Allocator, pr: *PrimitiveReader, has_global_table_spec: bool) !Self {
         var spec = Self{
@@ -203,22 +207,24 @@ pub const RowsMetadata = struct {
             metadata.new_metadata_id = try pr.readShortBytes(allocator);
         }
 
-        if (flags & FlagNoMetadata == 0) {
-            if (flags & FlagGlobalTablesSpec == FlagGlobalTablesSpec) {
-                const spec = GlobalTableSpec{
-                    .keyspace = try pr.readString(allocator),
-                    .table = try pr.readString(allocator),
-                };
-                metadata.global_table_spec = spec;
-            }
-
-            var column_specs = try allocator.alloc(ColumnSpec, columns_count);
-            var i: usize = 0;
-            while (i < columns_count) : (i += 1) {
-                column_specs[i] = try ColumnSpec.read(allocator, pr, metadata.global_table_spec != null);
-            }
-            metadata.column_specs = column_specs;
+        if (flags & FlagNoMetadata == FlagNoMetadata) {
+            return metadata;
         }
+
+        if (flags & FlagGlobalTablesSpec == FlagGlobalTablesSpec) {
+            const spec = GlobalTableSpec{
+                .keyspace = try pr.readString(allocator),
+                .table = try pr.readString(allocator),
+            };
+            metadata.global_table_spec = spec;
+        }
+
+        var column_specs = try allocator.alloc(ColumnSpec, columns_count);
+        var i: usize = 0;
+        while (i < columns_count) : (i += 1) {
+            column_specs[i] = try ColumnSpec.read(allocator, pr, metadata.global_table_spec != null);
+        }
+        metadata.column_specs = column_specs;
 
         return metadata;
     }
