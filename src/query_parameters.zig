@@ -32,7 +32,7 @@ pub const QueryParameters = struct {
     const FlagWithKeyspace: u32 = 0x0080;
     const FlagWithNowInSeconds: u32 = 0x100;
 
-    pub fn write(self: Self, header: FrameHeader, pw: *PrimitiveWriter) !void {
+    pub fn write(self: Self, protocol_version: ProtocolVersion, pw: *PrimitiveWriter) !void {
         _ = try pw.writeConsistency(self.consistency_level);
 
         // Build the flags value
@@ -59,7 +59,7 @@ pub const QueryParameters = struct {
         if (self.timestamp != null) {
             flags |= FlagWithDefaultTimestamp;
         }
-        if (header.version.is(5)) {
+        if (protocol_version.is(5)) {
             if (self.keyspace != null) {
                 flags |= FlagWithKeyspace;
             }
@@ -68,7 +68,7 @@ pub const QueryParameters = struct {
             }
         }
 
-        if (header.version.is(5)) {
+        if (protocol_version.is(5)) {
             _ = try pw.writeInt(u32, flags);
         } else {
             _ = try pw.writeInt(u8, @intCast(u8, flags));
@@ -107,7 +107,7 @@ pub const QueryParameters = struct {
             _ = try pw.writeInt(u64, ts);
         }
 
-        if (!header.version.is(5)) {
+        if (!protocol_version.is(5)) {
             return;
         }
 
@@ -121,7 +121,7 @@ pub const QueryParameters = struct {
         }
     }
 
-    pub fn read(allocator: *mem.Allocator, header: FrameHeader, pr: *PrimitiveReader) !QueryParameters {
+    pub fn read(allocator: *mem.Allocator, protocol_version: ProtocolVersion, pr: *PrimitiveReader) !QueryParameters {
         var params = QueryParameters{
             .consistency_level = undefined,
             .values = null,
@@ -140,7 +140,7 @@ pub const QueryParameters = struct {
 
         // The size of the flags bitmask depends on the protocol version.
         var flags: u32 = 0;
-        if (header.version.is(5)) {
+        if (protocol_version.is(5)) {
             flags = try pr.readInt(u32);
         } else {
             flags = try pr.readInt(u8);
@@ -200,7 +200,7 @@ pub const QueryParameters = struct {
             params.timestamp = timestamp;
         }
 
-        if (!header.version.is(5)) {
+        if (!protocol_version.is(5)) {
             return params;
         }
 

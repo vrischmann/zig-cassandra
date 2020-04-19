@@ -5,6 +5,8 @@ const net = std.net;
 
 usingnamespace @import("frame.zig");
 usingnamespace @import("primitive_types.zig");
+usingnamespace @import("iterator.zig");
+usingnamespace @import("query_parameters.zig");
 
 // Ordered by Opcode
 
@@ -24,12 +26,24 @@ usingnamespace @import("frames/batch.zig");
 
 const testing = @import("testing.zig");
 
+pub const QueryResultTag = enum {
+    None,
+    Iter,
+};
+
+pub const QueryResult = union(QueryResultTag) {
+    None: void,
+    Iter: Iterator,
+};
+
 pub const Client = struct {
     const Self = @This();
 
     const InStreamType = @TypeOf(std.fs.File.InStream);
     const OutStreamType = @TypeOf(std.fs.File.OutStream);
     const RawConnType = RawConn();
+
+    arena: heap.ArenaAllocator,
 
     username: ?[]const u8,
     password: ?[]const u8,
@@ -42,13 +56,14 @@ pub const Client = struct {
         const socket_in_stream = socket.inStream();
         const socket_out_stream = socket.outStream();
 
-        var raw_conn = RawConnType.init(allocator, socket_in_stream, socket_out_stream);
         var client = Client{
+            .arena = heap.ArenaAllocator.init(allocator),
             .username = null,
             .password = null,
             .socket = socket,
-            .raw_conn = raw_conn,
+            .raw_conn = undefined,
         };
+        client.raw_conn = RawConnType.init(&client.arena.allocator, socket_in_stream, socket_out_stream);
 
         _ = try client.handshake();
 
@@ -62,7 +77,27 @@ pub const Client = struct {
         self.password = password;
     }
 
+    // TODO(vincent): maybe add not comptime equivalent ?
+    // TODO(vincent): return an iterator
+    // TODO(vincent): parse the query string to match the args tuple
+
+    pub fn cquery(self: *Self, comptime query_string: []const u8, args: var) !QueryResult {
+        std.debug.assert(self.socket.handle > 0);
+
+        var parameters: QueryParameters = undefined;
+        var result = try self.raw_conn.writeQuery(query_string, parameters);
+        switch (result) {
+            .Rows => |rows| {
+                var iter = Iterator.init(&self.arena.allocator, rows.metadata, rows.data);
+                return QueryResult{ .Iter = iter };
+            },
+            else => return QueryResult{ .None = .{} },
+        }
+    }
+
     fn handshake(self: *Self) !void {
+        defer self.raw_conn.reset();
+
         // Sequence diagram to establish the connection:
         //
         // +---------+                 +---------+
@@ -147,6 +182,7 @@ fn RawConn() type {
         in_stream: InStreamType,
         out_stream: OutStreamType,
 
+        allocator: *mem.Allocator,
         arena: heap.ArenaAllocator,
 
         raw_frame_reader: RawFrameReaderType,
@@ -163,19 +199,26 @@ fn RawConn() type {
         }
 
         pub fn init(allocator: *mem.Allocator, in_stream: InStreamType, out_stream: OutStreamType) Self {
-            var arena = heap.ArenaAllocator.init(allocator);
-
-            return Self{
-                .arena = arena,
+            var result = Self{
+                .allocator = allocator,
+                .arena = heap.ArenaAllocator.init(allocator),
                 .in_stream = in_stream,
                 .out_stream = out_stream,
-                .raw_frame_reader = RawFrameReaderType.init(&arena.allocator, in_stream),
+                .raw_frame_reader = undefined,
                 .raw_frame_writer = RawFrameWriterType.init(out_stream),
-                .primitive_reader = PrimitiveReader.init(&arena.allocator),
+                .primitive_reader = undefined,
                 .primitive_writer = PrimitiveWriter.init(),
                 .protocol_version = undefined,
                 .cql_version = undefined,
             };
+            result.raw_frame_reader = RawFrameReaderType.init(&result.arena.allocator, in_stream);
+            result.primitive_reader = PrimitiveReader.init(&result.arena.allocator);
+
+            return result;
+        }
+
+        fn reset(self: *Self) void {
+            self.arena.deinit();
         }
 
         fn writeOptions(self: *Self) !void {
@@ -210,13 +253,13 @@ fn RawConn() type {
         }
 
         fn writeStartup(self: *Self) !StartupResponse {
-            var startup_frame = StartupFrame{
-                .cql_version = self.cql_version,
-                .compression = null,
-            };
-
             // Write STARTUP
             {
+                var startup_frame = StartupFrame{
+                    .cql_version = self.cql_version,
+                    .compression = null,
+                };
+
                 // Encode body
                 var buf: [128]u8 = undefined;
                 self.primitive_writer.reset(&buf);
@@ -238,22 +281,63 @@ fn RawConn() type {
             }
 
             // Read either READY or AUTHENTICATE
-            {
-                const raw_frame = try self.raw_frame_reader.read();
-                self.primitive_reader.reset(raw_frame.body);
+            const raw_frame = try self.raw_frame_reader.read();
+            self.primitive_reader.reset(raw_frame.body);
 
-                return switch (raw_frame.header.opcode) {
-                    .Ready => StartupResponse{ .Ready = .{} },
-                    .Authenticate => StartupResponse{
-                        .Authenticate = try AuthenticateFrame.read(&self.arena.allocator, &self.primitive_reader),
-                    },
-                    else => error.InvalidResponseFrame,
-                };
-            }
+            return switch (raw_frame.header.opcode) {
+                .Ready => StartupResponse{ .Ready = .{} },
+                .Authenticate => StartupResponse{
+                    .Authenticate = try AuthenticateFrame.read(&self.arena.allocator, &self.primitive_reader),
+                },
+                else => error.InvalidResponseFrame,
+            };
         }
 
         fn writeAuthResponse(self: *Self, username: []const u8, password: []const u8) !AuthResult {
             unreachable;
+        }
+
+        fn writeQuery(self: *Self, query: []const u8, query_parameters: QueryParameters) !Result {
+            @breakpoint();
+            // Write QUERY
+            {
+                var query_frame = QueryFrame{
+                    .query = query,
+                    .query_parameters = query_parameters,
+                };
+                // Encode body
+
+                // TODO(vincent): this sucks, will change later
+                var buf: [4096]u8 = undefined;
+                self.primitive_writer.reset(&buf);
+
+                _ = try query_frame.write(self.protocol_version, &self.primitive_writer);
+
+                // Write raw frame
+                const raw_frame = RawFrame{
+                    .header = FrameHeader{
+                        .version = self.protocol_version,
+                        .flags = 0,
+                        .stream = 0,
+                        .opcode = .Query,
+                        .body_len = @intCast(u32, self.primitive_writer.getWritten().len),
+                    },
+                    .body = self.primitive_writer.getWritten(),
+                };
+                _ = try self.raw_frame_writer.write(raw_frame);
+            }
+
+            // Read RESULT
+            @breakpoint();
+            const raw_frame = try self.raw_frame_reader.read();
+            self.primitive_reader.reset(raw_frame.body);
+
+            if (raw_frame.header.opcode != .Result) {
+                return error.InvalidServerResponseOpcode;
+            }
+
+            var result_frame = try ResultFrame.read(&self.arena.allocator, self.protocol_version, &self.primitive_reader);
+            return result_frame.result;
         }
     };
 }

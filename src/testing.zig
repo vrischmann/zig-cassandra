@@ -84,7 +84,7 @@ pub fn expectSameRawFrame(frame: var, header: FrameHeader, exp: []const u8) void
             std.debug.panic("unable to write frame. err: {}\n", .{err});
         };
     } else if (function.args.len == 3) {
-        frame.write(header, &pw) catch |err| {
+        frame.write(header.version, &pw) catch |err| {
             std.debug.panic("unable to write frame. err: {}\n", .{err});
         };
     }

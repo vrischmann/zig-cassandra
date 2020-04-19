@@ -18,17 +18,17 @@ const ExecuteFrame = struct {
     result_metadata_id: ?[]const u8,
     query_parameters: QueryParameters,
 
-    pub fn write(self: Self, header: FrameHeader, pw: *PrimitiveWriter) !void {
+    pub fn write(self: Self, protocol_version: ProtocolVersion, pw: *PrimitiveWriter) !void {
         _ = try pw.writeShortBytes(self.query_id);
-        if (header.version.is(5)) {
+        if (protocol_version.is(5)) {
             if (self.result_metadata_id) |id| {
                 _ = try pw.writeShortBytes(id);
             }
         }
-        _ = try self.query_parameters.write(header, pw);
+        _ = try self.query_parameters.write(protocol_version, pw);
     }
 
-    pub fn read(allocator: *mem.Allocator, header: FrameHeader, pr: *PrimitiveReader) !Self {
+    pub fn read(allocator: *mem.Allocator, protocol_version: ProtocolVersion, pr: *PrimitiveReader) !Self {
         var frame = Self{
             .query_id = undefined,
             .result_metadata_id = null,
@@ -36,10 +36,10 @@ const ExecuteFrame = struct {
         };
 
         frame.query_id = (try pr.readShortBytes()) orelse &[_]u8{};
-        if (header.version.is(5)) {
+        if (protocol_version.is(5)) {
             frame.result_metadata_id = try pr.readShortBytes();
         }
-        frame.query_parameters = try QueryParameters.read(allocator, header, pr);
+        frame.query_parameters = try QueryParameters.read(allocator, protocol_version, pr);
 
         return frame;
     }
@@ -59,7 +59,7 @@ test "execute frame" {
     var pr = PrimitiveReader.init(&arena.allocator);
     pr.reset(raw_frame.body);
 
-    const frame = try ExecuteFrame.read(&arena.allocator, raw_frame.header, &pr);
+    const frame = try ExecuteFrame.read(&arena.allocator, raw_frame.header.version, &pr);
 
     const exp_query_id = "\x97\x97\x95\x6d\xfe\xb2\x4c\x99\x86\x8e\xd3\x84\xff\x6f\xd9\x4c";
     testing.expectEqualSlices(u8, exp_query_id, frame.query_id);

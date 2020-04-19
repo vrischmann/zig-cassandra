@@ -52,7 +52,7 @@ pub const StartupFrame = struct {
             if (!mem.eql(u8, "3.0.0", version.value)) {
                 return error.InvalidCQLVersion;
             }
-            frame.cql_version = version.value;
+            frame.cql_version = try CQLVersion.fromString(version.value);
         } else {
             return error.InvalidCQLVersion;
         }
@@ -87,7 +87,7 @@ test "startup frame" {
 
     const frame = try StartupFrame.read(&arena.allocator, &pr);
 
-    testing.expectEqualString("3.0.0", frame.cql_version);
+    testing.expectEqual(CQLVersion{ .major = 3, .minor = 0, .patch = 0 }, frame.cql_version);
     testing.expect(frame.compression == null);
 
     // write

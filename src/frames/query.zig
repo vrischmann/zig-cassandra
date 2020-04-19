@@ -12,21 +12,21 @@ const testing = @import("../testing.zig");
 /// QUERY is sent to perform a CQL query.
 ///
 /// Described in the protocol spec at §4.1.4
-const QueryFrame = struct {
+pub const QueryFrame = struct {
     const Self = @This();
 
     query: []const u8,
     query_parameters: QueryParameters,
 
-    pub fn write(self: Self, header: FrameHeader, pw: *PrimitiveWriter) !void {
+    pub fn write(self: Self, protocol_version: ProtocolVersion, pw: *PrimitiveWriter) !void {
         _ = try pw.writeLongString(self.query);
-        _ = try self.query_parameters.write(header, pw);
+        _ = try self.query_parameters.write(protocol_version, pw);
     }
 
-    pub fn read(allocator: *mem.Allocator, header: FrameHeader, pr: *PrimitiveReader) !Self {
+    pub fn read(allocator: *mem.Allocator, protocol_version: ProtocolVersion, pr: *PrimitiveReader) !Self {
         return Self{
             .query = try pr.readLongString(),
-            .query_parameters = try QueryParameters.read(allocator, header, pr),
+            .query_parameters = try QueryParameters.read(allocator, protocol_version, pr),
         };
     }
 };
@@ -45,7 +45,7 @@ test "query frame: no values, no paging state" {
     var pr = PrimitiveReader.init(&arena.allocator);
     pr.reset(raw_frame.body);
 
-    const frame = try QueryFrame.read(&arena.allocator, raw_frame.header, &pr);
+    const frame = try QueryFrame.read(&arena.allocator, raw_frame.header.version, &pr);
 
     testing.expectEqualString("SELECT * FROM foobar.user ;", frame.query);
     testing.expectEqual(Consistency.One, frame.query_parameters.consistency_level);

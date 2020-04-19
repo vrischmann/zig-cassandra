@@ -96,7 +96,7 @@ const BatchFrame = struct {
     const FlagWithKeyspace: u32 = 0x0080;
     const FlagWithNowInSeconds: u32 = 0x100;
 
-    pub fn write(self: Self, header: FrameHeader, pw: *PrimitiveWriter) !void {
+    pub fn write(self: Self, protocol_version: ProtocolVersion, pw: *PrimitiveWriter) !void {
         _ = try pw.writeInt(u8, @intCast(u8, @enumToInt(self.batch_type)));
 
         // Write the queries
@@ -119,7 +119,7 @@ const BatchFrame = struct {
         if (self.timestamp != null) {
             flags |= FlagWithDefaultTimestamp;
         }
-        if (header.version.is(5)) {
+        if (protocol_version.is(5)) {
             if (self.keyspace != null) {
                 flags |= FlagWithKeyspace;
             }
@@ -128,7 +128,7 @@ const BatchFrame = struct {
             }
         }
 
-        if (header.version.is(5)) {
+        if (protocol_version.is(5)) {
             _ = try pw.writeInt(u32, flags);
         } else {
             _ = try pw.writeInt(u8, @intCast(u8, flags));
@@ -137,7 +137,7 @@ const BatchFrame = struct {
         // Write the remaining body
     }
 
-    pub fn read(allocator: *mem.Allocator, header: FrameHeader, pr: *PrimitiveReader) !Self {
+    pub fn read(allocator: *mem.Allocator, protocol_version: ProtocolVersion, pr: *PrimitiveReader) !Self {
         var frame = Self{
             .batch_type = undefined,
             .queries = undefined,
@@ -171,7 +171,7 @@ const BatchFrame = struct {
 
         // The size of the flags bitmask depends on the protocol version.
         var flags: u32 = 0;
-        if (header.version.is(5)) {
+        if (protocol_version.is(5)) {
             flags = try pr.readInt(u32);
         } else {
             flags = try pr.readInt(u8);
@@ -192,7 +192,7 @@ const BatchFrame = struct {
             frame.timestamp = timestamp;
         }
 
-        if (!header.version.is(5)) {
+        if (!protocol_version.is(5)) {
             return frame;
         }
 
@@ -222,7 +222,7 @@ test "batch frame: query type string" {
     var pr = PrimitiveReader.init(&arena.allocator);
     pr.reset(raw_frame.body);
 
-    const frame = try BatchFrame.read(&arena.allocator, raw_frame.header, &pr);
+    const frame = try BatchFrame.read(&arena.allocator, raw_frame.header.version, &pr);
 
     testing.expectEqual(BatchType.Logged, frame.batch_type);
 
@@ -260,7 +260,7 @@ test "batch frame: query type prepared" {
     var pr = PrimitiveReader.init(&arena.allocator);
     pr.reset(raw_frame.body);
 
-    const frame = try BatchFrame.read(&arena.allocator, raw_frame.header, &pr);
+    const frame = try BatchFrame.read(&arena.allocator, raw_frame.header.version, &pr);
 
     testing.expectEqual(BatchType.Logged, frame.batch_type);
 

@@ -7,7 +7,7 @@ usingnamespace @import("frame.zig");
 
 const testing = @import("testing.zig");
 
-const Iterator = struct {
+pub const Iterator = struct {
     const Self = @This();
 
     arena: heap.ArenaAllocator,

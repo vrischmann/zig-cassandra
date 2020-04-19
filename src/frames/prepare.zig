@@ -18,9 +18,9 @@ const PrepareFrame = struct {
 
     const FlagWithKeyspace = 0x01;
 
-    pub fn write(self: Self, header: FrameHeader, pw: *PrimitiveWriter) !void {
+    pub fn write(self: Self, protocol_version: ProtocolVersion, pw: *PrimitiveWriter) !void {
         _ = try pw.writeLongString(self.query);
-        if (!header.version.is(5)) {
+        if (!protocol_version.is(5)) {
             return;
         }
 
@@ -30,7 +30,7 @@ const PrepareFrame = struct {
         }
     }
 
-    pub fn read(allocator: *mem.Allocator, header: FrameHeader, pr: *PrimitiveReader) !Self {
+    pub fn read(allocator: *mem.Allocator, protocol_version: ProtocolVersion, pr: *PrimitiveReader) !Self {
         var frame = Self{
             .query = undefined,
             .keyspace = null,
@@ -38,7 +38,7 @@ const PrepareFrame = struct {
 
         frame.query = try pr.readLongString();
 
-        if (!header.version.is(5)) {
+        if (!protocol_version.is(5)) {
             return frame;
         }
 
@@ -65,7 +65,7 @@ test "prepare frame" {
     var pr = PrimitiveReader.init(&arena.allocator);
     pr.reset(raw_frame.body);
 
-    const frame = try PrepareFrame.read(&arena.allocator, raw_frame.header, &pr);
+    const frame = try PrepareFrame.read(&arena.allocator, raw_frame.header.version, &pr);
 
     testing.expectEqualString("SELECT age, name from foobar.user where id = ?", frame.query);
     testing.expect(frame.keyspace == null);

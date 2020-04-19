@@ -12,6 +12,8 @@ const testing = @import("../testing.zig");
 pub const PrimitiveWriter = struct {
     const Self = @This();
 
+    // TODO(vincent): use a ArrayList internally for easier use
+
     wbuf: []u8,
     source: io.StreamSource,
     out_stream: io.StreamSource.OutStream,

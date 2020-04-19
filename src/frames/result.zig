@@ -71,7 +71,7 @@ const Prepared = struct {
     metadata: PreparedMetadata,
     rows_metadata: RowsMetadata,
 
-    pub fn read(allocator: *mem.Allocator, header: FrameHeader, pr: *PrimitiveReader) !Self {
+    pub fn read(allocator: *mem.Allocator, protocol_version: ProtocolVersion, pr: *PrimitiveReader) !Self {
         var prepared = Self{
             .query_id = undefined,
             .result_metadata_id = null,
@@ -80,7 +80,7 @@ const Prepared = struct {
         };
 
         prepared.query_id = (try pr.readShortBytes()) orelse return error.NoQueryIDInPreparedFrame;
-        if (header.version.is(5)) {
+        if (protocol_version.is(5)) {
             prepared.result_metadata_id = (try pr.readShortBytes()) orelse return error.NoResultMetadataIDInPreparedFrame;
         }
         prepared.metadata = try PreparedMetadata.read(allocator, pr);
@@ -90,7 +90,7 @@ const Prepared = struct {
     }
 };
 
-const Result = union(ResultKind) {
+pub const Result = union(ResultKind) {
     Void: void,
     Rows: Rows,
     SetKeyspace: []const u8,
@@ -101,12 +101,12 @@ const Result = union(ResultKind) {
 /// RESULT is the result to a query (QUERY, PREPARE, EXECUTE or BATCH messages).
 ///
 /// Described in the protocol spec at §4.2.5.
-const ResultFrame = struct {
+pub const ResultFrame = struct {
     const Self = @This();
 
     result: Result,
 
-    pub fn read(allocator: *mem.Allocator, header: FrameHeader, pr: *PrimitiveReader) !ResultFrame {
+    pub fn read(allocator: *mem.Allocator, protocol_version: ProtocolVersion, pr: *PrimitiveReader) !ResultFrame {
         var frame = Self{
             .result = undefined,
         };
@@ -124,7 +124,7 @@ const ResultFrame = struct {
                 frame.result = Result{ .SetKeyspace = keyspace };
             },
             .Prepared => {
-                const prepared = try Prepared.read(allocator, header, pr);
+                const prepared = try Prepared.read(allocator, protocol_version, pr);
                 frame.result = Result{ .Prepared = prepared };
             },
             .SchemaChange => {
@@ -149,7 +149,7 @@ test "result frame: void" {
     var pr = PrimitiveReader.init(&arena.allocator);
     pr.reset(raw_frame.body);
 
-    const frame = try ResultFrame.read(&arena.allocator, raw_frame.header, &pr);
+    const frame = try ResultFrame.read(&arena.allocator, raw_frame.header.version, &pr);
 
     testing.expect(frame.result == .Void);
 }
@@ -166,7 +166,7 @@ test "result frame: rows" {
     var pr = PrimitiveReader.init(&arena.allocator);
     pr.reset(raw_frame.body);
 
-    const frame = try ResultFrame.read(&arena.allocator, raw_frame.header, &pr);
+    const frame = try ResultFrame.read(&arena.allocator, raw_frame.header.version, &pr);
 
     testing.expect(frame.result == .Rows);
 
@@ -222,7 +222,7 @@ test "result frame: set keyspace" {
     var pr = PrimitiveReader.init(&arena.allocator);
     pr.reset(raw_frame.body);
 
-    const frame = try ResultFrame.read(&arena.allocator, raw_frame.header, &pr);
+    const frame = try ResultFrame.read(&arena.allocator, raw_frame.header.version, &pr);
 
     testing.expect(frame.result == .SetKeyspace);
     testing.expectEqualString("foobar", frame.result.SetKeyspace);
@@ -240,7 +240,7 @@ test "result frame: prepared insert" {
     var pr = PrimitiveReader.init(&arena.allocator);
     pr.reset(raw_frame.body);
 
-    const frame = try ResultFrame.read(&arena.allocator, raw_frame.header, &pr);
+    const frame = try ResultFrame.read(&arena.allocator, raw_frame.header.version, &pr);
 
     testing.expect(frame.result == .Prepared);
 
@@ -286,7 +286,7 @@ test "result frame: prepared select" {
     var pr = PrimitiveReader.init(&arena.allocator);
     pr.reset(raw_frame.body);
 
-    const frame = try ResultFrame.read(&arena.allocator, raw_frame.header, &pr);
+    const frame = try ResultFrame.read(&arena.allocator, raw_frame.header.version, &pr);
 
     testing.expect(frame.result == .Prepared);
 
