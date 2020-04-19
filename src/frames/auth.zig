@@ -41,7 +41,7 @@ const AuthResponseFrame = struct {
 /// AUTH_CHALLENGE is a server authentication challenge.
 ///
 /// Described in the protocol spec at §4.2.7.
-const AuthChallengeFrame = struct {
+pub const AuthChallengeFrame = struct {
     token: ?[]const u8,
 
     pub fn read(allocator: *mem.Allocator, pr: *PrimitiveReader) !AuthChallengeFrame {

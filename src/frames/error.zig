@@ -120,7 +120,7 @@ const UnpreparedError = struct {
 /// ERROR is sent by a node if there's an error processing a request.
 ///
 /// Described in the protocol spec at §4.2.1.
-const ErrorFrame = struct {
+pub const ErrorFrame = struct {
     const Self = @This();
 
     // TODO(vincent): extract this for use by the client
