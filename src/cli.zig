@@ -8,5 +8,7 @@ pub fn main() anyerror!void {
     defer arena.deinit();
     const allocator = &arena.allocator;
 
-    var client = try cql.Client.init(allocator, "localhost", 9042);
+    var address = net.Address.initIp4([_]u8{ 127, 0, 0, 1 }, 9042);
+
+    var client = try cql.Client.init(allocator, address);
 }

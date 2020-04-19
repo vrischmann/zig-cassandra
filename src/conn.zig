@@ -37,8 +37,8 @@ pub const Client = struct {
     socket: std.fs.File,
     raw_conn: RawConnType,
 
-    pub fn init(allocator: *mem.Allocator, seed_host: []const u8, seed_port: u16) !Client {
-        const socket = try net.tcpConnectToHost(allocator, seed_host, seed_port);
+    pub fn init(allocator: *mem.Allocator, seed_address: net.Address) !Client {
+        const socket = try net.tcpConnectToAddress(seed_address);
         const socket_in_stream = socket.inStream();
         const socket_out_stream = socket.outStream();
 
