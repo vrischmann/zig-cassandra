@@ -9,19 +9,22 @@ const testing = @import("../testing.zig");
 /// STARTUP is sent to a node to initialize a connection.
 ///
 /// Described in the protocol spec at §4.1.1.
-const StartupFrame = struct {
+pub const StartupFrame = struct {
     const Self = @This();
 
-    cql_version: []const u8,
+    cql_version: CQLVersion,
     compression: ?CompressionAlgorithm,
 
     pub fn write(self: Self, pw: *PrimitiveWriter) !void {
+        var buf: [16]u8 = undefined;
+        const cql_version = try self.cql_version.print(&buf);
+
         if (self.compression) |c| {
             // Always 2 keys
             _ = try pw.startStringMap(2);
 
             _ = try pw.writeString("CQL_VERSION");
-            _ = try pw.writeString("3.0.0");
+            _ = try pw.writeString(cql_version);
 
             _ = try pw.writeString("COMPRESSION");
             switch (c) {
@@ -32,7 +35,7 @@ const StartupFrame = struct {
             // Always 1 key
             _ = try pw.startStringMap(1);
             _ = try pw.writeString("CQL_VERSION");
-            _ = try pw.writeString("3.0.0");
+            _ = try pw.writeString(cql_version);
         }
     }
 

@@ -9,22 +9,6 @@ usingnamespace @import("primitive_types.zig");
 pub const PrimitiveReader = @import("primitive/reader.zig").PrimitiveReader;
 pub const PrimitiveWriter = @import("primitive/writer.zig").PrimitiveWriter;
 
-// Ordered by Opcode
-
-usingnamespace @import("frames/error.zig");
-usingnamespace @import("frames/startup.zig");
-usingnamespace @import("frames/ready.zig");
-usingnamespace @import("frames/auth.zig");
-usingnamespace @import("frames/options.zig");
-usingnamespace @import("frames/supported.zig");
-usingnamespace @import("frames/query.zig");
-usingnamespace @import("frames/result.zig");
-usingnamespace @import("frames/prepare.zig");
-usingnamespace @import("frames/execute.zig");
-usingnamespace @import("frames/register.zig");
-usingnamespace @import("frames/event.zig");
-usingnamespace @import("frames/batch.zig");
-
 const testing = @import("testing.zig");
 
 pub const FrameHeader = packed struct {

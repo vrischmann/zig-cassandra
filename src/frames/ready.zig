@@ -11,7 +11,7 @@ const testing = @import("../testing.zig");
 /// READY is sent by a node to indicate it is ready to process queries.
 ///
 /// Described in the protocol spec at §4.2.2.
-const ReadyFrame = struct {};
+pub const ReadyFrame = struct {};
 
 test "ready frame" {
     var arena = testing.arenaAllocator();
