@@ -84,7 +84,7 @@ pub const Client = struct {
         var parameters = QueryParameters{
             .consistency_level = self.consistency,
             .values = null,
-            .skip_metadata = true,
+            .skip_metadata = false,
             .page_size = null,
             .paging_state = null,
             .serial_consistency_level = null,
@@ -219,7 +219,7 @@ fn RawConn() type {
             {
                 const raw_frame = RawFrame{
                     .header = FrameHeader{
-                        .version = ProtocolVersion{ .version = 3 },
+                        .version = ProtocolVersion{ .version = 4 },
                         .flags = 0,
                         .stream = 0,
                         .opcode = .Options,
@@ -242,7 +242,7 @@ fn RawConn() type {
             if (supported_frame.protocol_versions.len > 0) {
                 self.protocol_version = supported_frame.protocol_versions[0];
             } else {
-                self.protocol_version = ProtocolVersion{ .version = 3 };
+                self.protocol_version = ProtocolVersion{ .version = 4 };
             }
             self.cql_version = supported_frame.cql_versions[0];
         }
