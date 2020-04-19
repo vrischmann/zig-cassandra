@@ -19,4 +19,15 @@ pub fn main() anyerror!void {
 
     var result = try client.cquery(result_allocator, "SELECT * FROM foobar.user", .{});
     var iter = result.Iter;
+
+    const Row = struct {
+        id: [16]u8,
+        age: u8,
+        name: []const u8,
+    };
+    var row: Row = undefined;
+
+    while (try iter.scan(&row)) {
+        std.debug.warn("id: {x} name: {} age: {}\n", .{ row.id, row.name, row.age });
+    }
 }
