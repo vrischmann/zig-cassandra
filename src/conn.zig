@@ -1,6 +1,7 @@
 const std = @import("std");
 const heap = std.heap;
 const mem = std.mem;
+const net = std.net;
 
 usingnamespace @import("frame.zig");
 usingnamespace @import("primitive_types.zig");
@@ -28,7 +29,7 @@ pub const Client = struct {
 
     const InStreamType = @TypeOf(std.fs.File.InStream);
     const OutStreamType = @TypeOf(std.fs.File.OutStream);
-    const RawConnType = RawConn(InStreamType, OutStreamType);
+    const RawConnType = RawConn();
 
     username: ?[]const u8,
     password: ?[]const u8,
@@ -83,15 +84,9 @@ pub const Client = struct {
         //      | AUTH_RESPONSE             |
         //      |-------------------------->|
         //      |                           |
-        var supported_frame = try self.raw_conn.writeOptions();
+        try self.raw_conn.writeOptions();
 
-        self.protocol_version = supported_frame.protocol_versions[0];
-        self.cql_version = supported_frame.cql_versions[0];
-
-        var startup_response = try self.raw_conn.writeStartup(cql.StartupFrame{
-            .cql_version = self.cql_version,
-            .compression = null,
-        });
+        var startup_response = try self.raw_conn.writeStartup();
 
         switch (startup_response) {
             .Ready => return,
@@ -101,7 +96,7 @@ pub const Client = struct {
                     .Challenge => unreachable,
                     .Success => return,
                     .Error => |err| {
-                        std.debug.panic("error code: {} message: {}\n", .{ erro.error_code, err.message });
+                        std.debug.panic("error code: {} message: {}\n", .{ err.error_code, err.message });
                     },
                 }
             },
@@ -130,15 +125,22 @@ const AuthResultTag = enum {
     Success,
     Error,
 };
-const AuthResult = struct {
+const AuthResult = union(AuthResultTag) {
     Challenge: AuthChallengeFrame,
     Success: ReadyFrame,
     Error: ErrorFrame,
 };
 
-fn RawConn(comptime InStreamType: type, comptime OutStreamType: type) type {
+// TODO(vincent): for now taking InStreamType/OutStreamType in is broken with Zig refusing to compile.
+// See https://github.com/ziglang/zig/issues/5090
+// Use std.fs.File directly so we can test with a TCP socket.
+fn RawConn() type {
+    const InStreamType = std.fs.File.InStream;
+    const OutStreamType = std.fs.File.OutStream;
+
     const RawFrameReaderType = RawFrameReader(InStreamType);
     const RawFrameWriterType = RawFrameWriter(OutStreamType);
+
     return struct {
         const Self = @This();
 
@@ -176,7 +178,7 @@ fn RawConn(comptime InStreamType: type, comptime OutStreamType: type) type {
             };
         }
 
-        fn writeOptions(self: *Self) !SupportedFrame {
+        fn writeOptions(self: *Self) !void {
             // Write OPTIONS
             {
                 const raw_frame = RawFrame{
@@ -193,21 +195,29 @@ fn RawConn(comptime InStreamType: type, comptime OutStreamType: type) type {
             }
 
             // Read SUPPORTED
-            {
-                const raw_frame = try self.raw_frame_reader.read();
-                self.primitive_reader.reset(raw_frame.body);
-                return try SupportedFrame.read(&self.arena.allocator, &self.primitive_reader);
-            }
+            const raw_frame = try self.raw_frame_reader.read();
+            self.primitive_reader.reset(raw_frame.body);
+
+            var supported_frame = try SupportedFrame.read(&self.arena.allocator, &self.primitive_reader);
+
+            // TODO(vincent): handle compression
+            self.protocol_version = supported_frame.protocol_versions[0];
+            self.cql_version = supported_frame.cql_versions[0];
         }
 
         fn writeStartup(self: *Self) !StartupResponse {
+            var startup_frame = StartupFrame{
+                .cql_version = self.cql_version,
+                .compression = null,
+            };
+
             // Write STARTUP
             {
                 // Encode body
                 var buf: [128]u8 = undefined;
                 self.primitive_writer.reset(&buf);
 
-                _ = try frame.write(&self.primitive_writer);
+                _ = try startup_frame.write(&self.primitive_writer);
 
                 // Write raw frame
                 const raw_frame = RawFrame{
@@ -216,7 +226,7 @@ fn RawConn(comptime InStreamType: type, comptime OutStreamType: type) type {
                         .flags = 0,
                         .stream = 0,
                         .opcode = .Startup,
-                        .body_len = self.primitive_writer.getWritten().len,
+                        .body_len = @intCast(u32, self.primitive_writer.getWritten().len),
                     },
                     .body = self.primitive_writer.getWritten(),
                 };
@@ -236,6 +246,10 @@ fn RawConn(comptime InStreamType: type, comptime OutStreamType: type) type {
                     else => error.InvalidResponseFrame,
                 };
             }
+        }
+
+        fn writeAuthResponse(self: *Self, username: []const u8, password: []const u8) !AuthResult {
+            unreachable;
         }
     };
 }
