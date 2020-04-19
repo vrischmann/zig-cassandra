@@ -201,7 +201,11 @@ fn RawConn() type {
             var supported_frame = try SupportedFrame.read(&self.arena.allocator, &self.primitive_reader);
 
             // TODO(vincent): handle compression
-            self.protocol_version = supported_frame.protocol_versions[0];
+            if (supported_frame.protocol_versions.len > 0) {
+                self.protocol_version = supported_frame.protocol_versions[0];
+            } else {
+                self.protocol_version = ProtocolVersion{ .version = 3 };
+            }
             self.cql_version = supported_frame.cql_versions[0];
         }
 
