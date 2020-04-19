@@ -84,7 +84,7 @@ pub const Client = struct {
         var parameters = QueryParameters{
             .consistency_level = self.consistency,
             .values = null,
-            .skip_metadata = false,
+            .skip_metadata = true,
             .page_size = null,
             .paging_state = null,
             .serial_consistency_level = null,
@@ -125,7 +125,7 @@ pub const Client = struct {
         //      | AUTH_RESPONSE             |
         //      |-------------------------->|
         //      |                           |
-        var buffer: [512]u8 = undefined;
+        var buffer: [4096]u8 = undefined;
         var fba = std.heap.FixedBufferAllocator.init(&buffer);
 
         try self.raw_conn.writeOptions(&fba.allocator);
@@ -256,9 +256,8 @@ fn RawConn() type {
                 };
 
                 // Encode body
-                var buf: [128]u8 = undefined;
-                self.primitive_writer.reset(&buf);
-
+                self.primitive_writer.reset(allocator);
+                defer self.primitive_writer.deinit(allocator);
                 _ = try startup_frame.write(&self.primitive_writer);
 
                 // Write raw frame
@@ -303,11 +302,8 @@ fn RawConn() type {
                 };
 
                 // Encode body
-
-                // TODO(vincent): remove me
-                var buf: [4096]u8 = undefined;
-                self.primitive_writer.reset(&buf);
-
+                self.primitive_writer.reset(allocator);
+                defer self.primitive_writer.deinit(allocator);
                 _ = try query_frame.write(self.protocol_version, &self.primitive_writer);
 
                 // Write raw frame

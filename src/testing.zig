@@ -73,10 +73,12 @@ pub fn readRawFrame(_allocator: *std.mem.Allocator, data: []const u8) !RawFrame 
 }
 
 pub fn expectSameRawFrame(frame: var, header: FrameHeader, exp: []const u8) void {
+    var arena = arenaAllocator();
+    defer arena.deinit();
+
     // Write frame body
-    var buf: [1024]u8 = undefined;
-    var pw = PrimitiveWriter.init();
-    pw.reset(&buf);
+    var pw: PrimitiveWriter = undefined;
+    pw.reset(&arena.allocator);
 
     const function = @typeInfo(@TypeOf(frame.write)).BoundFn;
     if (function.args.len == 2) {

@@ -13,7 +13,7 @@ pub fn main() anyerror!void {
     var client: cql.Client = undefined;
     try client.init(allocator, address);
 
-    var result_arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    var result_arena = std.heap.ArenaAllocator.init(allocator);
     defer result_arena.deinit();
     const result_allocator = &result_arena.allocator;
 
