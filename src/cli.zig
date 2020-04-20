@@ -21,7 +21,7 @@ pub fn main() anyerror!void {
     //     .age = 120,
     // });
     var result = try client.cquery(result_allocator, "SELECT * FROM foobar.age_to_ids WHERE age = ?", .{
-        120,
+        @as(u32, 120),
     });
     var iter = result.Iter;
 
