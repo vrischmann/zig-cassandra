@@ -84,8 +84,10 @@ pub const Client = struct {
 
         comptime {
             const bind_markers = countBindMarkers(query_string);
-            if (bind_markers != args.len) {
-                @compileLog("number of arguments = ", args.len);
+            const fields = @typeInfo(@TypeOf(args)).Struct.fields.len;
+
+            if (bind_markers != fields) {
+                @compileLog("number of arguments = ", fields);
                 @compileLog("number of bind markers = ", bind_markers);
                 @compileError("Query string has different number of bind markers than the number of arguments provided");
             }
@@ -93,9 +95,20 @@ pub const Client = struct {
 
         std.debug.assert(self.socket.handle > 0);
 
+        var values = std.ArrayList(Value).init(allocator);
+
+        inline for (@typeInfo(@TypeOf(args)).Struct.fields) |struct_field, i| {
+            const field_type_info = @typeInfo(struct_field.field_type);
+            const field_name = struct_field.name;
+
+            const arg = @field(args, field_name);
+            try appendValueToQueryParameter(allocator, &values, struct_field.field_type, arg);
+        }
+
+        // TODO(vincent): handle named values
         var parameters = QueryParameters{
             .consistency_level = self.consistency,
-            .values = null,
+            .values = Values{ .Normal = values.toOwnedSlice() },
             .skip_metadata = false,
             .page_size = null,
             .paging_state = null,
@@ -175,6 +188,48 @@ pub const Client = struct {
         );
     }
 };
+
+fn appendValueToQueryParameter(allocator: *mem.Allocator, values: *std.ArrayList(Value), comptime Type: type, arg: Type) !void {
+    const type_info = @typeInfo(Type);
+
+    var value: Value = undefined;
+    switch (type_info) {
+        .Int, .ComptimeInt => {
+            // TODO(vincent): should probably make this better so that
+            // something that fits in a u8 is encoded as a u8
+            // const int_arg = if (@TypeOf(arg) == comptime_int) blk: {
+            //     break :blk @as(u64, arg);
+            // } else @as(u64, arg);
+            const int_arg = @as(u64, arg);
+
+            const buf = try allocator.alloc(u8, 8);
+
+            mem.writeIntSliceBig(u64, buf, int_arg);
+            value = Value{ .Set = buf };
+        },
+        else => @compileError("field type " ++ @typeName(Type) ++ " not handled yet"),
+    }
+
+    try values.append(value);
+}
+
+fn countBindMarkers(query_string: []const u8) usize {
+    var pos: usize = 0;
+    var count: usize = 0;
+
+    while (mem.indexOfScalarPos(u8, query_string, pos, '?')) |i| {
+        count += 1;
+        pos = i + 1;
+    }
+
+    return count;
+}
+
+test "count bind markers" {
+    const query_string = "select * from foobar.user where id = ? and name = ? and age < ?";
+    const count = countBindMarkers(query_string);
+    testing.expectEqual(@as(usize, 3), count);
+}
 
 const AuthResultTag = enum {
     Challenge,
@@ -354,24 +409,6 @@ const StartupResponse = union(StartupResponseTag) {
     Ready: ReadyFrame,
     Authenticate: AuthenticateFrame,
 };
-
-fn countBindMarkers(query_string: []const u8) usize {
-    var pos: usize = 0;
-    var count: usize = 0;
-
-    while (mem.indexOfScalarPos(u8, query_string, pos, '?')) |i| {
-        count += 1;
-        pos = i + 1;
-    }
-
-    return count;
-}
-
-test "count bind markers" {
-    const query_string = "select * from foobar.user where id = ? and name = ? and age < ?";
-    const count = countBindMarkers(query_string);
-    testing.expectEqual(@as(usize, 3), count);
-}
 
 test "raw conn: startup" {
     // TODO(vincent): this is tedious just to test.

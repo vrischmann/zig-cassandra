@@ -17,7 +17,12 @@ pub fn main() anyerror!void {
     defer result_arena.deinit();
     const result_allocator = &result_arena.allocator;
 
-    var result = try client.cquery(result_allocator, "SELECT * FROM foobar.user", .{});
+    // var result = try client.cquery(result_allocator, "SELECT * FROM foobar.user WHERE age = ? allow filtering", .{
+    //     .age = 120,
+    // });
+    var result = try client.cquery(result_allocator, "SELECT * FROM foobar.age_to_ids WHERE age = ?", .{
+        120,
+    });
     var iter = result.Iter;
 
     const Row = struct {
