@@ -78,8 +78,17 @@ pub const Client = struct {
     // TODO(vincent): parse the query string to match the args tuple
 
     pub fn cquery(self: *Self, allocator: *mem.Allocator, comptime query_string: []const u8, args: var) !QueryResult {
-        if (@typeInfo(args) != .Struct) {
+        if (@typeInfo(@TypeOf(args)) != .Struct) {
             @compileError("Expected tuple or struct argument, found " ++ @typeName(args) ++ " of type " ++ @tagName(@typeInfo(args)));
+        }
+
+        comptime {
+            const bind_markers = countBindMarkers(query_string);
+            if (bind_markers != args.len) {
+                @compileLog("number of arguments = ", args.len);
+                @compileLog("number of bind markers = ", bind_markers);
+                @compileError("Query string has different number of bind markers than the number of arguments provided");
+            }
         }
 
         std.debug.assert(self.socket.handle > 0);
