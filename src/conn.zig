@@ -108,7 +108,7 @@ pub const Client = struct {
         // TODO(vincent): handle named values
         var parameters = QueryParameters{
             .consistency_level = self.consistency,
-            .values = Values{ .Normal = values.toOwnedSlice() },
+            .values = undefined,
             .skip_metadata = false,
             .page_size = null,
             .paging_state = null,
@@ -117,6 +117,7 @@ pub const Client = struct {
             .keyspace = null,
             .now_in_seconds = null,
         };
+        parameters.values = Values{ .Normal = values.toOwnedSlice() };
 
         var result = try self.raw_conn.writeQuery(allocator, query_string, parameters);
         switch (result) {
