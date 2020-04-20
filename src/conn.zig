@@ -195,17 +195,10 @@ fn appendValueToQueryParameter(allocator: *mem.Allocator, values: *std.ArrayList
 
     var value: Value = undefined;
     switch (type_info) {
-        .Int, .ComptimeInt => {
-            // TODO(vincent): should probably make this better so that
-            // something that fits in a u8 is encoded as a u8
-            // const int_arg = if (@TypeOf(arg) == comptime_int) blk: {
-            //     break :blk @as(u64, arg);
-            // } else @as(u64, arg);
-            const int_arg = @as(u64, arg);
+        .Int => |info| {
+            const buf = try allocator.alloc(u8, info.bits / 8);
 
-            const buf = try allocator.alloc(u8, 8);
-
-            mem.writeIntSliceBig(u64, buf, int_arg);
+            mem.writeIntSliceBig(Type, buf, arg);
             value = Value{ .Set = buf };
         },
         else => @compileError("field type " ++ @typeName(Type) ++ " not handled yet"),
