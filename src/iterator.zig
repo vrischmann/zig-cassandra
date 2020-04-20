@@ -144,7 +144,7 @@ pub const Iterator = struct {
     fn readInt(self: *Self, column_spec: ColumnSpec, column_data: ColumnData, comptime Type: type) !Type {
         var r: Type = 0;
 
-        const id = column_spec.option.id;
+        const id = column_spec.option;
 
         switch (Type) {
             u8, i8 => {
@@ -194,7 +194,7 @@ pub const Iterator = struct {
     fn readFloat(self: *Self, column_spec: ColumnSpec, column_data: ColumnData, comptime Type: type) !Type {
         var r: Type = 0.0;
 
-        const id = column_spec.option.id;
+        const id = column_spec.option;
 
         switch (Type) {
             f32 => {
@@ -237,14 +237,14 @@ pub const Iterator = struct {
 
         var slice: Type = undefined;
 
-        const id = column_spec.option.id;
+        const id = column_spec.option;
 
         switch (ChildType) {
             u8 => {
                 switch (id) {
                     .Blob, .UUID, .Timeuuid => slice = column_data.slice,
                     .Ascii, .Varchar => slice = column_data.slice,
-                    else => std.debug.panic("CQL type {} can't be read into the type {}", .{ std.meta.tagName(column_spec.option.id), @typeName(Type) }),
+                    else => std.debug.panic("CQL type {} can't be read into the type {}", .{ std.meta.tagName(column_spec.option), @typeName(Type) }),
                 }
             },
             else => {
@@ -255,17 +255,9 @@ pub const Iterator = struct {
                 switch (id) {
                     .List, .Set => {
                         // A list or set is a complex type.
-                        //
-                        // To be able to decode this type correctly we need to decode the type of element first.
-                        // This is stored in the list option value.
-                        //
-                        // If it doesn't exist the data is malformed.
-                        if (column_spec.option.value == null or column_spec.option.value.? != .Set) {
-                            return error.InvalidCQLTypeData;
+                        if (column_spec.listset_element_type_option == null) {
+                            return error.MalformerdColumnSpec;
                         }
-
-                        var pr = PrimitiveReader.init();
-                        pr.reset(column_spec.option.value.?.Set);
 
                         // Define a temporary column spec for the list element so we can
                         // reuse the same functions to decode list elements.
@@ -274,11 +266,16 @@ pub const Iterator = struct {
                             .keyspace = null,
                             .table = null,
                             .name = "",
-                            .option = try Option.read(&self.arena.allocator, &pr),
+                            .option = column_spec.listset_element_type_option.?,
+                            .listset_element_type_option = null,
+                            .map_key_type_option = null,
+                            .map_value_type_option = null,
+                            .custom_class_name = null,
                         };
 
                         // Now decode the data
 
+                        var pr = PrimitiveReader.init();
                         pr.reset(column_data.slice);
 
                         const n = try pr.readInt(u32);
@@ -297,7 +294,7 @@ pub const Iterator = struct {
 
                         slice = res;
                     },
-                    else => std.debug.panic("CQL type {} can't be read into the type {}", .{ std.meta.tagName(column_spec.option.id), @typeName(Type) }),
+                    else => std.debug.panic("CQL type {} can't be read into the type {}", .{ std.meta.tagName(column_spec.option), @typeName(Type) }),
                 }
             },
         }
@@ -314,9 +311,9 @@ pub const Iterator = struct {
         // Maybe in the future we could allow more advanced stuff like reading blobs for arrays of packed struct/union/enum
         // Maybe we can also allow reading strings and adding zeroes to tne end ?
 
-        switch (column_spec.option.id) {
+        switch (column_spec.option) {
             .UUID, .Timeuuid => mem.copy(u8, &array, column_data.slice[0..array.len]),
-            else => std.debug.panic("CQL type {} can't be read into the type {}", .{ std.meta.tagName(column_spec.option.id), @typeName(Type) }),
+            else => std.debug.panic("CQL type {} can't be read into the type {}", .{ std.meta.tagName(column_spec.option), @typeName(Type) }),
         }
 
         return array;
@@ -328,16 +325,11 @@ fn columnSpec(id: OptionID) ColumnSpec {
         .keyspace = null,
         .table = null,
         .name = "name",
-        .option = Option{ .id = id, .value = null },
-    };
-}
-
-fn columnSpecWithValue(id: OptionID, value: Value) ColumnSpec {
-    return ColumnSpec{
-        .keyspace = null,
-        .table = null,
-        .name = "name",
-        .option = Option{ .id = id, .value = value },
+        .option = id,
+        .listset_element_type_option = null,
+        .map_key_type_option = null,
+        .map_value_type_option = null,
+        .custom_class_name = null,
     };
 }
 
@@ -739,12 +731,16 @@ test "iterator scan: set/list" {
     };
     var row: Row = undefined;
 
-    const column_specs = &[_]ColumnSpec{
-        columnSpecWithValue(.Set, Value{ .Set = "\x00\x14" }),
-        columnSpecWithValue(.List, Value{ .Set = "\x00\x14" }),
-        columnSpecWithValue(.Set, Value{ .Set = "\x00\x0c" }),
-        columnSpecWithValue(.List, Value{ .Set = "\x00\x0c" }),
-    };
+    var spec1 = columnSpec(.Set);
+    spec1.listset_element_type_option = .Tinyint;
+    var spec2 = columnSpec(.List);
+    spec2.listset_element_type_option = .Tinyint;
+    var spec3 = columnSpec(.Set);
+    spec3.listset_element_type_option = .UUID;
+    var spec4 = columnSpec(.List);
+    spec4.listset_element_type_option = .UUID;
+
+    const column_specs = &[_]ColumnSpec{ spec1, spec2, spec3, spec4 };
     const test_data = &[_][]const u8{
         "\x00\x00\x00\x02\x00\x00\x00\x04\x21\x22\x23\x24\x00\x00\x00\x04\x31\x32\x33\x34",
         "\x00\x00\x00\x02\x00\x00\x00\x04\x41\x42\x43\x44\x00\x00\x00\x04\x51\x52\x53\x54",

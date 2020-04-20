@@ -112,33 +112,14 @@ pub const OptionID = packed enum(u16) {
     Set = 0x0022,
     UDT = 0x0030,
     Tuple = 0x0031,
+
+    pub fn read(pr: *PrimitiveReader) !OptionID {
+        return @intToEnum(OptionID, try pr.readInt(u16));
+    }
 };
 
 pub const Option = struct {
     id: OptionID,
-    value: ?Value,
-
-    pub fn read(allocator: *mem.Allocator, pr: *PrimitiveReader) !Option {
-        var option = Option{
-            .id = @intToEnum(OptionID, try pr.readInt(u16)),
-            .value = null,
-        };
-
-        switch (option.id) {
-            .Custom => {
-                option.value = Value{ .Set = try pr.readString(allocator) };
-            },
-            .List, .Map, .Set => {
-                option.value = try pr.readValue(allocator);
-            },
-            .UDT, .Tuple => {
-                std.debug.panic("option {} not implemented yet", .{option.id});
-            },
-            else => {},
-        }
-
-        return option;
-    }
 };
 
 pub const GlobalTableSpec = struct {
@@ -153,7 +134,13 @@ pub const ColumnSpec = struct {
     table: ?[]const u8,
     name: []const u8,
 
-    option: Option,
+    option: OptionID,
+
+    // TODO(vincent): not a fan of this but for now it's fine.
+    listset_element_type_option: ?OptionID,
+    map_key_type_option: ?OptionID,
+    map_value_type_option: ?OptionID,
+    custom_class_name: ?[]const u8,
 
     pub fn read(allocator: *mem.Allocator, pr: *PrimitiveReader, has_global_table_spec: bool) !Self {
         var spec = Self{
@@ -161,6 +148,10 @@ pub const ColumnSpec = struct {
             .table = null,
             .name = undefined,
             .option = undefined,
+            .listset_element_type_option = null,
+            .map_key_type_option = null,
+            .map_value_type_option = null,
+            .custom_class_name = null,
         };
 
         if (!has_global_table_spec) {
@@ -168,7 +159,23 @@ pub const ColumnSpec = struct {
             spec.table = try pr.readString(allocator);
         }
         spec.name = try pr.readString(allocator);
-        spec.option = try Option.read(allocator, pr);
+        spec.option = try OptionID.read(pr);
+
+        switch (spec.option) {
+            .Tuple => unreachable,
+            .UDT => unreachable,
+            .Custom => {
+                spec.custom_class_name = try pr.readString(allocator);
+            },
+            .List, .Set => {
+                spec.listset_element_type_option = try OptionID.read(pr);
+            },
+            .Map => {
+                spec.map_key_type_option = try OptionID.read(pr);
+                spec.map_value_type_option = try OptionID.read(pr);
+            },
+            else => {},
+        }
 
         return spec;
     }

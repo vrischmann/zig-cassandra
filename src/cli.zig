@@ -26,13 +26,12 @@ pub fn main() anyerror!void {
     var iter = result.Iter;
 
     const Row = struct {
-        id: [16]u8,
-        age: u8,
-        name: []const u8,
+        age: u32,
+        ids: []const []const u8,
     };
     var row: Row = undefined;
 
     while (try iter.scan(&row)) {
-        std.debug.warn("id: {x} name: {} age: {}\n", .{ row.id, row.name, row.age });
+        std.debug.warn("age: {} id: {x}\n", .{ row.age, row.ids });
     }
 }
