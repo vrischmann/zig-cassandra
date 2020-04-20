@@ -346,6 +346,24 @@ const StartupResponse = union(StartupResponseTag) {
     Authenticate: AuthenticateFrame,
 };
 
+fn countBindMarkers(query_string: []const u8) usize {
+    var pos: usize = 0;
+    var count: usize = 0;
+
+    while (mem.indexOfScalarPos(u8, query_string, pos, '?')) |i| {
+        count += 1;
+        pos = i + 1;
+    }
+
+    return count;
+}
+
+test "count bind markers" {
+    const query_string = "select * from foobar.user where id = ? and name = ? and age < ?";
+    const count = countBindMarkers(query_string);
+    testing.expectEqual(@as(usize, 3), count);
+}
+
 test "raw conn: startup" {
     // TODO(vincent): this is tedious just to test.
     // var buf: [1024]u8 = undefined;
