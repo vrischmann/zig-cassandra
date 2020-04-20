@@ -82,7 +82,6 @@ pub const Multimap = struct {
         };
     }
 
-    // TODO(vincent): change this to take a slice
     pub fn put(self: *Self, key: []const u8, values: []const []const u8) !void {
         _ = try self.map.put(key, values);
     }

@@ -75,7 +75,6 @@ pub const Client = struct {
     }
 
     // TODO(vincent): maybe add not comptime equivalent ?
-    // TODO(vincent): return an iterator
     // TODO(vincent): parse the query string to match the args tuple
 
     pub fn cquery(self: *Self, allocator: *mem.Allocator, comptime query_string: []const u8, args: var) !QueryResult {
