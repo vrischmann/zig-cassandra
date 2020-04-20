@@ -78,6 +78,10 @@ pub const Client = struct {
     // TODO(vincent): parse the query string to match the args tuple
 
     pub fn cquery(self: *Self, allocator: *mem.Allocator, comptime query_string: []const u8, args: var) !QueryResult {
+        if (@typeInfo(args) != .Struct) {
+            @compileError("Expected tuple or struct argument, found " ++ @typeName(args) ++ " of type " ++ @tagName(@typeInfo(args)));
+        }
+
         std.debug.assert(self.socket.handle > 0);
 
         var parameters = QueryParameters{
