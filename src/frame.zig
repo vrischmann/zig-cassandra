@@ -118,10 +118,6 @@ pub const OptionID = packed enum(u16) {
     }
 };
 
-pub const Option = struct {
-    id: OptionID,
-};
-
 pub const GlobalTableSpec = struct {
     keyspace: []const u8,
     table: []const u8,

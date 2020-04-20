@@ -46,14 +46,16 @@ pub const Iterator = struct {
             return error.MetadataIncompatibleWithStructFields;
         }
 
-        inline for (@typeInfo(child).Struct.fields) |struct_field, i| {
+        inline for (@typeInfo(child).Struct.fields) |struct_field, _i| {
+            const i = @as(usize, _i);
+
             const field_type_info = @typeInfo(struct_field.field_type);
             const field_name = struct_field.name;
 
-            const column_spec = self.metadata.column_specs[@as(usize, i)];
-            const column_data = self.rows[self.pos].slice[@as(usize, i)];
+            const column_spec = self.metadata.column_specs[i];
+            const column_data = self.rows[self.pos].slice[i];
 
-            @field(args, field_name) = try self.readType(column_spec, column_data, struct_field.field_type);
+            @field(args, field_name) = try self.readType(column_spec, column_data.slice, struct_field.field_type);
         }
 
         self.pos += 1;
@@ -61,16 +63,18 @@ pub const Iterator = struct {
         return true;
     }
 
-    fn readType(self: *Self, column_spec: ColumnSpec, column_data: ColumnData, comptime Type: type) !Type {
+    fn readType(self: *Self, column_spec: ColumnSpec, column_data: []const u8, comptime Type: type) !Type {
         const type_info = @typeInfo(Type);
 
         // TODO(vincent): if the struct is packed we could maybe read stuff directly
         // TODO(vincent): handle packed enum
         // TODO(vincent): handle union
 
+        const option = column_spec.option;
+
         switch (type_info) {
-            .Int => return try self.readInt(column_spec, column_data, Type),
-            .Float => return try self.readFloat(column_spec, column_data, Type),
+            .Int => return try self.readInt(option, column_data, Type),
+            .Float => return try self.readFloat(option, column_data, Type),
             .Pointer => |pointer| switch (pointer.size) {
                 .One => {
                     return try self.readType(column_spec, column_data, @TypeOf(pointer.child));
@@ -80,7 +84,7 @@ pub const Iterator = struct {
                 },
                 else => @compileError("invalid pointer size " ++ @tagName(pointer.size)),
             },
-            .Array => return try self.readArray(column_spec, column_data, Type),
+            .Array => return try self.readArray(option, column_data, Type),
             else => @compileError("field type " ++ @typeName(Type) ++ " not handled yet"),
         }
     }
@@ -141,38 +145,36 @@ pub const Iterator = struct {
         return mem.readIntBig(Type, bytes);
     }
 
-    fn readInt(self: *Self, column_spec: ColumnSpec, column_data: ColumnData, comptime Type: type) !Type {
+    fn readInt(self: *Self, option: OptionID, column_data: []const u8, comptime Type: type) !Type {
         var r: Type = 0;
-
-        const id = column_spec.option;
 
         switch (Type) {
             u8, i8 => {
-                switch (id) {
-                    .Tinyint => return readIntFromSlice(Type, column_data.slice),
-                    else => std.debug.panic("CQL type {} can't be read into the type {}", .{ @tagName(id), @typeName(Type) }),
+                switch (option) {
+                    .Tinyint => return readIntFromSlice(Type, column_data),
+                    else => std.debug.panic("CQL type {} can't be read into the type {}", .{ @tagName(option), @typeName(Type) }),
                 }
             },
             u16, i16 => {
-                switch (id) {
+                switch (option) {
                     .Tinyint,
                     .Smallint,
-                    => return readIntFromSlice(Type, column_data.slice),
-                    else => std.debug.panic("CQL type {} can't be read into the type {}", .{ @tagName(id), @typeName(Type) }),
+                    => return readIntFromSlice(Type, column_data),
+                    else => std.debug.panic("CQL type {} can't be read into the type {}", .{ @tagName(option), @typeName(Type) }),
                 }
             },
             u32, i32 => {
-                switch (id) {
+                switch (option) {
                     .Tinyint,
                     .Smallint,
                     .Int,
                     .Date,
-                    => return readIntFromSlice(Type, column_data.slice),
-                    else => std.debug.panic("CQL type {} can't be read into the type {}", .{ @tagName(id), @typeName(Type) }),
+                    => return readIntFromSlice(Type, column_data),
+                    else => std.debug.panic("CQL type {} can't be read into the type {}", .{ @tagName(option), @typeName(Type) }),
                 }
             },
             u64, i64, u128, i128 => {
-                switch (id) {
+                switch (option) {
                     .Tinyint,
                     .Smallint,
                     .Int,
@@ -181,8 +183,8 @@ pub const Iterator = struct {
                     .Date,
                     .Time,
                     .Timestamp,
-                    => return readIntFromSlice(Type, column_data.slice),
-                    else => std.debug.panic("CQL type {} can't be read into the type {}", .{ @tagName(id), @typeName(Type) }),
+                    => return readIntFromSlice(Type, column_data),
+                    else => std.debug.panic("CQL type {} can't be read into the type {}", .{ @tagName(option), @typeName(Type) }),
                 }
             },
             else => @compileError("int type " ++ @typeName(Type) ++ " is invalid"),
@@ -191,39 +193,37 @@ pub const Iterator = struct {
         return r;
     }
 
-    fn readFloat(self: *Self, column_spec: ColumnSpec, column_data: ColumnData, comptime Type: type) !Type {
+    fn readFloat(self: *Self, option: OptionID, column_data: []const u8, comptime Type: type) !Type {
         var r: Type = 0.0;
-
-        const id = column_spec.option;
 
         switch (Type) {
             f32 => {
-                switch (id) {
-                    .Float => return readFloatFromSlice(f32, column_data.slice),
-                    else => std.debug.panic("CQL type {} can't be read into the type {}", .{ @tagName(id), @typeName(Type) }),
+                switch (option) {
+                    .Float => return readFloatFromSlice(f32, column_data),
+                    else => std.debug.panic("CQL type {} can't be read into the type {}", .{ @tagName(option), @typeName(Type) }),
                 }
             },
             f64 => {
-                switch (id) {
+                switch (option) {
                     .Float => {
-                        const f_32 = readFloatFromSlice(f32, column_data.slice);
+                        const f_32 = readFloatFromSlice(f32, column_data);
                         return @floatCast(Type, f_32);
                     },
-                    .Double => return readFloatFromSlice(f64, column_data.slice),
-                    else => std.debug.panic("CQL type {} can't be read into the type {}", .{ @tagName(id), @typeName(Type) }),
+                    .Double => return readFloatFromSlice(f64, column_data),
+                    else => std.debug.panic("CQL type {} can't be read into the type {}", .{ @tagName(option), @typeName(Type) }),
                 }
             },
             f128 => {
-                switch (id) {
+                switch (option) {
                     .Float => {
-                        const f_32 = readFloatFromSlice(f32, column_data.slice);
+                        const f_32 = readFloatFromSlice(f32, column_data);
                         return @floatCast(Type, f_32);
                     },
                     .Double => {
-                        const f_64 = readFloatFromSlice(f64, column_data.slice);
+                        const f_64 = readFloatFromSlice(f64, column_data);
                         return @floatCast(Type, f_64);
                     },
-                    else => std.debug.panic("CQL type {} can't be read into the type {}", .{ @tagName(id), @typeName(Type) }),
+                    else => std.debug.panic("CQL type {} can't be read into the type {}", .{ @tagName(option), @typeName(Type) }),
                 }
             },
             else => @compileError("float type " ++ @typeName(Type) ++ " is invalid"),
@@ -232,7 +232,7 @@ pub const Iterator = struct {
         return r;
     }
 
-    fn readSlice(self: *Self, column_spec: ColumnSpec, column_data: ColumnData, comptime Type: type) !Type {
+    fn readSlice(self: *Self, column_spec: ColumnSpec, column_data: []const u8, comptime Type: type) !Type {
         const ChildType = std.meta.Elem(Type);
 
         var slice: Type = undefined;
@@ -242,9 +242,9 @@ pub const Iterator = struct {
         switch (ChildType) {
             u8 => {
                 switch (id) {
-                    .Blob, .UUID, .Timeuuid => slice = column_data.slice,
-                    .Ascii, .Varchar => slice = column_data.slice,
-                    else => std.debug.panic("CQL type {} can't be read into the type {}", .{ std.meta.tagName(column_spec.option), @typeName(Type) }),
+                    .Blob, .UUID, .Timeuuid => slice = column_data,
+                    .Ascii, .Varchar => slice = column_data,
+                    else => std.debug.panic("CQL type {} can't be read into the type {}", .{ std.meta.tagName(id), @typeName(Type) }),
                 }
             },
             else => {
@@ -252,31 +252,25 @@ pub const Iterator = struct {
                     @compileError("cannot read a slice of arrays, use a slice instead as the element type");
                 }
 
+                @compileError("broken !");
+
                 switch (id) {
                     .List, .Set => {
                         // A list or set is a complex type.
                         if (column_spec.listset_element_type_option == null) {
-                            return error.MalformerdColumnSpec;
+                            return error.MalformedColumnSpec;
                         }
 
                         // Define a temporary column spec for the list element so we can
                         // reuse the same functions to decode list elements.
 
-                        const element_column_spec = ColumnSpec{
-                            .keyspace = null,
-                            .table = null,
-                            .name = "",
-                            .option = column_spec.listset_element_type_option.?,
-                            .listset_element_type_option = null,
-                            .map_key_type_option = null,
-                            .map_value_type_option = null,
-                            .custom_class_name = null,
-                        };
+                        var child_column_spec: ColumnSpec = undefined;
+                        child_column_spec.option = column_spec.listset_element_type_option.?;
 
                         // Now decode the data
 
                         var pr = PrimitiveReader.init();
-                        pr.reset(column_data.slice);
+                        pr.reset(column_data);
 
                         const n = try pr.readInt(u32);
 
@@ -289,12 +283,13 @@ pub const Iterator = struct {
                             if (element_bytes == null) {
                                 return error.InvalidCQLData;
                             }
-                            res[i] = try self.readType(element_column_spec, ColumnData{ .slice = element_bytes.? }, ChildType);
+
+                            res[i] = try self.readType(child_column_spec, element_bytes.?, ChildType);
                         }
 
                         slice = res;
                     },
-                    else => std.debug.panic("CQL type {} can't be read into the type {}", .{ std.meta.tagName(column_spec.option), @typeName(Type) }),
+                    else => std.debug.panic("CQL type {} can't be read into the type {}", .{ std.meta.tagName(id), @typeName(Type) }),
                 }
             },
         }
@@ -302,7 +297,7 @@ pub const Iterator = struct {
         return slice;
     }
 
-    fn readArray(self: *Self, column_spec: ColumnSpec, column_data: ColumnData, comptime Type: type) !Type {
+    fn readArray(self: *Self, option: OptionID, column_data: []const u8, comptime Type: type) !Type {
         const ChildType = std.meta.Elem(Type);
 
         var array: Type = undefined;
@@ -311,9 +306,9 @@ pub const Iterator = struct {
         // Maybe in the future we could allow more advanced stuff like reading blobs for arrays of packed struct/union/enum
         // Maybe we can also allow reading strings and adding zeroes to tne end ?
 
-        switch (column_spec.option) {
-            .UUID, .Timeuuid => mem.copy(u8, &array, column_data.slice[0..array.len]),
-            else => std.debug.panic("CQL type {} can't be read into the type {}", .{ std.meta.tagName(column_spec.option), @typeName(Type) }),
+        switch (option) {
+            .UUID, .Timeuuid => mem.copy(u8, &array, column_data[0..array.len]),
+            else => std.debug.panic("CQL type {} can't be read into the type {}", .{ std.meta.tagName(option), @typeName(Type) }),
         }
 
         return array;
