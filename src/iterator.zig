@@ -279,24 +279,22 @@ pub const Iterator = struct {
                             return error.InvalidColumnSpec;
                         }
 
-                        switch (column_spec.listset_element_type_option.?) {
-                            .Int => {
-                                var pr = PrimitiveReader.init();
-                                pr.reset(column_data);
-                                const n = try pr.readInt(u32);
+                        var child_column_spec: ColumnSpec = undefined;
+                        child_column_spec.option = column_spec.listset_element_type_option.?;
 
-                                slice = try self.arena.allocator.alloc(ChildType, @as(usize, n));
-                                errdefer self.arena.allocator.free(slice);
+                        var pr = PrimitiveReader.init();
+                        pr.reset(column_data);
+                        const n = try pr.readInt(u32);
 
-                                var i: usize = 0;
-                                while (i < n) : (i += 1) {
-                                    const bytes = (try pr.readBytes(&self.arena.allocator)) orelse unreachable;
-                                    defer self.arena.allocator.free(bytes);
+                        slice = try self.arena.allocator.alloc(ChildType, @as(usize, n));
+                        errdefer self.arena.allocator.free(slice);
 
-                                    slice[i] = mem.readIntSliceBig(ChildType, bytes);
-                                }
-                            },
-                            else => std.debug.panic("CQL type {} can't be read into the type {}", .{ std.meta.tagName(id), @typeName(Type) }),
+                        var i: usize = 0;
+                        while (i < n) : (i += 1) {
+                            const bytes = (try pr.readBytes(&self.arena.allocator)) orelse unreachable;
+                            defer self.arena.allocator.free(bytes);
+
+                            slice[i] = try self.readType(child_column_spec, bytes, ChildType);
                         }
                     },
                     else => std.debug.panic("CQL type {} can't be read into the type {}", .{ std.meta.tagName(id), @typeName(Type) }),
