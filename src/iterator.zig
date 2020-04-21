@@ -702,10 +702,10 @@ test "iterator scan: set/list" {
     defer arena.deinit();
 
     const Row = struct {
-        set: []u32,
-        list: []u32,
-        set_of_uuid: [][]const u8,
-        list_of_uuid: [][]const u8,
+        set: []const u32,
+        list: []const u32,
+        set_of_uuid: []const []const u8,
+        list_of_uuid: []const []const u8,
     };
     var row: Row = undefined;
 
