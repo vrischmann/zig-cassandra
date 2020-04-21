@@ -20,19 +20,19 @@ pub fn main() anyerror!void {
     // var result = try client.cquery(result_allocator, "SELECT * FROM foobar.user WHERE age = ? allow filtering", .{
     //     .age = 120,
     // });
-    var result = try client.cquery(result_allocator, "SELECT age FROM foobar.age_to_ids WHERE age = ?", .{
+    var result = try client.cquery(result_allocator, "SELECT age, ids FROM foobar.age_to_ids WHERE age = ?", .{
         @as(u32, 120),
     });
     var iter = result.Iter;
 
     const Row = struct {
         age: u32,
-        // ids: []const []const u8,
+        ids: []const u8,
     };
     var row: Row = undefined;
 
     while (try iter.scan(&row)) {
-        // std.debug.warn("age: {} id: {x}\n", .{ row.age, row.ids });
-        std.debug.warn("age: {}\n", .{row.age});
+        std.debug.warn("age: {} id: {}\n", .{ row.age, row.ids });
+        // std.debug.warn("age: {}\n", .{row.age});
     }
 }

@@ -233,6 +233,13 @@ pub const Iterator = struct {
     }
 
     fn readSlice(self: *Self, column_spec: ColumnSpec, column_data: []const u8, comptime Type: type) !Type {
+        if (@typeInfo(Type) == .Array) {
+            @compileError("cannot read a slice of arrays, use a slice instead as the element type");
+        }
+        if (!@typeInfo(Type).Pointer.is_const) {
+            @compileError("slices must be const in the scanned struct");
+        }
+
         const ChildType = std.meta.Elem(Type);
 
         var slice: Type = undefined;
@@ -244,54 +251,30 @@ pub const Iterator = struct {
                 switch (id) {
                     .Blob, .UUID, .Timeuuid => slice = column_data,
                     .Ascii, .Varchar => slice = column_data,
-                    else => std.debug.panic("CQL type {} can't be read into the type {}", .{ std.meta.tagName(id), @typeName(Type) }),
-                }
-            },
-            else => {
-                if (@typeInfo(ChildType) == .Array) {
-                    @compileError("cannot read a slice of arrays, use a slice instead as the element type");
-                }
-
-                @compileError("broken !");
-
-                switch (id) {
-                    .List, .Set => {
-                        // A list or set is a complex type.
-                        if (column_spec.listset_element_type_option == null) {
-                            return error.MalformedColumnSpec;
+                    .Set => {
+                        switch (column_spec.listset_element_type_option.?) {
+                            .Tinyint => {
+                                var pr = PrimitiveReader.init();
+                                pr.reset(column_data);
+                                const n = try pr.readInt(u32);
+                            },
+                            else => std.debug.panic("CQL type {} can't be read into the type {}", .{ std.meta.tagName(id), @typeName(Type) }),
                         }
-
-                        // Define a temporary column spec for the list element so we can
-                        // reuse the same functions to decode list elements.
-
-                        var child_column_spec: ColumnSpec = undefined;
-                        child_column_spec.option = column_spec.listset_element_type_option.?;
-
-                        // Now decode the data
-
-                        var pr = PrimitiveReader.init();
-                        pr.reset(column_data);
-
-                        const n = try pr.readInt(u32);
-
-                        var res = try self.arena.allocator.alloc(ChildType, @as(usize, n));
-                        errdefer self.arena.allocator.free(res);
-
-                        var i: usize = 0;
-                        while (i < @as(usize, n)) : (i += 1) {
-                            const element_bytes = try pr.readBytes(&self.arena.allocator);
-                            if (element_bytes == null) {
-                                return error.InvalidCQLData;
-                            }
-
-                            res[i] = try self.readType(child_column_spec, element_bytes.?, ChildType);
-                        }
-
-                        slice = res;
                     },
                     else => std.debug.panic("CQL type {} can't be read into the type {}", .{ std.meta.tagName(id), @typeName(Type) }),
                 }
             },
+            u32 => {
+                switch (id) {
+                    .Set => {
+                        switch (column_spec.listset_element_type_option.?) {
+                            else => std.debug.panic("CQL type {} can't be read into the type {}", .{ std.meta.tagName(id), @typeName(Type) }),
+                        }
+                    },
+                    else => std.debug.panic("CQL type {} can't be read into the type {}", .{ std.meta.tagName(id), @typeName(Type) }),
+                }
+            },
+            else => @compileError("type " ++ @typeName(Type) ++ " is invalid"),
         }
 
         return slice;
