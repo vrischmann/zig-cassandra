@@ -12,22 +12,19 @@ const testing = @import("../testing.zig");
 pub const PrimitiveReader = struct {
     const Self = @This();
 
-    rbuf: []const u8,
-    source: io.StreamSource,
-    in_stream: io.StreamSource.InStream,
+    buffer: io.FixedBufferStream([]const u8),
+    in_stream: io.FixedBufferStream([]const u8).InStream,
 
     pub fn init() Self {
         return Self{
-            .rbuf = undefined,
-            .source = undefined,
+            .buffer = undefined,
             .in_stream = undefined,
         };
     }
 
     pub fn reset(self: *Self, rbuf: []const u8) void {
-        self.rbuf = rbuf;
-        self.source = io.StreamSource{ .const_buffer = io.fixedBufferStream(rbuf) };
-        self.in_stream = self.source.inStream();
+        self.buffer = io.fixedBufferStream(rbuf);
+        self.in_stream = self.buffer.inStream();
     }
 
     /// Read either a short, a int or a long from the buffer.
