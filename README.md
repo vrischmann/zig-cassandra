@@ -15,3 +15,5 @@ TODO
 * Add an abstraction for a Stream
 * Compression
 * Handle named values in a statement
+* Allow scanning using a user provided type with a method like `pub fn scan(self: *Self, column_spec: ColumnSpec, data: []const u8)`. Would be useful for UDT.
+* Allow scanning into a specific struct for the raw bytes undecoded so the user can do whatever with it
