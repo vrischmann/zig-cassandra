@@ -233,6 +233,7 @@ pub const Iterator = struct {
     }
 
     fn readSlice(self: *Self, column_spec: ColumnSpec, column_data: []const u8, comptime Type: type) !Type {
+        const type_info = @typeInfo(Type);
         const ChildType = std.meta.Elem(Type);
         if (@typeInfo(ChildType) == .Array) {
             @compileError("cannot read a slice of arrays, use a slice instead as the element type");
@@ -240,37 +241,24 @@ pub const Iterator = struct {
 
         const id = column_spec.option;
 
+        // Special case the u8 type because it's used for strings.
+        // We can simply reuse the column data slice for this so make sure the
+        // user uses a []const u8 in its struct.
+        if (type_info.Pointer.is_const and ChildType == u8) {
+            var slice: Type = undefined;
+
+            switch (id) {
+                .Blob, .UUID, .Timeuuid, .Ascii, .Varchar => {
+                    slice = column_data;
+                },
+                else => std.debug.panic("CQL type {} can't be read into the type {}", .{ std.meta.tagName(id), @typeName(Type) }),
+            }
+
+            return slice;
+        }
+
         switch (ChildType) {
-            u8 => {
-                // Special case the u8 type because it's used for strings.
-                // We can simply reuse the column data slice for this so make sure the
-                // user uses a []const u8 in its struct.
-                if (!@typeInfo(Type).Pointer.is_const) {
-                    @compileError("slices must be const in the scanned struct");
-                }
-
-                var slice: Type = undefined;
-
-                switch (id) {
-                    .Blob, .UUID, .Timeuuid => slice = column_data,
-                    .Ascii, .Varchar => slice = column_data,
-                    .Set => {
-                        switch (column_spec.listset_element_type_option.?) {
-                            .Tinyint => {
-                                var pr = PrimitiveReader.init();
-                                pr.reset(column_data);
-                                const n = try pr.readInt(u32);
-                            },
-                            else => std.debug.panic("CQL type {} can't be read into the type {}", .{ std.meta.tagName(id), @typeName(Type) }),
-                        }
-                    },
-                    else => std.debug.panic("CQL type {} can't be read into the type {}", .{ std.meta.tagName(id), @typeName(Type) }),
-                }
-
-                return slice;
-            },
-            i8, u16, i16, u32, i32, i64, u64 => {
-                const type_info = @typeInfo(Type);
+            u8, i8, u16, i16, u32, i32, i64, u64 => {
                 const NonConstType = @Type(std.builtin.TypeInfo{
                     .Pointer = .{
                         .size = .Slice,
@@ -783,4 +771,28 @@ test "iterator scan: set/list" {
     // testing.expectEqual(@as(usize, 2), row.list_of_uuid.len);
     // testing.expectEqualSlices(u8, "\x14\x2d\x6b\x2d\x2c\xe6\x45\x80\x95\x53\x15\x87\xa9\x6d\xec\x94", row.list_of_uuid[0]);
     // testing.expectEqualSlices(u8, "\x8a\xa8\xc1\x37\xd0\x53\x41\x12\xbf\xee\x5f\x96\x28\x7e\xe5\x1a", row.list_of_uuid[1]);
+}
+
+test "iterator scan: set of tinyint" {
+    var arena = testing.arenaAllocator();
+    defer arena.deinit();
+
+    const Row = struct {
+        set: []u8,
+    };
+    var row: Row = undefined;
+
+    var spec1 = columnSpec(.Set);
+    spec1.listset_element_type_option = .Tinyint;
+
+    const column_specs = &[_]ColumnSpec{spec1};
+    const test_data = &[_][]const u8{
+        "\x00\x00\x00\x02\x00\x00\x00\x01\x20\x00\x00\x00\x01\x21",
+    };
+
+    try testIteratorScan(&arena.allocator, column_specs, test_data, &row);
+
+    testing.expectEqual(@as(usize, 2), row.set.len);
+    testing.expectEqual(@as(u8, 0x20), row.set[0]);
+    testing.expectEqual(@as(u8, 0x21), row.set[1]);
 }
