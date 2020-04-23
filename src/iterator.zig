@@ -34,9 +34,6 @@ pub const Iterator = struct {
         diags: ?*Diagnostics = null,
 
         pub const Diagnostics = struct {
-            /// If there was an error returned by Cassandra in a ERROR frame its message will be provided here.
-            cassandra_error: ?[]const u8 = null,
-
             /// If the struct type in which the CQL data should be scanned is incompatible
             incompatible_metadata: IncompatibleMetadata = IncompatibleMetadata{},
 
