@@ -20,9 +20,6 @@ pub fn main() anyerror!void {
     var result = try client.cquery(result_allocator, "SELECT ids, age, name FROM foobar.age_to_ids WHERE age = ?", .{
         .age = @as(u32, 120),
     });
-    // var result = try client.cquery(result_allocator, "SELECT ids, age FROM foobar.age_to_ids WHERE age = ?", .{
-    //     @as(u32, 120),
-    // });
     var iter = result.Iter;
 
     const Row = struct {
@@ -36,7 +33,28 @@ pub fn main() anyerror!void {
         var rowArena = std.heap.ArenaAllocator.init(allocator);
         defer rowArena.deinit();
 
-        var scanned = try iter.scan(&rowArena.allocator, &row);
+        var diags = cql.Iterator.ScanOptions.Diagnostics{};
+        var options = cql.Iterator.ScanOptions{
+            .diags = &diags,
+        };
+
+        const scanned = iter.scan(&rowArena.allocator, options, &row) catch |err| switch (err) {
+            error.IncompatibleMetadata => blk: {
+                const im = diags.incompatible_metadata;
+                const it = im.incompatible_types;
+                if (it.cql_type_name != null and it.native_type_name != null) {
+                    std.debug.panic("metadata incompatible. CQL type {} can't be scanned into native type {}\n", .{
+                        it.cql_type_name, it.native_type_name,
+                    });
+                } else {
+                    std.debug.panic("metadata incompatible. columns in result: {} fields in struct: {}\n", .{
+                        im.metadata_columns, im.struct_fields,
+                    });
+                }
+                break :blk false;
+            },
+            else => return err,
+        };
         if (!scanned) {
             break;
         }
