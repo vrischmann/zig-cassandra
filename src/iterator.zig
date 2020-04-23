@@ -7,6 +7,10 @@ usingnamespace @import("frame.zig");
 
 const testing = @import("testing.zig");
 
+pub const RawBytes = struct {
+    data: []const u8,
+};
+
 pub const Iterator = struct {
     const Self = @This();
 
@@ -84,6 +88,7 @@ pub const Iterator = struct {
                 },
                 else => @compileError("invalid pointer size " ++ @tagName(pointer.size)),
             },
+            .Struct => return try self.readStruct(option, column_data, Type),
             .Array => return try self.readArray(option, column_data, Type),
             else => @compileError("field type " ++ @typeName(Type) ++ " not handled yet"),
         }
@@ -304,6 +309,16 @@ pub const Iterator = struct {
             },
             else => @compileError("type " ++ @typeName(Type) ++ " is invalid"),
         }
+    }
+
+    fn readStruct(self: *Self, option: OptionID, column_data: []const u8, comptime Type: type) !Type {
+        if (Type == RawBytes) {
+            return RawBytes{
+                .data = column_data,
+            };
+        }
+
+        @compileError("type " ++ @typeName(Type) ++ " is invalid");
     }
 
     fn readArray(self: *Self, option: OptionID, column_data: []const u8, comptime Type: type) !Type {
@@ -793,4 +808,41 @@ test "iterator scan: set of tinyint" {
     testing.expectEqual(@as(usize, 2), row.set.len);
     testing.expectEqual(@as(u8, 0x20), row.set[0]);
     testing.expectEqual(@as(u8, 0x21), row.set[1]);
+}
+
+test "iterator scan: set of tinyint into RawBytes" {
+    var arena = testing.arenaAllocator();
+    defer arena.deinit();
+
+    const Row = struct {
+        list_timestamp: []u64,
+        age: u32,
+        set: RawBytes,
+        name: []const u8,
+    };
+    var row: Row = undefined;
+
+    var spec1 = columnSpec(.List);
+    spec1.listset_element_type_option = .Timestamp;
+    var spec2 = columnSpec(.Int);
+    var spec3 = columnSpec(.Set);
+    spec3.listset_element_type_option = .Tinyint;
+    var spec4 = columnSpec(.Varchar);
+
+    const column_specs = &[_]ColumnSpec{ spec1, spec2, spec3, spec4 };
+    const test_data = &[_][]const u8{
+        "\x00\x00\x00\x02\x00\x00\x00\x08\xbc\xbc\xbc\xbc\xbc\xbc\xbc\xbc\x00\x00\x00\x08\xbe\xbe\xbe\xbe\xbe\xbe\xbe\xbe",
+        "\x10\x11\x12\x13",
+        "\x00\x00\x00\x02\x00\x00\x00\x01\x20\x00\x00\x00\x01\x21",
+        "foobar",
+    };
+
+    try testIteratorScan(&arena.allocator, column_specs, test_data, &row);
+
+    testing.expectEqual(@as(u32, 0x10111213), row.age);
+    testing.expectEqualSlices(u8, test_data[2], row.set.data);
+    testing.expectEqualString("foobar", row.name);
+    testing.expectEqual(@as(usize, 2), row.list_timestamp.len);
+    testing.expectEqual(@as(u64, 0xbcbcbcbcbcbcbcbc), row.list_timestamp[0]);
+    testing.expectEqual(@as(u64, 0xbebebebebebebebe), row.list_timestamp[1]);
 }
