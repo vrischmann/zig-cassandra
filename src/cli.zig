@@ -32,7 +32,15 @@ pub fn main() anyerror!void {
     };
     var row: Row = undefined;
 
-    while (try iter.scan(&row)) {
+    while (true) {
+        var rowArena = std.heap.ArenaAllocator.init(allocator);
+        defer rowArena.deinit();
+
+        var scanned = try iter.scan(&rowArena.allocator, &row);
+        if (!scanned) {
+            break;
+        }
+
         std.debug.warn("age: {} id: {x} name: {} {x}\n", .{ row.age, row.ids, row.name, row.name });
     }
 }

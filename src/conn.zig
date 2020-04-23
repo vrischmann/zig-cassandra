@@ -122,7 +122,7 @@ pub const Client = struct {
         var result = try self.raw_conn.writeQuery(allocator, query_string, parameters);
         switch (result) {
             .Rows => |rows| {
-                var iter = Iterator.init(allocator, rows.metadata, rows.data);
+                var iter = Iterator.init(rows.metadata, rows.data);
                 return QueryResult{ .Iter = iter };
             },
             else => return QueryResult{ .None = .{} },

@@ -15,26 +15,20 @@ pub const RawBytes = struct {
 pub const Iterator = struct {
     const Self = @This();
 
-    arena: heap.ArenaAllocator,
     metadata: RowsMetadata,
     rows: []const RowData,
 
     pos: usize,
 
-    pub fn deinit(self: Self) void {
-        self.arena.deinit();
-    }
-
-    pub fn init(allocator: *mem.Allocator, metadata: RowsMetadata, rows: []const RowData) Self {
+    pub fn init(metadata: RowsMetadata, rows: []const RowData) Self {
         return Self{
-            .arena = heap.ArenaAllocator.init(allocator),
             .metadata = metadata,
             .rows = rows,
             .pos = 0,
         };
     }
 
-    pub fn scan(self: *Self, args: var) !bool {
+    pub fn scan(self: *Self, allocator: *mem.Allocator, args: var) !bool {
         const child = switch (@typeInfo(@TypeOf(args))) {
             .Pointer => |info| info.child,
             else => @compileError("Expected a pointer to a tuple or struct, found " ++ @typeName(@TypeOf(args))),
@@ -60,7 +54,7 @@ pub const Iterator = struct {
             const column_spec = self.metadata.column_specs[i];
             const column_data = self.rows[self.pos].slice[i];
 
-            @field(args, field_name) = try self.readType(column_spec, column_data.slice, struct_field.field_type);
+            @field(args, field_name) = try self.readType(allocator, column_spec, column_data.slice, struct_field.field_type);
         }
 
         self.pos += 1;
@@ -68,7 +62,7 @@ pub const Iterator = struct {
         return true;
     }
 
-    fn readType(self: *Self, column_spec: ColumnSpec, column_data: []const u8, comptime Type: type) !Type {
+    fn readType(self: *Self, allocator: *mem.Allocator, column_spec: ColumnSpec, column_data: []const u8, comptime Type: type) !Type {
         const type_info = @typeInfo(Type);
 
         // TODO(vincent): if the struct is packed we could maybe read stuff directly
@@ -85,11 +79,11 @@ pub const Iterator = struct {
                     return try self.readType(column_spec, column_data, @TypeOf(pointer.child));
                 },
                 .Slice => {
-                    return try self.readSlice(column_spec, column_data, Type);
+                    return try self.readSlice(allocator, column_spec, column_data, Type);
                 },
                 else => @compileError("invalid pointer size " ++ @tagName(pointer.size)),
             },
-            .Struct => return try self.readStruct(column_spec, column_data, Type),
+            .Struct => return try self.readStruct(allocator, column_spec, column_data, Type),
             .Array => return try self.readArray(option, column_data, Type),
             else => @compileError("field type " ++ @typeName(Type) ++ " not handled yet"),
         }
@@ -238,7 +232,7 @@ pub const Iterator = struct {
         return r;
     }
 
-    fn readSlice(self: *Self, column_spec: ColumnSpec, column_data: []const u8, comptime Type: type) !Type {
+    fn readSlice(self: *Self, allocator: *mem.Allocator, column_spec: ColumnSpec, column_data: []const u8, comptime Type: type) !Type {
         const type_info = @typeInfo(Type);
         const ChildType = std.meta.Elem(Type);
         if (@typeInfo(ChildType) == .Array) {
@@ -292,15 +286,15 @@ pub const Iterator = struct {
                         pr.reset(column_data);
                         const n = try pr.readInt(u32);
 
-                        slice = try self.arena.allocator.alloc(ChildType, @as(usize, n));
-                        errdefer self.arena.allocator.free(slice);
+                        slice = try allocator.alloc(ChildType, @as(usize, n));
+                        errdefer allocator.free(slice);
 
                         var i: usize = 0;
                         while (i < n) : (i += 1) {
-                            const bytes = (try pr.readBytes(&self.arena.allocator)) orelse unreachable;
-                            defer self.arena.allocator.free(bytes);
+                            const bytes = (try pr.readBytes(allocator)) orelse unreachable;
+                            defer allocator.free(bytes);
 
-                            slice[i] = try self.readType(child_column_spec, bytes, ChildType);
+                            slice[i] = try self.readType(allocator, child_column_spec, bytes, ChildType);
                         }
                     },
                     else => std.debug.panic("CQL type {} can't be read into the type {}", .{ std.meta.tagName(id), @typeName(Type) }),
@@ -312,7 +306,7 @@ pub const Iterator = struct {
         }
     }
 
-    fn readStruct(self: *Self, column_spec: ColumnSpec, column_data: []const u8, comptime Type: type) !Type {
+    fn readStruct(self: *Self, allocator: *mem.Allocator, column_spec: ColumnSpec, column_data: []const u8, comptime Type: type) !Type {
         if (Type == RawBytes) {
             return RawBytes{
                 .data = column_data,
@@ -322,7 +316,7 @@ pub const Iterator = struct {
         if (comptime std.meta.trait.hasFn("scan")(Type)) {
             var res: Type = undefined;
 
-            try res.scan(&self.arena.allocator, column_spec, column_data);
+            try res.scan(allocator, column_spec, column_data);
 
             return res;
         }
@@ -381,8 +375,8 @@ fn testIteratorScan(allocator: *mem.Allocator, column_specs: []ColumnSpec, data:
         RowData{ .slice = column_data.toOwnedSlice() },
     };
 
-    var iterator = Iterator.init(allocator, metadata, row_data);
-    testing.expect(try iterator.scan(row));
+    var iterator = Iterator.init(metadata, row_data);
+    testing.expect(try iterator.scan(allocator, row));
 }
 
 test "iterator scan: u8/i8" {
