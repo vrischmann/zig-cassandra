@@ -28,7 +28,42 @@ pub const Iterator = struct {
         };
     }
 
-    pub fn scan(self: *Self, allocator: *mem.Allocator, args: var) !bool {
+    pub const ScanOptions = struct {
+        /// If this is provided, scan will populate some information about failures.
+        /// This will provide more detail than an error can.
+        diags: ?*Diagnostics = null,
+
+        pub const Diagnostics = struct {
+            /// If there was an error returned by Cassandra in a ERROR frame its message will be provided here.
+            cassandra_error: ?[]const u8 = null,
+
+            /// If the struct type in which the CQL data should be scanned is incompatible
+            incompatible_metadata: IncompatibleMetadata = IncompatibleMetadata{},
+
+            pub const IncompatibleMetadata = struct {
+                /// The number of columns in the CQL result.
+                metadata_columns: usize = 0,
+                /// The number of fields in the struct to scan into.
+                struct_fields: usize = 0,
+
+                /// If there was an attempt to scan a CQL type into an incompatible native type, both type names
+                /// will be provided here.
+                incompatible_types: IncompatibleTypes = IncompatibleTypes{},
+
+                pub const IncompatibleTypes = struct {
+                    cql_type_name: ?[]const u8 = null,
+                    native_type_name: ?[]const u8 = null,
+                };
+            };
+        };
+    };
+
+    const Diags = ScanOptions.Diagnostics;
+
+    pub fn scan(self: *Self, allocator: *mem.Allocator, options: ScanOptions, args: var) !bool {
+        var dummy_diags = Diags{};
+        var diags = options.diags orelse &dummy_diags;
+
         const child = switch (@typeInfo(@TypeOf(args))) {
             .Pointer => |info| info.child,
             else => @compileError("Expected a pointer to a tuple or struct, found " ++ @typeName(@TypeOf(args))),
@@ -42,7 +77,9 @@ pub const Iterator = struct {
         }
 
         if (self.metadata.column_specs.len != @typeInfo(child).Struct.fields.len) {
-            return error.MetadataIncompatibleWithStructFields;
+            diags.incompatible_metadata.metadata_columns = self.metadata.column_specs.len;
+            diags.incompatible_metadata.struct_fields = @typeInfo(child).Struct.fields.len;
+            return error.IncompatibleMetadata;
         }
 
         inline for (@typeInfo(child).Struct.fields) |struct_field, _i| {
@@ -54,7 +91,7 @@ pub const Iterator = struct {
             const column_spec = self.metadata.column_specs[i];
             const column_data = self.rows[self.pos].slice[i];
 
-            @field(args, field_name) = try self.readType(allocator, column_spec, column_data.slice, struct_field.field_type);
+            @field(args, field_name) = try self.readType(allocator, diags, column_spec, column_data.slice, struct_field.field_type);
         }
 
         self.pos += 1;
@@ -62,7 +99,7 @@ pub const Iterator = struct {
         return true;
     }
 
-    fn readType(self: *Self, allocator: *mem.Allocator, column_spec: ColumnSpec, column_data: []const u8, comptime Type: type) !Type {
+    fn readType(self: *Self, allocator: *mem.Allocator, diags: *Diags, column_spec: ColumnSpec, column_data: []const u8, comptime Type: type) !Type {
         const type_info = @typeInfo(Type);
 
         // TODO(vincent): if the struct is packed we could maybe read stuff directly
@@ -72,19 +109,19 @@ pub const Iterator = struct {
         const option = column_spec.option;
 
         switch (type_info) {
-            .Int => return try self.readInt(option, column_data, Type),
-            .Float => return try self.readFloat(option, column_data, Type),
+            .Int => return try self.readInt(diags, option, column_data, Type),
+            .Float => return try self.readFloat(diags, option, column_data, Type),
             .Pointer => |pointer| switch (pointer.size) {
                 .One => {
-                    return try self.readType(column_spec, column_data, @TypeOf(pointer.child));
+                    return try self.readType(allocator, diags, column_spec, column_data, @TypeOf(pointer.child));
                 },
                 .Slice => {
-                    return try self.readSlice(allocator, column_spec, column_data, Type);
+                    return try self.readSlice(allocator, diags, column_spec, column_data, Type);
                 },
                 else => @compileError("invalid pointer size " ++ @tagName(pointer.size)),
             },
-            .Struct => return try self.readStruct(allocator, column_spec, column_data, Type),
-            .Array => return try self.readArray(option, column_data, Type),
+            .Struct => return try self.readStruct(allocator, diags, column_spec, column_data, Type),
+            .Array => return try self.readArray(diags, option, column_data, Type),
             else => @compileError("field type " ++ @typeName(Type) ++ " not handled yet"),
         }
     }
@@ -145,14 +182,18 @@ pub const Iterator = struct {
         return mem.readIntBig(Type, bytes);
     }
 
-    fn readInt(self: *Self, option: OptionID, column_data: []const u8, comptime Type: type) !Type {
+    fn readInt(self: *Self, diags: *Diags, option: OptionID, column_data: []const u8, comptime Type: type) !Type {
         var r: Type = 0;
 
         switch (Type) {
             u8, i8 => {
                 switch (option) {
                     .Tinyint => return readIntFromSlice(Type, column_data),
-                    else => std.debug.panic("CQL type {} can't be read into the type {}", .{ @tagName(option), @typeName(Type) }),
+                    else => {
+                        diags.incompatible_metadata.incompatible_types.cql_type_name = @tagName(option);
+                        diags.incompatible_metadata.incompatible_types.native_type_name = @typeName(Type);
+                        return error.IncompatibleMetadata;
+                    },
                 }
             },
             u16, i16 => {
@@ -160,7 +201,11 @@ pub const Iterator = struct {
                     .Tinyint,
                     .Smallint,
                     => return readIntFromSlice(Type, column_data),
-                    else => std.debug.panic("CQL type {} can't be read into the type {}", .{ @tagName(option), @typeName(Type) }),
+                    else => {
+                        diags.incompatible_metadata.incompatible_types.cql_type_name = @tagName(option);
+                        diags.incompatible_metadata.incompatible_types.native_type_name = @typeName(Type);
+                        return error.IncompatibleMetadata;
+                    },
                 }
             },
             u32, i32 => {
@@ -170,7 +215,11 @@ pub const Iterator = struct {
                     .Int,
                     .Date,
                     => return readIntFromSlice(Type, column_data),
-                    else => std.debug.panic("CQL type {} can't be read into the type {}", .{ @tagName(option), @typeName(Type) }),
+                    else => {
+                        diags.incompatible_metadata.incompatible_types.cql_type_name = @tagName(option);
+                        diags.incompatible_metadata.incompatible_types.native_type_name = @typeName(Type);
+                        return error.IncompatibleMetadata;
+                    },
                 }
             },
             u64, i64, u128, i128 => {
@@ -184,7 +233,11 @@ pub const Iterator = struct {
                     .Time,
                     .Timestamp,
                     => return readIntFromSlice(Type, column_data),
-                    else => std.debug.panic("CQL type {} can't be read into the type {}", .{ @tagName(option), @typeName(Type) }),
+                    else => {
+                        diags.incompatible_metadata.incompatible_types.cql_type_name = @tagName(option);
+                        diags.incompatible_metadata.incompatible_types.native_type_name = @typeName(Type);
+                        return error.IncompatibleMetadata;
+                    },
                 }
             },
             else => @compileError("int type " ++ @typeName(Type) ++ " is invalid"),
@@ -193,14 +246,18 @@ pub const Iterator = struct {
         return r;
     }
 
-    fn readFloat(self: *Self, option: OptionID, column_data: []const u8, comptime Type: type) !Type {
+    fn readFloat(self: *Self, diags: *Diags, option: OptionID, column_data: []const u8, comptime Type: type) !Type {
         var r: Type = 0.0;
 
         switch (Type) {
             f32 => {
                 switch (option) {
                     .Float => return readFloatFromSlice(f32, column_data),
-                    else => std.debug.panic("CQL type {} can't be read into the type {}", .{ @tagName(option), @typeName(Type) }),
+                    else => {
+                        diags.incompatible_metadata.incompatible_types.cql_type_name = @tagName(option);
+                        diags.incompatible_metadata.incompatible_types.native_type_name = @typeName(Type);
+                        return error.IncompatibleMetadata;
+                    },
                 }
             },
             f64 => {
@@ -210,7 +267,11 @@ pub const Iterator = struct {
                         return @floatCast(Type, f_32);
                     },
                     .Double => return readFloatFromSlice(f64, column_data),
-                    else => std.debug.panic("CQL type {} can't be read into the type {}", .{ @tagName(option), @typeName(Type) }),
+                    else => {
+                        diags.incompatible_metadata.incompatible_types.cql_type_name = @tagName(option);
+                        diags.incompatible_metadata.incompatible_types.native_type_name = @typeName(Type);
+                        return error.IncompatibleMetadata;
+                    },
                 }
             },
             f128 => {
@@ -223,7 +284,11 @@ pub const Iterator = struct {
                         const f_64 = readFloatFromSlice(f64, column_data);
                         return @floatCast(Type, f_64);
                     },
-                    else => std.debug.panic("CQL type {} can't be read into the type {}", .{ @tagName(option), @typeName(Type) }),
+                    else => {
+                        diags.incompatible_metadata.incompatible_types.cql_type_name = @tagName(option);
+                        diags.incompatible_metadata.incompatible_types.native_type_name = @typeName(Type);
+                        return error.IncompatibleMetadata;
+                    },
                 }
             },
             else => @compileError("float type " ++ @typeName(Type) ++ " is invalid"),
@@ -232,7 +297,7 @@ pub const Iterator = struct {
         return r;
     }
 
-    fn readSlice(self: *Self, allocator: *mem.Allocator, column_spec: ColumnSpec, column_data: []const u8, comptime Type: type) !Type {
+    fn readSlice(self: *Self, allocator: *mem.Allocator, diags: *Diags, column_spec: ColumnSpec, column_data: []const u8, comptime Type: type) !Type {
         const type_info = @typeInfo(Type);
         const ChildType = std.meta.Elem(Type);
         if (@typeInfo(ChildType) == .Array) {
@@ -251,7 +316,11 @@ pub const Iterator = struct {
                 .Blob, .UUID, .Timeuuid, .Ascii, .Varchar => {
                     slice = column_data;
                 },
-                else => std.debug.panic("CQL type {} can't be read into the type {}", .{ std.meta.tagName(id), @typeName(Type) }),
+                else => {
+                    diags.incompatible_metadata.incompatible_types.cql_type_name = @tagName(id);
+                    diags.incompatible_metadata.incompatible_types.native_type_name = @typeName(Type);
+                    return error.IncompatibleMetadata;
+                },
             }
 
             return slice;
@@ -294,10 +363,14 @@ pub const Iterator = struct {
                             const bytes = (try pr.readBytes(allocator)) orelse unreachable;
                             defer allocator.free(bytes);
 
-                            slice[i] = try self.readType(allocator, child_column_spec, bytes, ChildType);
+                            slice[i] = try self.readType(allocator, diags, child_column_spec, bytes, ChildType);
                         }
                     },
-                    else => std.debug.panic("CQL type {} can't be read into the type {}", .{ std.meta.tagName(id), @typeName(Type) }),
+                    else => {
+                        diags.incompatible_metadata.incompatible_types.cql_type_name = @tagName(id);
+                        diags.incompatible_metadata.incompatible_types.native_type_name = @typeName(Type);
+                        return error.IncompatibleMetadata;
+                    },
                 }
 
                 return slice;
@@ -306,7 +379,7 @@ pub const Iterator = struct {
         }
     }
 
-    fn readStruct(self: *Self, allocator: *mem.Allocator, column_spec: ColumnSpec, column_data: []const u8, comptime Type: type) !Type {
+    fn readStruct(self: *Self, allocator: *mem.Allocator, diags: *Diags, column_spec: ColumnSpec, column_data: []const u8, comptime Type: type) !Type {
         if (Type == RawBytes) {
             return RawBytes{
                 .data = column_data,
@@ -324,7 +397,7 @@ pub const Iterator = struct {
         @compileError("type " ++ @typeName(Type) ++ " is invalid");
     }
 
-    fn readArray(self: *Self, option: OptionID, column_data: []const u8, comptime Type: type) !Type {
+    fn readArray(self: *Self, diags: *Diags, option: OptionID, column_data: []const u8, comptime Type: type) !Type {
         const ChildType = std.meta.Elem(Type);
 
         var array: Type = undefined;
@@ -335,7 +408,11 @@ pub const Iterator = struct {
 
         switch (option) {
             .UUID, .Timeuuid => mem.copy(u8, &array, column_data[0..array.len]),
-            else => std.debug.panic("CQL type {} can't be read into the type {}", .{ std.meta.tagName(option), @typeName(Type) }),
+            else => {
+                diags.incompatible_metadata.incompatible_types.cql_type_name = @tagName(option);
+                diags.incompatible_metadata.incompatible_types.native_type_name = @typeName(Type);
+                return error.IncompatibleMetadata;
+            },
         }
 
         return array;
@@ -355,7 +432,7 @@ fn columnSpec(id: OptionID) ColumnSpec {
     };
 }
 
-fn testIteratorScan(allocator: *mem.Allocator, column_specs: []ColumnSpec, data: []const []const u8, row: var) !void {
+fn testIteratorScan(allocator: *mem.Allocator, column_specs: []ColumnSpec, data: []const []const u8, diags: ?*Iterator.ScanOptions.Diagnostics, row: var) !void {
     const metadata = RowsMetadata{
         .paging_state = null,
         .new_metadata_id = null,
@@ -376,7 +453,53 @@ fn testIteratorScan(allocator: *mem.Allocator, column_specs: []ColumnSpec, data:
     };
 
     var iterator = Iterator.init(metadata, row_data);
-    testing.expect(try iterator.scan(allocator, row));
+    var options = Iterator.ScanOptions{
+        .diags = diags,
+    };
+    testing.expect(try iterator.scan(allocator, options, row));
+}
+
+test "iterator scan: incompatible metadata" {
+    var arena = testing.arenaAllocator();
+    defer arena.deinit();
+
+    var diags = Iterator.ScanOptions.Diagnostics{};
+
+    {
+        const Row = struct {
+            u_8: u8,
+            i_8: i8,
+        };
+        var row: Row = undefined;
+
+        const column_specs = &[_]ColumnSpec{columnSpec(.Tinyint)};
+        const test_data = &[_][]const u8{ "\x20", "\x20" };
+
+        var err = testIteratorScan(&arena.allocator, column_specs, test_data, &diags, &row);
+        testing.expectError(error.IncompatibleMetadata, err);
+        testing.expectEqual(@as(usize, 1), diags.incompatible_metadata.metadata_columns);
+        testing.expectEqual(@as(usize, 2), diags.incompatible_metadata.struct_fields);
+    }
+
+    diags.incompatible_metadata.metadata_columns = 0;
+    diags.incompatible_metadata.struct_fields = 0;
+
+    {
+        const Row = struct {
+            b: u8,
+        };
+        var row: Row = undefined;
+
+        const column_specs = &[_]ColumnSpec{columnSpec(.Int)};
+        const test_data = &[_][]const u8{"\x01"};
+
+        var err = testIteratorScan(&arena.allocator, column_specs, test_data, &diags, &row);
+        testing.expectError(error.IncompatibleMetadata, err);
+        testing.expectEqual(@as(usize, 0), diags.incompatible_metadata.metadata_columns);
+        testing.expectEqual(@as(usize, 0), diags.incompatible_metadata.struct_fields);
+        testing.expectEqualString("Int", diags.incompatible_metadata.incompatible_types.cql_type_name.?);
+        testing.expectEqualString("u8", diags.incompatible_metadata.incompatible_types.native_type_name.?);
+    }
 }
 
 test "iterator scan: u8/i8" {
@@ -395,7 +518,7 @@ test "iterator scan: u8/i8" {
     };
     const test_data = &[_][]const u8{ "\x20", "\x20" };
 
-    try testIteratorScan(&arena.allocator, column_specs, test_data, &row);
+    try testIteratorScan(&arena.allocator, column_specs, test_data, null, &row);
 
     testing.expectEqual(@as(u8, 0x20), row.u_8);
     testing.expectEqual(@as(i8, 0x20), row.i_8);
@@ -418,7 +541,7 @@ test "iterator scan: u16/i16" {
         };
         const test_data = &[_][]const u8{ "\x20", "\x20" };
 
-        try testIteratorScan(&arena.allocator, column_specs, test_data, &row);
+        try testIteratorScan(&arena.allocator, column_specs, test_data, null, &row);
 
         testing.expectEqual(@as(u16, 0x20), row.u_16);
         testing.expectEqual(@as(i16, 0x20), row.i_16);
@@ -431,7 +554,7 @@ test "iterator scan: u16/i16" {
         };
         const test_data = &[_][]const u8{ "\x21\x20", "\x22\x20" };
 
-        try testIteratorScan(&arena.allocator, column_specs, test_data, &row);
+        try testIteratorScan(&arena.allocator, column_specs, test_data, null, &row);
 
         testing.expectEqual(@as(u16, 0x2120), row.u_16);
         testing.expectEqual(@as(i16, 0x2220), row.i_16);
@@ -455,7 +578,7 @@ test "iterator scan: u32/i32" {
         };
         const test_data = &[_][]const u8{ "\x20", "\x20" };
 
-        try testIteratorScan(&arena.allocator, column_specs, test_data, &row);
+        try testIteratorScan(&arena.allocator, column_specs, test_data, null, &row);
 
         testing.expectEqual(@as(u32, 0x20), row.u_32);
         testing.expectEqual(@as(i32, 0x20), row.i_32);
@@ -468,7 +591,7 @@ test "iterator scan: u32/i32" {
         };
         const test_data = &[_][]const u8{ "\x21\x20", "\x22\x20" };
 
-        try testIteratorScan(&arena.allocator, column_specs, test_data, &row);
+        try testIteratorScan(&arena.allocator, column_specs, test_data, null, &row);
 
         testing.expectEqual(@as(u32, 0x2120), row.u_32);
         testing.expectEqual(@as(i32, 0x2220), row.i_32);
@@ -481,7 +604,7 @@ test "iterator scan: u32/i32" {
         };
         const test_data = &[_][]const u8{ "\x21\x22\x23\x24", "\x25\x26\x27\x28" };
 
-        try testIteratorScan(&arena.allocator, column_specs, test_data, &row);
+        try testIteratorScan(&arena.allocator, column_specs, test_data, null, &row);
 
         testing.expectEqual(@as(u32, 0x21222324), row.u_32);
         testing.expectEqual(@as(i32, 0x25262728), row.i_32);
@@ -505,7 +628,7 @@ test "iterator scan: u64/i64" {
         };
         const test_data = &[_][]const u8{ "\x20", "\x20" };
 
-        try testIteratorScan(&arena.allocator, column_specs, test_data, &row);
+        try testIteratorScan(&arena.allocator, column_specs, test_data, null, &row);
 
         testing.expectEqual(@as(u64, 0x20), row.u_64);
         testing.expectEqual(@as(i64, 0x20), row.i_64);
@@ -518,7 +641,7 @@ test "iterator scan: u64/i64" {
         };
         const test_data = &[_][]const u8{ "\x22\x20", "\x23\x20" };
 
-        try testIteratorScan(&arena.allocator, column_specs, test_data, &row);
+        try testIteratorScan(&arena.allocator, column_specs, test_data, null, &row);
 
         testing.expectEqual(@as(u64, 0x2220), row.u_64);
         testing.expectEqual(@as(i64, 0x2320), row.i_64);
@@ -531,7 +654,7 @@ test "iterator scan: u64/i64" {
         };
         const test_data = &[_][]const u8{ "\x24\x22\x28\x21", "\x22\x29\x23\x22" };
 
-        try testIteratorScan(&arena.allocator, column_specs, test_data, &row);
+        try testIteratorScan(&arena.allocator, column_specs, test_data, null, &row);
 
         testing.expectEqual(@as(u64, 0x24222821), row.u_64);
         testing.expectEqual(@as(i64, 0x22292322), row.i_64);
@@ -544,7 +667,7 @@ test "iterator scan: u64/i64" {
         };
         const test_data = &[_][]const u8{ "\x21\x22\x23\x24\x25\x26\x27\x28", "\x31\x32\x33\x34\x35\x36\x37\x38" };
 
-        try testIteratorScan(&arena.allocator, column_specs, test_data, &row);
+        try testIteratorScan(&arena.allocator, column_specs, test_data, null, &row);
 
         testing.expectEqual(@as(u64, 0x2122232425262728), row.u_64);
         testing.expectEqual(@as(i64, 0x3132333435363738), row.i_64);
@@ -568,7 +691,7 @@ test "iterator scan: u128/i128" {
         };
         const test_data = &[_][]const u8{ "\x20", "\x20" };
 
-        try testIteratorScan(&arena.allocator, column_specs, test_data, &row);
+        try testIteratorScan(&arena.allocator, column_specs, test_data, null, &row);
 
         testing.expectEqual(@as(u128, 0x20), row.u_128);
         testing.expectEqual(@as(i128, 0x20), row.i_128);
@@ -581,7 +704,7 @@ test "iterator scan: u128/i128" {
         };
         const test_data = &[_][]const u8{ "\x22\x20", "\x23\x20" };
 
-        try testIteratorScan(&arena.allocator, column_specs, test_data, &row);
+        try testIteratorScan(&arena.allocator, column_specs, test_data, null, &row);
 
         testing.expectEqual(@as(u128, 0x2220), row.u_128);
         testing.expectEqual(@as(i128, 0x2320), row.i_128);
@@ -594,7 +717,7 @@ test "iterator scan: u128/i128" {
         };
         const test_data = &[_][]const u8{ "\x24\x22\x28\x21", "\x22\x29\x23\x22" };
 
-        try testIteratorScan(&arena.allocator, column_specs, test_data, &row);
+        try testIteratorScan(&arena.allocator, column_specs, test_data, null, &row);
 
         testing.expectEqual(@as(u128, 0x24222821), row.u_128);
         testing.expectEqual(@as(i128, 0x22292322), row.i_128);
@@ -607,7 +730,7 @@ test "iterator scan: u128/i128" {
         };
         const test_data = &[_][]const u8{ "\x21\x22\x23\x24\x25\x26\x27\x28", "\x31\x32\x33\x34\x35\x36\x37\x38" };
 
-        try testIteratorScan(&arena.allocator, column_specs, test_data, &row);
+        try testIteratorScan(&arena.allocator, column_specs, test_data, null, &row);
 
         testing.expectEqual(@as(u128, 0x2122232425262728), row.u_128);
         testing.expectEqual(@as(i128, 0x3132333435363738), row.i_128);
@@ -626,7 +749,7 @@ test "iterator scan: f32" {
     const column_specs = &[_]ColumnSpec{columnSpec(.Float)};
     const test_data = &[_][]const u8{"\x85\xeb\x01\x40"};
 
-    try testIteratorScan(&arena.allocator, column_specs, test_data, &row);
+    try testIteratorScan(&arena.allocator, column_specs, test_data, null, &row);
 
     testing.expectEqual(@as(f32, 2.03), row.f_32);
 }
@@ -644,7 +767,7 @@ test "iterator scan: f64" {
         const column_specs = &[_]ColumnSpec{columnSpec(.Float)};
         const test_data = &[_][]const u8{"\x85\xeb\x01\x40"};
 
-        try testIteratorScan(&arena.allocator, column_specs, test_data, &row);
+        try testIteratorScan(&arena.allocator, column_specs, test_data, null, &row);
 
         testing.expectInDelta(@as(f64, 2.03), row.f_64, 0.000001);
     }
@@ -653,7 +776,7 @@ test "iterator scan: f64" {
         const column_specs = &[_]ColumnSpec{columnSpec(.Double)};
         const test_data = &[_][]const u8{"\x05\x51\xf7\x01\x40\x12\xe6\x40"};
 
-        try testIteratorScan(&arena.allocator, column_specs, test_data, &row);
+        try testIteratorScan(&arena.allocator, column_specs, test_data, null, &row);
 
         testing.expectInDelta(@as(f64, 45202.00024), row.f_64, 0.000001);
     }
@@ -672,7 +795,7 @@ test "iterator scan: f128" {
         const column_specs = &[_]ColumnSpec{columnSpec(.Float)};
         const test_data = &[_][]const u8{"\x85\xeb\x01\x40"};
 
-        try testIteratorScan(&arena.allocator, column_specs, test_data, &row);
+        try testIteratorScan(&arena.allocator, column_specs, test_data, null, &row);
 
         testing.expectInDelta(@as(f128, 2.03), row.f_128, 0.000001);
     }
@@ -681,7 +804,7 @@ test "iterator scan: f128" {
         const column_specs = &[_]ColumnSpec{columnSpec(.Double)};
         const test_data = &[_][]const u8{"\x05\x51\xf7\x01\x40\x12\xe6\x40"};
 
-        try testIteratorScan(&arena.allocator, column_specs, test_data, &row);
+        try testIteratorScan(&arena.allocator, column_specs, test_data, null, &row);
 
         testing.expectInDelta(@as(f128, 45202.00024), row.f_128, 0.000001);
     }
@@ -709,7 +832,7 @@ test "iterator scan: blobs, uuids, timeuuids" {
         "\xe9\x13\x93\x2e\x7a\xb7\x11\xea\xbf\x1b\x10\xc3\x7b\x6e\x96\xcc",
     };
 
-    try testIteratorScan(&arena.allocator, column_specs, test_data, &row);
+    try testIteratorScan(&arena.allocator, column_specs, test_data, null, &row);
 
     testing.expectEqualString("Vincent", row.blob);
     testing.expectEqualSlices(u8, "\x02\x9a\x93\xa9\xc3\x27\x4c\x79\xbe\x32\x71\x8e\x22\xb5\x02\x4c", &row.uuid);
@@ -735,7 +858,7 @@ test "iterator scan: ascii/varchar" {
         "Varchar vincent",
     };
 
-    try testIteratorScan(&arena.allocator, column_specs, test_data, &row);
+    try testIteratorScan(&arena.allocator, column_specs, test_data, null, &row);
 
     testing.expectEqualString("Ascii vincent", row.ascii);
     testing.expectEqualString("Varchar vincent", row.varchar);
@@ -770,7 +893,7 @@ test "iterator scan: set/list" {
         // "\x00\x00\x00\x02\x00\x00\x00\x10\x14\x2d\x6b\x2d\x2c\xe6\x45\x80\x95\x53\x15\x87\xa9\x6d\xec\x94\x00\x00\x00\x10\x8a\xa8\xc1\x37\xd0\x53\x41\x12\xbf\xee\x5f\x96\x28\x7e\xe5\x1a",
     };
 
-    try testIteratorScan(&arena.allocator, column_specs, test_data, &row);
+    try testIteratorScan(&arena.allocator, column_specs, test_data, null, &row);
 
     testing.expectEqual(@as(usize, 2), row.set.len);
     testing.expectEqual(@as(u32, 0x21222324), row.set[0]);
@@ -806,7 +929,7 @@ test "iterator scan: set of tinyint" {
         "\x00\x00\x00\x02\x00\x00\x00\x01\x20\x00\x00\x00\x01\x21",
     };
 
-    try testIteratorScan(&arena.allocator, column_specs, test_data, &row);
+    try testIteratorScan(&arena.allocator, column_specs, test_data, null, &row);
 
     testing.expectEqual(@as(usize, 2), row.set.len);
     testing.expectEqual(@as(u8, 0x20), row.set[0]);
@@ -840,7 +963,7 @@ test "iterator scan: set of tinyint into RawBytes" {
         "foobar",
     };
 
-    try testIteratorScan(&arena.allocator, column_specs, test_data, &row);
+    try testIteratorScan(&arena.allocator, column_specs, test_data, null, &row);
 
     testing.expectEqual(@as(u32, 0x10111213), row.age);
     testing.expectEqualSlices(u8, test_data[2], row.set.data);
@@ -889,7 +1012,7 @@ test "iterator scan: into user provided scanner" {
         "\x10\x11\x12\x13",
     };
 
-    try testIteratorScan(&arena.allocator, column_specs, test_data, &row);
+    try testIteratorScan(&arena.allocator, column_specs, test_data, null, &row);
 
     testing.expectEqual(@as(usize, 2), row.list_timestamp.data.len);
     testing.expectEqual(@as(u64, 0xbcbcbcbcbcbcbcbc), row.list_timestamp.data[0]);
