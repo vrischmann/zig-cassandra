@@ -5,6 +5,7 @@ const net = std.net;
 const ArrayList = std.ArrayList;
 
 pub const Client = @import("conn.zig").Client;
+pub const Iterator = @import("iterator.zig").Iterator;
 
 const testing = @import("testing.zig");
 
