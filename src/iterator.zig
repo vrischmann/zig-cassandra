@@ -1,5 +1,6 @@
 const std = @import("std");
 const heap = std.heap;
+const io = std.io;
 const mem = std.mem;
 
 usingnamespace @import("primitive_types.zig");
@@ -88,7 +89,7 @@ pub const Iterator = struct {
                 },
                 else => @compileError("invalid pointer size " ++ @tagName(pointer.size)),
             },
-            .Struct => return try self.readStruct(option, column_data, Type),
+            .Struct => return try self.readStruct(column_spec, column_data, Type),
             .Array => return try self.readArray(option, column_data, Type),
             else => @compileError("field type " ++ @typeName(Type) ++ " not handled yet"),
         }
@@ -311,11 +312,19 @@ pub const Iterator = struct {
         }
     }
 
-    fn readStruct(self: *Self, option: OptionID, column_data: []const u8, comptime Type: type) !Type {
+    fn readStruct(self: *Self, column_spec: ColumnSpec, column_data: []const u8, comptime Type: type) !Type {
         if (Type == RawBytes) {
             return RawBytes{
                 .data = column_data,
             };
+        }
+
+        if (comptime std.meta.trait.hasFn("scan")(Type)) {
+            var res: Type = undefined;
+
+            try res.scan(&self.arena.allocator, column_spec, column_data);
+
+            return res;
         }
 
         @compileError("type " ++ @typeName(Type) ++ " is invalid");
@@ -845,4 +854,51 @@ test "iterator scan: set of tinyint into RawBytes" {
     testing.expectEqual(@as(usize, 2), row.list_timestamp.len);
     testing.expectEqual(@as(u64, 0xbcbcbcbcbcbcbcbc), row.list_timestamp[0]);
     testing.expectEqual(@as(u64, 0xbebebebebebebebe), row.list_timestamp[1]);
+}
+
+test "iterator scan: into user provided scanner" {
+    var arena = testing.arenaAllocator();
+    defer arena.deinit();
+
+    const MyTimestampList = struct {
+        data: []u64,
+
+        pub fn scan(self: *@This(), allocator: *mem.Allocator, column_spec: ColumnSpec, data: []const u8) !void {
+            var fbs = io.fixedBufferStream(data);
+            var in = fbs.inStream();
+
+            const n = @as(usize, try in.readIntBig(u32));
+
+            self.data = try allocator.alloc(u64, n);
+
+            var i: usize = 0;
+            while (i < n) : (i += 1) {
+                _ = try in.readIntBig(u32); // void the bytes length
+                self.data[i] = try in.readIntBig(u64);
+            }
+        }
+    };
+
+    const Row = struct {
+        list_timestamp: MyTimestampList,
+        age: u32,
+    };
+    var row: Row = undefined;
+
+    var spec1 = columnSpec(.List);
+    spec1.listset_element_type_option = .Timestamp;
+    var spec2 = columnSpec(.Int);
+
+    const column_specs = &[_]ColumnSpec{ spec1, spec2 };
+    const test_data = &[_][]const u8{
+        "\x00\x00\x00\x02\x00\x00\x00\x08\xbc\xbc\xbc\xbc\xbc\xbc\xbc\xbc\x00\x00\x00\x08\xbe\xbe\xbe\xbe\xbe\xbe\xbe\xbe",
+        "\x10\x11\x12\x13",
+    };
+
+    try testIteratorScan(&arena.allocator, column_specs, test_data, &row);
+
+    testing.expectEqual(@as(usize, 2), row.list_timestamp.data.len);
+    testing.expectEqual(@as(u64, 0xbcbcbcbcbcbcbcbc), row.list_timestamp.data[0]);
+    testing.expectEqual(@as(u64, 0xbebebebebebebebe), row.list_timestamp.data[1]);
+    testing.expectEqual(@as(u32, 0x10111213), row.age);
 }
