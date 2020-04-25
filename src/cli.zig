@@ -10,26 +10,44 @@ pub fn main() anyerror!void {
 
     var address = net.Address.initIp4([_]u8{ 127, 0, 0, 1 }, 9042);
 
+    // Connect to the seed node
+
     var client: cql.Client = undefined;
-    try client.init(allocator, address);
+    client.init(allocator, address) catch |err| switch (err) {
+        error.ConnectionRefused => {
+            std.debug.panic("connection refused to {}\n", .{address});
+        },
+        else => return err,
+    };
+
+    // Execute a query
 
     var result_arena = std.heap.ArenaAllocator.init(allocator);
     defer result_arena.deinit();
     const result_allocator = &result_arena.allocator;
 
+    // We want query diagonistics in case of failure.
     var diags = cql.Client.QueryOptions.Diagnostics{};
     var options = cql.Client.QueryOptions{
         .diags = &diags,
     };
 
-    var iter = client.cquery(result_allocator, options, "SELECT ids, age, name FROM foobar.age_to_ids WHERE age = ? FOO", .{
-        .age = @as(u32, 120),
-    }) catch |err| switch (err) {
+    var iter = client.cquery(
+        result_allocator,
+        options,
+        "SELECT ids, age, name FROM foobar.age_to_ids WHERE age = ? FOO",
+        .{
+            .age = @as(u32, 120),
+        },
+    ) catch |err| switch (err) {
         error.QueryExecutionFailed => {
             std.debug.panic("query execution failed, received cassandra error: {}\n", .{diags.message});
         },
         else => return err,
     };
+
+    // Iterate over every row in the result.
+    // Define a Row struct with a 1:1 mapping with the fields selected.
 
     const Row = struct {
         ids: []u8,
@@ -39,15 +57,18 @@ pub fn main() anyerror!void {
     var row: Row = undefined;
 
     while (true) {
-        var rowArena = std.heap.ArenaAllocator.init(allocator);
-        defer rowArena.deinit();
+        // Use a single arena per iteration.
+        // This makes it easy to discard all memory allocated while scanning the current row.
+        var row_arena = std.heap.ArenaAllocator.init(allocator);
+        defer row_arena.deinit();
 
+        // We want iteration diagnostics in case of failures.
         var iter_diags = cql.Iterator.ScanOptions.Diagnostics{};
         var iter_options = cql.Iterator.ScanOptions{
             .diags = &iter_diags,
         };
 
-        const scanned = iter.?.scan(&rowArena.allocator, iter_options, &row) catch |err| switch (err) {
+        const scanned = iter.?.scan(&row_arena.allocator, iter_options, &row) catch |err| switch (err) {
             error.IncompatibleMetadata => blk: {
                 const im = iter_diags.incompatible_metadata;
                 const it = im.incompatible_types;
