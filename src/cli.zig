@@ -35,9 +35,10 @@ pub fn main() anyerror!void {
     var iter = client.cquery(
         result_allocator,
         options,
-        "SELECT ids, age, name FROM foobar.age_to_ids WHERE age = ? FOO",
+        "SELECT ids, age, name FROM foobar.age_to_ids WHERE age in (?, ?)",
         .{
-            .age = @as(u32, 120),
+            .age1 = @as(u32, 120),
+            .age2 = @as(u32, 124),
         },
     ) catch |err| switch (err) {
         error.QueryExecutionFailed => {
