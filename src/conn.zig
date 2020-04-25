@@ -39,9 +39,9 @@ pub const QueryResult = union(QueryResultTag) {
 pub const Client = struct {
     const Self = @This();
 
-    const InStreamType = @TypeOf(std.fs.File.InStream);
-    const OutStreamType = @TypeOf(std.fs.File.OutStream);
-    const RawConnType = RawConn();
+    const InStreamType = std.fs.File.InStream;
+    const OutStreamType = std.fs.File.OutStream;
+    const RawConnType = RawConn(InStreamType, OutStreamType);
 
     username: ?[]const u8,
     password: ?[]const u8,
@@ -236,13 +236,7 @@ const AuthResult = union(AuthResultTag) {
     Error: ErrorFrame,
 };
 
-// TODO(vincent): for now taking InStreamType/OutStreamType in is broken with Zig refusing to compile.
-// See https://github.com/ziglang/zig/issues/5090
-// Use std.fs.File directly so we can test with a TCP socket.
-fn RawConn() type {
-    const InStreamType = std.fs.File.InStream;
-    const OutStreamType = std.fs.File.OutStream;
-
+fn RawConn(comptime InStreamType: type, comptime OutStreamType: type) type {
     const RawFrameReaderType = RawFrameReader(InStreamType);
     const RawFrameWriterType = RawFrameWriter(OutStreamType);
 
