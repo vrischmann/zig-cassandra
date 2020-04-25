@@ -17,10 +17,19 @@ pub fn main() anyerror!void {
     defer result_arena.deinit();
     const result_allocator = &result_arena.allocator;
 
-    var result = try client.cquery(result_allocator, "SELECT ids, age, name FROM foobar.age_to_ids WHERE age = ?", .{
+    var diags = cql.Client.QueryOptions.Diagnostics{};
+    var options = cql.Client.QueryOptions{
+        .diags = &diags,
+    };
+
+    var iter = client.cquery(result_allocator, options, "SELECT ids, age, name FROM foobar.age_to_ids WHERE age = ? FOO", .{
         .age = @as(u32, 120),
-    });
-    var iter = result.Iter;
+    }) catch |err| switch (err) {
+        error.QueryExecutionFailed => {
+            std.debug.panic("query execution failed, received cassandra error: {}\n", .{diags.message});
+        },
+        else => return err,
+    };
 
     const Row = struct {
         ids: []u8,
@@ -33,14 +42,14 @@ pub fn main() anyerror!void {
         var rowArena = std.heap.ArenaAllocator.init(allocator);
         defer rowArena.deinit();
 
-        var diags = cql.Iterator.ScanOptions.Diagnostics{};
-        var options = cql.Iterator.ScanOptions{
-            .diags = &diags,
+        var iter_diags = cql.Iterator.ScanOptions.Diagnostics{};
+        var iter_options = cql.Iterator.ScanOptions{
+            .diags = &iter_diags,
         };
 
-        const scanned = iter.scan(&rowArena.allocator, options, &row) catch |err| switch (err) {
+        const scanned = iter.?.scan(&rowArena.allocator, iter_options, &row) catch |err| switch (err) {
             error.IncompatibleMetadata => blk: {
-                const im = diags.incompatible_metadata;
+                const im = iter_diags.incompatible_metadata;
                 const it = im.incompatible_types;
                 if (it.cql_type_name != null and it.native_type_name != null) {
                     std.debug.panic("metadata incompatible. CQL type {} can't be scanned into native type {}\n", .{

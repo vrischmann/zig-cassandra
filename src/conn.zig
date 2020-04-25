@@ -26,16 +26,6 @@ usingnamespace @import("frames/batch.zig");
 
 const testing = @import("testing.zig");
 
-pub const QueryResultTag = enum {
-    None,
-    Iter,
-};
-
-pub const QueryResult = union(QueryResultTag) {
-    None: void,
-    Iter: Iterator,
-};
-
 pub const Client = struct {
     const Self = @This();
 
@@ -74,10 +64,35 @@ pub const Client = struct {
         self.consistency = consistency;
     }
 
-    // TODO(vincent): maybe add not comptime equivalent ?
-    // TODO(vincent): parse the query string to match the args tuple
+    pub const QueryOptions = struct {
+        /// If this is provided, cquery will populate some information about failures.
+        /// This will provide more detail than an error can.
+        diags: ?*Diagnostics = null,
 
-    pub fn cquery(self: *Self, allocator: *mem.Allocator, comptime query_string: []const u8, args: var) !QueryResult {
+        pub const Diagnostics = struct {
+            /// The error message returned by the Cassandra node.
+            message: []const u8 = "",
+
+            unavailable_replicas: ?UnavailableReplicasError = null,
+            function_failure: ?FunctionFailureError = null,
+            write_timeout: ?WriteError.Timeout = null,
+            read_timeout: ?ReadError.Timeout = null,
+            write_failure: ?WriteError.Failure = null,
+            read_failure: ?ReadError.Failure = null,
+            cas_write_unknown: ?WriteError.CASUnknown = null,
+            already_exists: ?AlreadyExistsError = null,
+            unprepared: ?UnpreparedError = null,
+        };
+    };
+
+    const Diags = QueryOptions.Diagnostics;
+
+    // TODO(vincent): maybe add not comptime equivalent ?
+
+    pub fn cquery(self: *Self, allocator: *mem.Allocator, options: QueryOptions, comptime query_string: []const u8, args: var) !?Iterator {
+        var dummy_diags = Diags{};
+        var diags = options.diags orelse &dummy_diags;
+
         if (@typeInfo(@TypeOf(args)) != .Struct) {
             @compileError("Expected tuple or struct argument, found " ++ @typeName(args) ++ " of type " ++ @tagName(@typeInfo(args)));
         }
@@ -119,13 +134,10 @@ pub const Client = struct {
         };
         parameters.values = Values{ .Normal = values.toOwnedSlice() };
 
-        var result = try self.raw_conn.writeQuery(allocator, query_string, parameters);
+        var result = try self.raw_conn.writeQuery(allocator, diags, query_string, parameters);
         switch (result) {
-            .Rows => |rows| {
-                var iter = Iterator.init(rows.metadata, rows.data);
-                return QueryResult{ .Iter = iter };
-            },
-            else => return QueryResult{ .None = .{} },
+            .Rows => |rows| return Iterator.init(rows.metadata, rows.data),
+            else => return null,
         }
     }
 
@@ -235,6 +247,14 @@ const AuthResult = union(AuthResultTag) {
     Success: ReadyFrame,
     Error: ErrorFrame,
 };
+const StartupResponseTag = enum {
+    Ready,
+    Authenticate,
+};
+const StartupResponse = union(StartupResponseTag) {
+    Ready: ReadyFrame,
+    Authenticate: AuthenticateFrame,
+};
 
 fn RawConn(comptime InStreamType: type, comptime OutStreamType: type) type {
     const RawFrameReaderType = RawFrameReader(InStreamType);
@@ -289,6 +309,8 @@ fn RawConn(comptime InStreamType: type, comptime OutStreamType: type) type {
             const raw_frame = try self.raw_frame_reader.read();
             defer raw_frame.deinit(self.allocator);
 
+            if (raw_frame.header.opcode != .Supported) return error.InvalidResponseInHandshake;
+
             self.primitive_reader.reset(raw_frame.body);
 
             var supported_frame = try SupportedFrame.read(allocator, &self.primitive_reader);
@@ -340,15 +362,16 @@ fn RawConn(comptime InStreamType: type, comptime OutStreamType: type) type {
                 .Authenticate => StartupResponse{
                     .Authenticate = try AuthenticateFrame.read(allocator, &self.primitive_reader),
                 },
-                else => error.InvalidResponseFrame,
+                else => error.InvalidResponseToStartup,
             };
         }
 
         fn writeAuthResponse(self: *Self, username: []const u8, password: []const u8) !AuthResult {
+            // TODO(vincent): do we need diagnostics ?
             unreachable;
         }
 
-        fn writeQuery(self: *Self, allocator: *mem.Allocator, query: []const u8, query_parameters: QueryParameters) !Result {
+        fn writeQuery(self: *Self, allocator: *mem.Allocator, diags: *Client.QueryOptions.Diagnostics, query: []const u8, query_parameters: QueryParameters) !Result {
             // Write QUERY
             {
                 var query_frame = QueryFrame{
@@ -379,24 +402,18 @@ fn RawConn(comptime InStreamType: type, comptime OutStreamType: type) type {
             const raw_frame = try self.raw_frame_reader.read();
             self.primitive_reader.reset(raw_frame.body);
 
-            if (raw_frame.header.opcode != .Result) {
-                return error.InvalidServerResponseOpcode;
-            }
-
-            var result_frame = try ResultFrame.read(allocator, self.protocol_version, &self.primitive_reader);
-            return result_frame.result;
+            return switch (raw_frame.header.opcode) {
+                .Result => (try ResultFrame.read(allocator, self.protocol_version, &self.primitive_reader)).result,
+                .Error => {
+                    var error_frame = try ErrorFrame.read(allocator, &self.primitive_reader);
+                    diags.message = error_frame.message;
+                    return error.QueryExecutionFailed;
+                },
+                else => std.debug.panic("invalid server response opcode {}\n", .{raw_frame.header.opcode}),
+            };
         }
     };
 }
-
-const StartupResponseTag = enum {
-    Ready,
-    Authenticate,
-};
-const StartupResponse = union(StartupResponseTag) {
-    Ready: ReadyFrame,
-    Authenticate: AuthenticateFrame,
-};
 
 test "raw conn: startup" {
     // TODO(vincent): this is tedious just to test.

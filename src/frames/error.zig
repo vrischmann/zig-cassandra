@@ -31,21 +31,21 @@ const ErrorCode = packed enum(u32) {
     Unprepared = 0x2500,
 };
 
-const UnavailableReplicasError = struct {
+pub const UnavailableReplicasError = struct {
     consistency_level: Consistency,
     required: u32,
     alive: u32,
 };
 
-const FunctionFailureError = struct {
+pub const FunctionFailureError = struct {
     keyspace: []const u8,
     function: []const u8,
     arg_types: []const []const u8,
 };
 
-const WriteError = struct {
+pub const WriteError = struct {
     // TODO(vincent): document this
-    const WriteType = enum {
+    pub const WriteType = enum {
         SIMPLE,
         BATCH,
         UNLOGGED_BATCH,
@@ -56,7 +56,7 @@ const WriteError = struct {
         CDC,
     };
 
-    const Timeout = struct {
+    pub const Timeout = struct {
         consistency_level: Consistency,
         received: u32,
         block_for: u32,
@@ -64,8 +64,8 @@ const WriteError = struct {
         contentions: ?u16,
     };
 
-    const Failure = struct {
-        const Reason = struct {
+    pub const Failure = struct {
+        pub const Reason = struct {
             endpoint: net.Address,
             // TODO(vincent): what's this failure code ?!
             failure_code: u16,
@@ -78,23 +78,23 @@ const WriteError = struct {
         write_type: WriteType,
     };
 
-    const CASUnknown = struct {
+    pub const CASUnknown = struct {
         consistency_level: Consistency,
         received: u32,
         block_for: u32,
     };
 };
 
-const ReadError = struct {
-    const Timeout = struct {
+pub const ReadError = struct {
+    pub const Timeout = struct {
         consistency_level: Consistency,
         received: u32,
         block_for: u32,
         data_present: u8,
     };
 
-    const Failure = struct {
-        const Reason = struct {
+    pub const Failure = struct {
+        pub const Reason = struct {
             endpoint: net.Address,
             // TODO(vincent): what's this failure code ?!
             failure_code: u16,
@@ -108,12 +108,12 @@ const ReadError = struct {
     };
 };
 
-const AlreadyExistsError = struct {
+pub const AlreadyExistsError = struct {
     keyspace: []const u8,
     table: []const u8,
 };
 
-const UnpreparedError = struct {
+pub const UnpreparedError = struct {
     statement_id: []const u8,
 };
 
@@ -128,7 +128,7 @@ pub const ErrorFrame = struct {
     error_code: ErrorCode,
     message: []const u8,
 
-    unavaiable_replicas: ?UnavailableReplicasError,
+    unavailable_replicas: ?UnavailableReplicasError,
     function_failure: ?FunctionFailureError,
     write_timeout: ?WriteError.Timeout,
     read_timeout: ?ReadError.Timeout,
@@ -142,7 +142,7 @@ pub const ErrorFrame = struct {
         var frame = Self{
             .error_code = undefined,
             .message = undefined,
-            .unavaiable_replicas = null,
+            .unavailable_replicas = null,
             .function_failure = null,
             .write_timeout = null,
             .read_timeout = null,
@@ -158,7 +158,7 @@ pub const ErrorFrame = struct {
 
         switch (frame.error_code) {
             .UnavailableReplicas => {
-                frame.unavaiable_replicas = UnavailableReplicasError{
+                frame.unavailable_replicas = UnavailableReplicasError{
                     .consistency_level = try pr.readConsistency(),
                     .required = try pr.readInt(u32),
                     .alive = try pr.readInt(u32),
