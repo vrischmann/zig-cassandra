@@ -8,6 +8,7 @@ The goal is only to support CQL.
 TODO
 ====
 
+* prepared statement
 * Use proper error sets for stuff
 * Cleanup code that won't be used, some frames are never written by a client for example.
 * Add an abstraction for a Stream
