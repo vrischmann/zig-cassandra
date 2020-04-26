@@ -208,6 +208,8 @@ pub const ErrorFrame = struct {
                 };
 
                 // Read reason map
+                // TODO(vincent): this is only correct for Protocol v5
+                // See point 10. in the the protocol v5 spec.
 
                 var reason_map = std.ArrayList(WriteError.Failure.Reason).init(allocator);
                 errdefer reason_map.deinit();
