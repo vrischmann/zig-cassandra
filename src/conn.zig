@@ -69,6 +69,15 @@ pub const Client = struct {
         username: ?[]const u8 = null,
         /// The password to use for authentication if required.
         password: ?[]const u8 = null,
+
+        /// If this is provided, init will populate some information about failures.
+        /// This will provide more detail than an error can.
+        diags: ?*Diagnostics = null,
+
+        pub const Diagnostics = struct {
+            /// The error message returned by the Cassandra node.
+            message: []const u8 = "",
+        };
     };
 
     pub fn init(self: *Self, allocator: *mem.Allocator, options: InitOptions) !void {
@@ -86,7 +95,10 @@ pub const Client = struct {
         self.primitive_reader = PrimitiveReader.init();
         self.primitive_writer = PrimitiveWriter.init();
 
-        _ = try self.handshake();
+        var dummy_diags = InitOptions.Diagnostics{};
+        var diags = options.diags orelse &dummy_diags;
+
+        _ = try self.handshake(diags);
     }
 
     pub fn setUsername(self: *Self, username: []const u8) void {
@@ -174,7 +186,7 @@ pub const Client = struct {
         }
     }
 
-    fn handshake(self: *Self) !void {
+    fn handshake(self: *Self, diags: *InitOptions.Diagnostics) !void {
         // Sequence diagram to establish the connection:
         //
         // +---------+                 +---------+
@@ -206,29 +218,24 @@ pub const Client = struct {
         switch (startup_response) {
             .Ready => return,
             .Authenticate => |frame| {
-                var auth_result = try self.authenticate(frame.authenticator);
-                switch (auth_result) {
-                    .Challenge => unreachable,
-                    .Success => return,
-                    .Error => |err| {
-                        std.debug.panic("error code: {} message: {}\n", .{ err.error_code, err.message });
-                    },
-                }
+                try self.authenticate(&fba.allocator, diags, frame.authenticator);
             },
         }
     }
 
-    fn authenticate(self: *Self, authenticator: []const u8) !AuthResult {
+    fn authenticate(self: *Self, allocator: *mem.Allocator, diags: *InitOptions.Diagnostics, authenticator: []const u8) !void {
         // TODO(vincent): handle authenticator classes
         // TODO(vincent): handle auth challenges
         if (self.options.username == null) {
             return error.NoUsername;
         }
         if (self.options.password == null) {
-            return error.NoPasswors;
+            return error.NoPassword;
         }
 
         return try self.writeAuthResponse(
+            allocator,
+            diags,
             self.options.username.?,
             self.options.password.?,
         );
@@ -256,7 +263,9 @@ pub const Client = struct {
         const raw_frame = try self.readRawFrame(allocator);
         defer raw_frame.deinit(allocator);
 
-        if (raw_frame.header.opcode != .Supported) return error.InvalidResponseInHandshake;
+        if (raw_frame.header.opcode != .Supported) {
+            return error.InvalidServerResponse;
+        }
 
         self.primitive_reader.reset(raw_frame.body);
 
@@ -274,7 +283,7 @@ pub const Client = struct {
     fn writeStartup(self: *Self, allocator: *mem.Allocator) !StartupResponse {
         // Write STARTUP
         {
-            var startup_frame = StartupFrame{
+            var frame = StartupFrame{
                 .cql_version = self.negotiated_state.cql_version,
                 .compression = self.options.compression,
             };
@@ -282,7 +291,7 @@ pub const Client = struct {
             // Encode body
             self.primitive_writer.reset(allocator);
             defer self.primitive_writer.deinit(allocator);
-            _ = try startup_frame.write(&self.primitive_writer);
+            _ = try frame.write(&self.primitive_writer);
 
             // Write raw frame
             const raw_frame = try self.makeRawFrame(allocator, .Startup, true);
@@ -300,19 +309,48 @@ pub const Client = struct {
             .Authenticate => StartupResponse{
                 .Authenticate = try AuthenticateFrame.read(allocator, &self.primitive_reader),
             },
-            else => error.InvalidResponseToStartup,
+            else => error.InvalidServerResponse,
         };
     }
 
-    fn writeAuthResponse(self: *Self, username: []const u8, password: []const u8) !AuthResult {
-        // TODO(vincent): do we need diagnostics ?
-        unreachable;
+    fn writeAuthResponse(self: *Self, allocator: *mem.Allocator, diags: *InitOptions.Diagnostics, username: []const u8, password: []const u8) !void {
+        // Write AUTH_RESPONSE
+        {
+            var buf: [512]u8 = undefined;
+            const token = try std.fmt.bufPrint(&buf, "\x00{}\x00{}", .{ username, password });
+
+            var frame = AuthResponseFrame{ .token = token };
+
+            // Encode body
+            self.primitive_writer.reset(allocator);
+            defer self.primitive_writer.deinit(allocator);
+            _ = try frame.write(&self.primitive_writer);
+
+            // Write raw frame
+            const raw_frame = try self.makeRawFrame(allocator, .AuthResponse, false);
+            _ = try self.raw_frame_writer.write(raw_frame);
+        }
+
+        // Read either AUTH_CHALLENGE, AUTH_SUCCESS or ERROR
+        const raw_frame = try self.readRawFrame(allocator);
+        self.primitive_reader.reset(raw_frame.body);
+
+        switch (raw_frame.header.opcode) {
+            .AuthChallenge => unreachable,
+            .AuthSuccess => return,
+            .Error => {
+                var error_frame = try ErrorFrame.read(allocator, &self.primitive_reader);
+                diags.message = error_frame.message;
+                return error.AuthenticationFailed;
+            },
+            else => return error.InvalidServerResponse,
+        }
     }
 
     fn writeQuery(self: *Self, allocator: *mem.Allocator, diags: *Client.QueryOptions.Diagnostics, query: []const u8, query_parameters: QueryParameters) !Result {
         // Write QUERY
         {
-            var query_frame = QueryFrame{
+            var frame = QueryFrame{
                 .query = query,
                 .query_parameters = query_parameters,
             };
@@ -320,7 +358,7 @@ pub const Client = struct {
             // Encode body
             self.primitive_writer.reset(allocator);
             defer self.primitive_writer.deinit(allocator);
-            _ = try query_frame.write(self.negotiated_state.protocol_version, &self.primitive_writer);
+            _ = try frame.write(self.negotiated_state.protocol_version, &self.primitive_writer);
 
             // Write raw frame
             const raw_frame = try self.makeRawFrame(allocator, .Query, false);
@@ -341,7 +379,7 @@ pub const Client = struct {
                 diags.message = error_frame.message;
                 return error.QueryExecutionFailed;
             },
-            else => std.debug.panic("invalid server response opcode {}\n", .{raw_frame.header.opcode}),
+            else => return error.InvalidServerResponse,
         };
     }
 
@@ -430,16 +468,6 @@ test "count bind markers" {
     testing.expectEqual(@as(usize, 3), count);
 }
 
-const AuthResultTag = enum {
-    Challenge,
-    Success,
-    Error,
-};
-const AuthResult = union(AuthResultTag) {
-    Challenge: AuthChallengeFrame,
-    Success: ReadyFrame,
-    Error: ErrorFrame,
-};
 const StartupResponseTag = enum {
     Ready,
     Authenticate,

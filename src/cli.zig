@@ -15,11 +15,22 @@ pub fn main() anyerror!void {
     var init_options = cql.Client.InitOptions{};
     init_options.seed_address = address;
     init_options.compression = cql.CompressionAlgorithm.LZ4;
+    init_options.username = "cassandra";
+    init_options.password = "cassandra";
+
+    var init_diags = cql.Client.InitOptions.Diagnostics{};
+    init_options.diags = &init_diags;
 
     var client: cql.Client = undefined;
     client.init(allocator, init_options) catch |err| switch (err) {
         error.ConnectionRefused => {
             std.debug.panic("connection refused to {}\n", .{address});
+        },
+        error.NoUsername, error.NoPassword => {
+            std.debug.panic("the server requires authentication, please set the username and password", .{});
+        },
+        error.AuthenticationFailed => {
+            std.debug.panic("server authentication failed, error was: {}", .{init_diags.message});
         },
         else => return err,
     };
