@@ -253,7 +253,7 @@ pub const Client = struct {
         }
 
         // Read SUPPORTED
-        const raw_frame = try self.raw_frame_reader.read();
+        const raw_frame = try self.readRawFrame(allocator);
         defer raw_frame.deinit(allocator);
 
         if (raw_frame.header.opcode != .Supported) return error.InvalidResponseInHandshake;
@@ -285,12 +285,12 @@ pub const Client = struct {
             _ = try startup_frame.write(&self.primitive_writer);
 
             // Write raw frame
-            const raw_frame = try self.getRawFrame(allocator, .Startup, true);
+            const raw_frame = try self.makeRawFrame(allocator, .Startup, true);
             _ = try self.raw_frame_writer.write(raw_frame);
         }
 
         // Read either READY or AUTHENTICATE
-        const raw_frame = try self.raw_frame_reader.read();
+        const raw_frame = try self.readRawFrame(allocator);
         defer raw_frame.deinit(allocator);
 
         self.primitive_reader.reset(raw_frame.body);
@@ -323,12 +323,12 @@ pub const Client = struct {
             _ = try query_frame.write(self.negotiated_state.protocol_version, &self.primitive_writer);
 
             // Write raw frame
-            const raw_frame = try self.getRawFrame(allocator, .Query, false);
+            const raw_frame = try self.makeRawFrame(allocator, .Query, false);
             _ = try self.raw_frame_writer.write(raw_frame);
         }
 
         // Read RESULT
-        const raw_frame = try self.raw_frame_reader.read();
+        const raw_frame = try self.readRawFrame(allocator);
         self.primitive_reader.reset(raw_frame.body);
 
         return switch (raw_frame.header.opcode) {
@@ -345,7 +345,18 @@ pub const Client = struct {
         };
     }
 
-    fn getRawFrame(self: *Self, allocator: *mem.Allocator, opcode: Opcode, force_no_compression: bool) !RawFrame {
+    fn readRawFrame(self: *Self, allocator: *mem.Allocator) !RawFrame {
+        var raw_frame = try self.raw_frame_reader.read();
+
+        if (raw_frame.header.flags & FrameFlags.Compression == FrameFlags.Compression) blk: {
+            const decompressed_data = try lz4.decompress(allocator, raw_frame.body);
+            raw_frame.body = decompressed_data;
+        }
+
+        return raw_frame;
+    }
+
+    fn makeRawFrame(self: *Self, allocator: *mem.Allocator, opcode: Opcode, force_no_compression: bool) !RawFrame {
         var raw_frame: RawFrame = undefined;
 
         const written = self.primitive_writer.getWritten();
@@ -366,7 +377,7 @@ pub const Client = struct {
                     .LZ4 => {
                         const compressed_data = try lz4.compress(allocator, written);
 
-                        raw_frame.header.flags |= @enumToInt(FrameFlags.Compression);
+                        raw_frame.header.flags |= FrameFlags.Compression;
                         raw_frame.header.body_len = @intCast(u32, compressed_data.len);
 
                         break :blk compressed_data;
