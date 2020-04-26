@@ -31,6 +31,8 @@ pub fn build(b: *Builder) void {
     // Build CLI
 
     const cli = b.addExecutable("cqlsh", "src/cli.zig");
+    cli.linkLibC();
+    cli.linkSystemLibrary("lz4");
     cli.setTarget(target);
     cli.setBuildMode(mode);
     cli.install();
