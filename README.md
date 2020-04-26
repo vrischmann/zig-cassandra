@@ -15,7 +15,7 @@ TODO
 * Handle named values in a statement
 * Store the prepared statement metadata for use with EXECUTE
 * Safe prepared statement (prepare a query string with a dummy struct for type binding and keeps this information for future execute calls)
-* Autodiscovery of other nodes
 * Batching
 * Setting a keyspace
 * Paging
+* Cluster client / client pool capable of maintaining a connection to each node in the cluster + autodiscovery with events
