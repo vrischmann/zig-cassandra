@@ -3,6 +3,8 @@ const heap = std.heap;
 const mem = std.mem;
 const net = std.net;
 
+const lz4 = @import("lz4.zig");
+
 usingnamespace @import("frame.zig");
 usingnamespace @import("primitive_types.zig");
 usingnamespace @import("iterator.zig");
@@ -424,4 +426,8 @@ test "raw conn: startup" {
 
     // var raw_conn = RawConn(@TypeOf(in_stream)).init(testing.allocator, in_stream);
     // defer raw_conn.deinit();
+}
+
+test "" {
+    _ = @import("lz4.zig");
 }
