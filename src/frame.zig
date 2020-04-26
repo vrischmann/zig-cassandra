@@ -11,6 +11,14 @@ pub const PrimitiveWriter = @import("primitive/writer.zig").PrimitiveWriter;
 
 const testing = @import("testing.zig");
 
+pub const FrameFlags = struct {
+    pub const Compression: u8 = 0x01;
+    pub const Tracing: u8 = 0x02;
+    pub const CustomPayload: u8 = 0x04;
+    pub const Warning: u8 = 0x08;
+    pub const UseBeta: u8 = 0x10;
+};
+
 pub const FrameHeader = packed struct {
     version: ProtocolVersion,
     flags: u8,
