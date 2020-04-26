@@ -46,7 +46,7 @@ pub fn decompress(allocator: *mem.Allocator, data: []const u8) ![]const u8 {
         @intCast(c_int, compressed_data.len),
         @intCast(c_int, buf.len),
     );
-    if (decompressed_size <= 0) {
+    if (decompressed_size < 0) {
         return error.DecompressionFailed;
     }
 
