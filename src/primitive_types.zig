@@ -127,14 +127,6 @@ pub const ProtocolVersion = packed struct {
     }
 };
 
-pub const FrameFlags = packed enum(u8) {
-    Compression = 0x01,
-    Tracing = 0x02,
-    CustomPayload = 0x04,
-    Warning = 0x08,
-    UseBeta = 0x10,
-};
-
 pub const Opcode = packed enum(u8) {
     Error = 0x00,
     Startup = 0x01,

@@ -12,8 +12,12 @@ pub fn main() anyerror!void {
 
     // Connect to the seed node
 
+    var init_options = cql.Client.InitOptions{};
+    init_options.seed_address = address;
+    init_options.compression = cql.CompressionAlgorithm.LZ4;
+
     var client: cql.Client = undefined;
-    client.init(allocator, address) catch |err| switch (err) {
+    client.init(allocator, init_options) catch |err| switch (err) {
         error.ConnectionRefused => {
             std.debug.panic("connection refused to {}\n", .{address});
         },

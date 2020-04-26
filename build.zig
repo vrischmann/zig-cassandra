@@ -14,11 +14,15 @@ pub fn build(b: *Builder) void {
     // Build library
 
     const lib = b.addStaticLibrary("zig-cassandra", "src/lib.zig");
+    lib.linkLibC();
+    lib.linkSystemLibrary("lz4");
     lib.setTarget(target);
     lib.setBuildMode(mode);
     lib.install();
 
     var main_tests = b.addTest("src/lib.zig");
+    main_tests.linkLibC();
+    main_tests.linkSystemLibrary("lz4");
     main_tests.setBuildMode(mode);
 
     const test_step = b.step("test", "Run library tests");
@@ -27,6 +31,8 @@ pub fn build(b: *Builder) void {
     // Build CLI
 
     const cli = b.addExecutable("cqlsh", "src/cli.zig");
+    cli.linkLibC();
+    cli.linkSystemLibrary("lz4");
     cli.setTarget(target);
     cli.setBuildMode(mode);
     cli.install();
