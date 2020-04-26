@@ -366,9 +366,6 @@ pub const Client = struct {
                     .LZ4 => {
                         const compressed_data = try lz4.compress(allocator, written);
 
-                        std.debug.warn("           data: {x}\n", .{written});
-                        std.debug.warn("compressed data: {x}\n", .{compressed_data});
-
                         raw_frame.header.flags |= @enumToInt(FrameFlags.Compression);
                         raw_frame.header.body_len = @intCast(u32, compressed_data.len);
 
