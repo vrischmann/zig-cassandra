@@ -11,7 +11,7 @@ const testing = @import("../testing.zig");
 /// EXECUTE is sent to execute a prepared query.
 ///
 /// Described in the protocol spec at §4.1.6
-const ExecuteFrame = struct {
+pub const ExecuteFrame = struct {
     const Self = @This();
 
     query_id: []const u8,
