@@ -276,7 +276,7 @@ pub const Client = struct {
         {
             var startup_frame = StartupFrame{
                 .cql_version = self.negotiated_state.cql_version,
-                .compression = null,
+                .compression = self.options.compression,
             };
 
             // Encode body
