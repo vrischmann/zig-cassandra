@@ -10,7 +10,7 @@ const testing = @import("../testing.zig");
 /// PREPARE is sent to prepare a CQL query for later execution (through EXECUTE).
 ///
 /// Described in the protocol spec at §4.1.5
-const PrepareFrame = struct {
+pub const PrepareFrame = struct {
     const Self = @This();
 
     query: []const u8,

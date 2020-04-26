@@ -111,6 +111,21 @@ pub const Client = struct {
         self.consistency = consistency;
     }
 
+    pub fn cprepare(self: *Self, allocator: *mem.Allocator, options: QueryOptions, comptime query_string: []const u8) ![]const u8 {
+        var dummy_diags = QueryOptions.Diagnostics{};
+        var diags = options.diags orelse &dummy_diags;
+
+        // TODO(vincent): need to store the metadata if present so that it can later be used with EXECUTE
+        // while adding the flag Skip_Metadata.
+        // See §4.1.4 in the protocol spec.
+
+        var result = try self.writePrepare(allocator, diags, query_string);
+        return switch (result) {
+            .Prepared => |prepared| prepared.query_id,
+            else => error.InvalidServerResponse,
+        };
+    }
+
     pub const QueryOptions = struct {
         /// If this is provided, cquery will populate some information about failures.
         /// This will provide more detail than an error can.
@@ -138,9 +153,7 @@ pub const Client = struct {
         var dummy_diags = QueryOptions.Diagnostics{};
         var diags = options.diags orelse &dummy_diags;
 
-        if (@typeInfo(@TypeOf(args)) != .Struct) {
-            @compileError("Expected tuple or struct argument, found " ++ @typeName(args) ++ " of type " ++ @tagName(@typeInfo(args)));
-        }
+        // Check that the query makes sens for the arguments provided.
 
         comptime {
             const bind_markers = countBindMarkers(query_string);
@@ -153,19 +166,11 @@ pub const Client = struct {
             }
         }
 
-        std.debug.assert(self.socket.handle > 0);
-
         var values = std.ArrayList(Value).init(allocator);
-
-        inline for (@typeInfo(@TypeOf(args)).Struct.fields) |struct_field, i| {
-            const field_type_info = @typeInfo(struct_field.field_type);
-            const field_name = struct_field.name;
-
-            const arg = @field(args, field_name);
-            try appendValueToQueryParameter(allocator, &values, struct_field.field_type, arg);
-        }
+        try computeValues(&values, allocator, args);
 
         // TODO(vincent): handle named values
+        // TODO(vincent): handle skip_metadata (see §4.1.4 in the spec
         var parameters = QueryParameters{
             .consistency_level = self.options.consistency,
             .values = undefined,
@@ -180,9 +185,66 @@ pub const Client = struct {
         parameters.values = Values{ .Normal = values.toOwnedSlice() };
 
         var result = try self.writeQuery(allocator, diags, query_string, parameters);
-        switch (result) {
-            .Rows => |rows| return Iterator.init(rows.metadata, rows.data),
-            else => return null,
+        return switch (result) {
+            .Rows => |rows| Iterator.init(rows.metadata, rows.data),
+            else => null,
+        };
+    }
+
+    pub fn execute(self: *Self, allocator: *mem.Allocator, options: QueryOptions, query_id: []const u8, args: var) !?Iterator {
+        var dummy_diags = QueryOptions.Diagnostics{};
+        var diags = options.diags orelse &dummy_diags;
+
+        var values = std.ArrayList(Value).init(allocator);
+        try computeValues(&values, allocator, args);
+
+        // TODO(vincent): handle named values
+        // TODO(vincent): handle skip_metadata (see §4.1.4 in the spec
+        var parameters = QueryParameters{
+            .consistency_level = self.options.consistency,
+            .values = undefined,
+            .skip_metadata = false,
+            .page_size = null,
+            .paging_state = null,
+            .serial_consistency_level = null,
+            .timestamp = null,
+            .keyspace = null,
+            .now_in_seconds = null,
+        };
+        parameters.values = Values{ .Normal = values.toOwnedSlice() };
+
+        var result = try self.writeExecute(allocator, diags, query_id, parameters);
+        return switch (result) {
+            .Rows => |rows| Iterator.init(rows.metadata, rows.data),
+            else => null,
+        };
+    }
+
+    /// Generates a list of Value compatible with the types in args.
+    /// This is done at comptime.
+    fn computeValues(values: *std.ArrayList(Value), allocator: *mem.Allocator, args: var) !void {
+        if (@typeInfo(@TypeOf(args)) != .Struct) {
+            @compileError("Expected tuple or struct argument, found " ++ @typeName(args) ++ " of type " ++ @tagName(@typeInfo(args)));
+        }
+
+        inline for (@typeInfo(@TypeOf(args)).Struct.fields) |struct_field, i| {
+            const field_type_info = @typeInfo(struct_field.field_type);
+            const field_name = struct_field.name;
+
+            const arg = @field(args, field_name);
+
+            var value: Value = undefined;
+            switch (field_type_info) {
+                .Int => |info| {
+                    const buf = try allocator.alloc(u8, info.bits / 8);
+
+                    mem.writeIntSliceBig(struct_field.field_type, buf, arg);
+                    value = Value{ .Set = buf };
+                },
+                else => @compileError("field type " ++ @typeName(Type) ++ " not handled yet"),
+            }
+
+            try values.append(value);
         }
     }
 
@@ -383,6 +445,80 @@ pub const Client = struct {
         };
     }
 
+    fn writePrepare(self: *Self, allocator: *mem.Allocator, diags: *Client.QueryOptions.Diagnostics, query: []const u8) !Result {
+        // Write PREPARE
+        {
+            var frame = PrepareFrame{
+                .query = query,
+                .keyspace = null,
+            };
+
+            // Encode body
+            self.primitive_writer.reset(allocator);
+            defer self.primitive_writer.deinit(allocator);
+            _ = try frame.write(self.negotiated_state.protocol_version, &self.primitive_writer);
+
+            // Write raw frame
+            const raw_frame = try self.makeRawFrame(allocator, .Prepare, false);
+            _ = try self.raw_frame_writer.write(raw_frame);
+        }
+
+        // Read RESULT
+        const raw_frame = try self.readRawFrame(allocator);
+        self.primitive_reader.reset(raw_frame.body);
+
+        return switch (raw_frame.header.opcode) {
+            .Result => blk: {
+                var frame = try ResultFrame.read(allocator, self.negotiated_state.protocol_version, &self.primitive_reader);
+                break :blk frame.result;
+            },
+            .Error => {
+                var error_frame = try ErrorFrame.read(allocator, &self.primitive_reader);
+                diags.message = error_frame.message;
+                return error.QueryPreparationFailed;
+            },
+            else => return error.InvalidServerResponse,
+        };
+    }
+
+    fn writeExecute(self: *Self, allocator: *mem.Allocator, diags: *Client.QueryOptions.Diagnostics, query_id: []const u8, query_parameters: QueryParameters) !Result {
+        // Write EXECUTE
+        {
+            var frame = ExecuteFrame{
+                .query_id = query_id,
+                .result_metadata_id = null,
+                .query_parameters = query_parameters,
+            };
+
+            // Encode body
+            self.primitive_writer.reset(allocator);
+            defer self.primitive_writer.deinit(allocator);
+            _ = try frame.write(self.negotiated_state.protocol_version, &self.primitive_writer);
+
+            // Write raw frame
+            const raw_frame = try self.makeRawFrame(allocator, .Execute, false);
+            _ = try self.raw_frame_writer.write(raw_frame);
+        }
+
+        // Read RESULT
+        // TODO(vincent): this is the same as in writeQuery, can we DRY it up ?
+        const raw_frame = try self.readRawFrame(allocator);
+        self.primitive_reader.reset(raw_frame.body);
+
+        return switch (raw_frame.header.opcode) {
+            .Result => blk: {
+                var frame = try ResultFrame.read(allocator, self.negotiated_state.protocol_version, &self.primitive_reader);
+                break :blk frame.result;
+            },
+            .Error => {
+                var error_frame = try ErrorFrame.read(allocator, &self.primitive_reader);
+                diags.message = error_frame.message;
+                return error.QueryExecutionFailed;
+            },
+            else => return error.InvalidServerResponse,
+        };
+    }
+
     fn readRawFrame(self: *Self, allocator: *mem.Allocator) !RawFrame {
         var raw_frame = try self.raw_frame_reader.read();
 
@@ -432,23 +568,6 @@ pub const Client = struct {
         return raw_frame;
     }
 };
-
-fn appendValueToQueryParameter(allocator: *mem.Allocator, values: *std.ArrayList(Value), comptime Type: type, arg: Type) !void {
-    const type_info = @typeInfo(Type);
-
-    var value: Value = undefined;
-    switch (type_info) {
-        .Int => |info| {
-            const buf = try allocator.alloc(u8, info.bits / 8);
-
-            mem.writeIntSliceBig(Type, buf, arg);
-            value = Value{ .Set = buf };
-        },
-        else => @compileError("field type " ++ @typeName(Type) ++ " not handled yet"),
-    }
-
-    try values.append(value);
-}
 
 fn countBindMarkers(query_string: []const u8) usize {
     var pos: usize = 0;

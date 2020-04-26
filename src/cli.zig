@@ -1,12 +1,165 @@
 const std = @import("std");
+const mem = std.mem;
 const net = std.net;
 
 const cql = @import("lib.zig");
+
+fn doQuery(allocator: *mem.Allocator, client: *cql.Client) !void {
+    var result_arena = std.heap.ArenaAllocator.init(allocator);
+    defer result_arena.deinit();
+    const result_allocator = &result_arena.allocator;
+
+    // We want query diagonistics in case of failure.
+    var diags = cql.Client.QueryOptions.Diagnostics{};
+    var options = cql.Client.QueryOptions{
+        .diags = &diags,
+    };
+
+    var iter = client.cquery(
+        result_allocator,
+        options,
+        "SELECT ids, age, name FROM foobar.age_to_ids WHERE age in (?, ?)",
+        .{
+            .age1 = @as(u32, 120),
+            .age2 = @as(u32, 124),
+        },
+    ) catch |err| switch (err) {
+        error.QueryExecutionFailed => {
+            std.debug.panic("query execution failed, received cassandra error: {}\n", .{diags.message});
+        },
+        else => return err,
+    };
+
+    try iterate(allocator, &(iter.?));
+}
+
+fn doPrepare(allocator: *mem.Allocator, client: *cql.Client) !void {
+    // We want query diagonistics in case of failure.
+    var diags = cql.Client.QueryOptions.Diagnostics{};
+    var options = cql.Client.QueryOptions{
+        .diags = &diags,
+    };
+
+    const query_id = client.cprepare(
+        allocator,
+        options,
+        "SELECT ids, age, name FROM foobar.age_to_ids WHERE age in (?, ?)",
+    ) catch |err| switch (err) {
+        error.QueryPreparationFailed => {
+            std.debug.panic("query preparation failed, received cassandra error: {}\n", .{diags.message});
+        },
+        else => return err,
+    };
+
+    std.debug.warn("prepared query id is {x}\n", .{query_id});
+}
+
+fn doExecute(allocator: *mem.Allocator, client: *cql.Client, query_id_string: []const u8) !void {
+    var result_arena = std.heap.ArenaAllocator.init(allocator);
+    defer result_arena.deinit();
+    const result_allocator = &result_arena.allocator;
+
+    // Parse the query id into raw bytes
+    var query_id = try allocator.alloc(u8, query_id_string.len / 2);
+    try std.fmt.hexToBytes(query_id, query_id_string);
+
+    // We want query diagonistics in case of failure.
+    var diags = cql.Client.QueryOptions.Diagnostics{};
+    var options = cql.Client.QueryOptions{
+        .diags = &diags,
+    };
+
+    var iter = client.execute(
+        result_allocator,
+        options,
+        query_id,
+        .{
+            .age1 = @as(u32, 120),
+            .age2 = @as(u32, 124),
+        },
+    ) catch |err| switch (err) {
+        error.QueryExecutionFailed => {
+            std.debug.panic("query execution failed, received cassandra error: {}\n", .{diags.message});
+        },
+        else => return err,
+    };
+
+    try iterate(allocator, &(iter.?));
+}
+
+/// Iterate over every row in the iterator provided.
+fn iterate(allocator: *mem.Allocator, iter: *cql.Iterator) !void {
+    // Define a Row struct with a 1:1 mapping with the fields selected.
+    const Row = struct {
+        ids: []u8,
+        age: u32,
+        name: []const u8,
+    };
+    var row: Row = undefined;
+
+    while (true) {
+        // Use a single arena per iteration.
+        // This makes it easy to discard all memory allocated while scanning the current row.
+        var row_arena = std.heap.ArenaAllocator.init(allocator);
+        defer row_arena.deinit();
+
+        // We want iteration diagnostics in case of failures.
+        var iter_diags = cql.Iterator.ScanOptions.Diagnostics{};
+        var iter_options = cql.Iterator.ScanOptions{
+            .diags = &iter_diags,
+        };
+
+        const scanned = iter.scan(&row_arena.allocator, iter_options, &row) catch |err| switch (err) {
+            error.IncompatibleMetadata => blk: {
+                const im = iter_diags.incompatible_metadata;
+                const it = im.incompatible_types;
+                if (it.cql_type_name != null and it.native_type_name != null) {
+                    std.debug.panic("metadata incompatible. CQL type {} can't be scanned into native type {}\n", .{
+                        it.cql_type_name, it.native_type_name,
+                    });
+                } else {
+                    std.debug.panic("metadata incompatible. columns in result: {} fields in struct: {}\n", .{
+                        im.metadata_columns, im.struct_fields,
+                    });
+                }
+                break :blk false;
+            },
+            else => return err,
+        };
+        if (!scanned) {
+            break;
+        }
+
+        std.debug.warn("age: {} id: {x} name: {} {x}\n", .{ row.age, row.ids, row.name, row.name });
+    }
+}
+
+const usage =
+    \\usage: cli <command> [options]
+    \\
+    \\Commands:
+    \\
+    \\    query
+    \\    prepare
+    \\    execute [query id]
+    \\
+;
 
 pub fn main() anyerror!void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
     const allocator = &arena.allocator;
+
+    const stderr = std.io.getStdErr().outStream();
+
+    const args = try std.process.argsAlloc(allocator);
+    defer std.process.argsFree(allocator, args);
+
+    if (args.len <= 1) {
+        try stderr.writeAll("expected command argument\n\n");
+        try stderr.writeAll(usage);
+        std.process.exit(1);
+    }
 
     var address = net.Address.initIp4([_]u8{ 127, 0, 0, 1 }, 9042);
 
@@ -35,76 +188,16 @@ pub fn main() anyerror!void {
         else => return err,
     };
 
-    // Execute a query
-
-    var result_arena = std.heap.ArenaAllocator.init(allocator);
-    defer result_arena.deinit();
-    const result_allocator = &result_arena.allocator;
-
-    // We want query diagonistics in case of failure.
-    var diags = cql.Client.QueryOptions.Diagnostics{};
-    var options = cql.Client.QueryOptions{
-        .diags = &diags,
-    };
-
-    var iter = client.cquery(
-        result_allocator,
-        options,
-        "SELECT ids, age, name FROM foobar.age_to_ids WHERE age in (?, ?)",
-        .{
-            .age1 = @as(u32, 120),
-            .age2 = @as(u32, 124),
-        },
-    ) catch |err| switch (err) {
-        error.QueryExecutionFailed => {
-            std.debug.panic("query execution failed, received cassandra error: {}\n", .{diags.message});
-        },
-        else => return err,
-    };
-
-    // Iterate over every row in the result.
-    // Define a Row struct with a 1:1 mapping with the fields selected.
-
-    const Row = struct {
-        ids: []u8,
-        age: u32,
-        name: []const u8,
-    };
-    var row: Row = undefined;
-
-    while (true) {
-        // Use a single arena per iteration.
-        // This makes it easy to discard all memory allocated while scanning the current row.
-        var row_arena = std.heap.ArenaAllocator.init(allocator);
-        defer row_arena.deinit();
-
-        // We want iteration diagnostics in case of failures.
-        var iter_diags = cql.Iterator.ScanOptions.Diagnostics{};
-        var iter_options = cql.Iterator.ScanOptions{
-            .diags = &iter_diags,
-        };
-
-        const scanned = iter.?.scan(&row_arena.allocator, iter_options, &row) catch |err| switch (err) {
-            error.IncompatibleMetadata => blk: {
-                const im = iter_diags.incompatible_metadata;
-                const it = im.incompatible_types;
-                if (it.cql_type_name != null and it.native_type_name != null) {
-                    std.debug.panic("metadata incompatible. CQL type {} can't be scanned into native type {}\n", .{
-                        it.cql_type_name, it.native_type_name,
-                    });
-                } else {
-                    std.debug.panic("metadata incompatible. columns in result: {} fields in struct: {}\n", .{
-                        im.metadata_columns, im.struct_fields,
-                    });
-                }
-                break :blk false;
-            },
-            else => return err,
-        };
-        if (!scanned) {
-            break;
+    const cmd = args[1];
+    if (mem.eql(u8, cmd, "query")) {
+        return doQuery(allocator, &client);
+    } else if (mem.eql(u8, cmd, "prepare")) {
+        return doPrepare(allocator, &client);
+    } else if (mem.eql(u8, cmd, "execute")) {
+        if (args.len <= 2) {
+            try stderr.writeAll("expected query id argument\n\n");
+            std.process.exit(1);
         }
-
-        std.debug.warn("age: {} id: {x} name: {} {x}\n", .{ row.age, row.ids, row.name, row.name });
+        return doExecute(allocator, &client, args[2]);
     }
 }
