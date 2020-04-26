@@ -4,6 +4,7 @@ const meta = std.meta;
 const net = std.net;
 const ArrayList = std.ArrayList;
 
+pub const CompressionAlgorithm = @import("conn.zig").CompressionAlgorithm;
 pub const Client = @import("conn.zig").Client;
 pub const Iterator = @import("iterator.zig").Iterator;
 
