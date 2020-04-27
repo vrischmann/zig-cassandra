@@ -1,6 +1,8 @@
-const Builder = @import("std").build.Builder;
+const std = @import("std");
+const builtin = @import("builtin");
+const Builder = std.build.Builder;
 
-pub fn build(b: *Builder) void {
+pub fn build(b: *Builder) !void {
     // Standard target options allows the person running `zig build` to choose
     // what target to build for. Here we do not override the defaults, which
     // means any target is allowed, and the default is native. Other options
@@ -14,6 +16,9 @@ pub fn build(b: *Builder) void {
     // Build library
 
     const lib = b.addStaticLibrary("zig-cassandra", "src/lib.zig");
+    if (builtin.os.tag == .windows) {
+        try lib.addVcpkgPaths(.Static);
+    }
     lib.linkLibC();
     lib.linkSystemLibrary("lz4");
     lib.setTarget(target);
@@ -21,6 +26,9 @@ pub fn build(b: *Builder) void {
     lib.install();
 
     var main_tests = b.addTest("src/lib.zig");
+    if (builtin.os.tag == .windows) {
+        try main_tests.addVcpkgPaths(.Static);
+    }
     main_tests.linkLibC();
     main_tests.linkSystemLibrary("lz4");
     main_tests.setBuildMode(mode);
@@ -31,6 +39,9 @@ pub fn build(b: *Builder) void {
     // Build CLI
 
     const cli = b.addExecutable("cqlsh", "src/cli.zig");
+    if (builtin.os.tag == .windows) {
+        try cli.addVcpkgPaths(.Static);
+    }
     cli.linkLibC();
     cli.linkSystemLibrary("lz4");
     cli.setTarget(target);
