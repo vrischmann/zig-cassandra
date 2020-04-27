@@ -1,9 +1,26 @@
-Cassandra client in Zig
-=======================
+# Cassandra client in Zig
 
 Experiment with writing a Cassandra client in Zig.
 
 The goal is only to support CQL.
+
+# Building
+
+## Linux
+
+You need to have lz4 and its headers installed:
+
+* Fedora: install `lz4-devel`
+
+## Windows
+
+We're using [vcpkg](https://github.com/microsoft/vcpkg). Once you set it up correctly, install `lz4` like this:
+
+```
+$ vcpkg install --triplet x64-windows-static lz4
+```
+
+If you're building for another architecture reinstall the correct triplet.
 
 TODO
 ====
