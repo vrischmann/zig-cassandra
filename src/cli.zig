@@ -33,7 +33,7 @@ fn doQuery(allocator: *mem.Allocator, client: *cql.Client) !void {
     try iterate(allocator, &(iter.?));
 }
 
-fn doPrepare(allocator: *mem.Allocator, client: *cql.Client) !void {
+fn doPrepare(allocator: *mem.Allocator, client: *cql.Client) ![]const u8 {
     // We want query diagonistics in case of failure.
     var diags = cql.Client.QueryOptions.Diagnostics{};
     var options = cql.Client.QueryOptions{
@@ -44,6 +44,10 @@ fn doPrepare(allocator: *mem.Allocator, client: *cql.Client) !void {
         allocator,
         options,
         "SELECT ids, age, name FROM foobar.age_to_ids WHERE age in (?, ?)",
+        .{
+            .age1 = @as(u32, 0),
+            .age2 = @as(u32, 0),
+        },
     ) catch |err| switch (err) {
         error.QueryPreparationFailed => {
             std.debug.panic("query preparation failed, received cassandra error: {}\n", .{diags.message});
@@ -52,16 +56,14 @@ fn doPrepare(allocator: *mem.Allocator, client: *cql.Client) !void {
     };
 
     std.debug.warn("prepared query id is {x}\n", .{query_id});
+
+    return query_id;
 }
 
-fn doExecute(allocator: *mem.Allocator, client: *cql.Client, query_id_string: []const u8) !void {
+fn doExecute(allocator: *mem.Allocator, client: *cql.Client, query_id: []const u8) !void {
     var result_arena = std.heap.ArenaAllocator.init(allocator);
     defer result_arena.deinit();
     const result_allocator = &result_arena.allocator;
-
-    // Parse the query id into raw bytes
-    var query_id = try allocator.alloc(u8, query_id_string.len / 2);
-    try std.fmt.hexToBytes(query_id, query_id_string);
 
     // We want query diagonistics in case of failure.
     var diags = cql.Client.QueryOptions.Diagnostics{};
@@ -85,6 +87,11 @@ fn doExecute(allocator: *mem.Allocator, client: *cql.Client, query_id_string: []
     };
 
     try iterate(allocator, &(iter.?));
+}
+
+fn doPrepareThenExec(allocator: *mem.Allocator, client: *cql.Client) !void {
+    const query_id = try doPrepare(allocator, client);
+    try doExecute(allocator, client, query_id);
 }
 
 /// Iterate over every row in the iterator provided.
@@ -192,12 +199,8 @@ pub fn main() anyerror!void {
     if (mem.eql(u8, cmd, "query")) {
         return doQuery(allocator, &client);
     } else if (mem.eql(u8, cmd, "prepare")) {
-        return doPrepare(allocator, &client);
-    } else if (mem.eql(u8, cmd, "execute")) {
-        if (args.len <= 2) {
-            try stderr.writeAll("expected query id argument\n\n");
-            std.process.exit(1);
-        }
-        return doExecute(allocator, &client, args[2]);
+        _ = try doPrepare(allocator, &client);
+    } else if (mem.eql(u8, cmd, "prepare-then-exec")) {
+        return doPrepareThenExec(allocator, &client);
     }
 }

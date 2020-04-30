@@ -1,3 +1,4 @@
+const builtin = @import("builtin");
 const std = @import("std");
 const heap = std.heap;
 const mem = std.mem;
@@ -36,24 +37,31 @@ pub const Client = struct {
     const RawFrameReaderType = RawFrameReader(InStreamType);
     const RawFrameWriterType = RawFrameWriter(OutStreamType);
 
+    /// Contains the state that is negotiated with a node as part of the handshake.
+    const NegotiatedState = struct {
+        protocol_version: ProtocolVersion,
+        cql_version: CQLVersion,
+    };
+
+    /// Maps a prepared statement id to the types of the arguments needed when executing it.
+    const PreparedStatementsMetadata = std.HashMap([]const u8, []OptionID, std.hash_map.hashString, std.hash_map.eqlString);
+
     arena: std.heap.ArenaAllocator,
     options: InitOptions,
 
+    /// The socket to talk to the Cassandra node.
     socket: std.fs.File,
 
+    /// Helpers types needed to decode the CQL protocol.
     raw_frame_reader: RawFrameReaderType,
     raw_frame_writer: RawFrameWriterType,
     primitive_reader: PrimitiveReader,
     primitive_writer: PrimitiveWriter,
 
+    prepared_statements_metadata: PreparedStatementsMetadata,
+
     // Negotiated with the server
-
     negotiated_state: NegotiatedState,
-
-    const NegotiatedState = struct {
-        protocol_version: ProtocolVersion,
-        cql_version: CQLVersion,
-    };
 
     pub const InitOptions = struct {
         /// The address of a seed node.
@@ -95,6 +103,8 @@ pub const Client = struct {
         self.primitive_reader = PrimitiveReader.init();
         self.primitive_writer = PrimitiveWriter.init();
 
+        self.prepared_statements_metadata = PreparedStatementsMetadata.init(&self.arena.allocator);
+
         var dummy_diags = InitOptions.Diagnostics{};
         var diags = options.diags orelse &dummy_diags;
 
@@ -111,19 +121,40 @@ pub const Client = struct {
         self.consistency = consistency;
     }
 
-    pub fn cprepare(self: *Self, allocator: *mem.Allocator, options: QueryOptions, comptime query_string: []const u8) ![]const u8 {
+    pub fn cprepare(self: *Self, allocator: *mem.Allocator, options: QueryOptions, comptime query_string: []const u8, args: var) ![]const u8 {
         var dummy_diags = QueryOptions.Diagnostics{};
         var diags = options.diags orelse &dummy_diags;
+
+        // Check that the query makes sense for the arguments provided.
+
+        comptime {
+            const bind_markers = countBindMarkers(query_string);
+            const fields = @typeInfo(@TypeOf(args)).Struct.fields.len;
+
+            if (bind_markers != fields) {
+                @compileLog("number of arguments = ", fields);
+                @compileLog("number of bind markers = ", bind_markers);
+                @compileError("Query string has different number of bind markers than the number of arguments provided");
+            }
+        }
+
+        var option_ids = std.ArrayList(OptionID).init(allocator);
+        try computeValues(allocator, null, &option_ids, args);
 
         // TODO(vincent): need to store the metadata if present so that it can later be used with EXECUTE
         // while adding the flag Skip_Metadata.
         // See §4.1.4 in the protocol spec.
 
         var result = try self.writePrepare(allocator, diags, query_string);
-        return switch (result) {
-            .Prepared => |prepared| prepared.query_id,
-            else => error.InvalidServerResponse,
-        };
+        switch (result) {
+            .Prepared => |prepared| {
+                const id = prepared.query_id;
+
+                _ = try self.prepared_statements_metadata.put(id, option_ids.toOwnedSlice());
+                return id;
+            },
+            else => return error.InvalidServerResponse,
+        }
     }
 
     pub const QueryOptions = struct {
@@ -153,7 +184,7 @@ pub const Client = struct {
         var dummy_diags = QueryOptions.Diagnostics{};
         var diags = options.diags orelse &dummy_diags;
 
-        // Check that the query makes sens for the arguments provided.
+        // Check that the query makes sense for the arguments provided.
 
         comptime {
             const bind_markers = countBindMarkers(query_string);
@@ -167,7 +198,7 @@ pub const Client = struct {
         }
 
         var values = std.ArrayList(Value).init(allocator);
-        try computeValues(&values, allocator, args);
+        try computeValues(allocator, &values, null, args);
 
         // TODO(vincent): handle named values
         // TODO(vincent): handle skip_metadata (see §4.1.4 in the spec
@@ -195,8 +226,24 @@ pub const Client = struct {
         var dummy_diags = QueryOptions.Diagnostics{};
         var diags = options.diags orelse &dummy_diags;
 
+        // If the metadata doesn't exist we can't proceed.
+        const prepared_option_ids = self.prepared_statements_metadata.get(query_id);
+        if (prepared_option_ids == null) {
+            return error.InvalidPreparedQueryID;
+        }
+
         var values = std.ArrayList(Value).init(allocator);
-        try computeValues(&values, allocator, args);
+        var option_ids = std.ArrayList(OptionID).init(allocator);
+        defer option_ids.deinit();
+        try computeValues(allocator, &values, &option_ids, args);
+
+        // Now that we have both prepared and compute option IDs, check that they're compatible
+        if (!areOptionIDsEqual(prepared_option_ids.?.value, option_ids.span())) {
+            // TODO(vincent): do we want diags here ?
+            return error.InvalidPreparedStatementExecuteArgs;
+        }
+
+        // Check that the values provided are compatible with the prepared statement
 
         // TODO(vincent): handle named values
         // TODO(vincent): handle skip_metadata (see §4.1.4 in the spec
@@ -220,15 +267,23 @@ pub const Client = struct {
         };
     }
 
-    /// Generates a list of Value compatible with the types in args.
-    /// This is done at comptime.
-    fn computeValues(values: *std.ArrayList(Value), allocator: *mem.Allocator, args: var) !void {
+    /// Compute a list of Value and OptionID for each field in the tuple or struct args.
+    fn computeValues(allocator: *mem.Allocator, values: ?*std.ArrayList(Value), options: ?*std.ArrayList(OptionID), args: var) !void {
         if (@typeInfo(@TypeOf(args)) != .Struct) {
             @compileError("Expected tuple or struct argument, found " ++ @typeName(args) ++ " of type " ++ @tagName(@typeInfo(args)));
         }
 
+        var dummy_vals = std.ArrayList(Value).init(allocator);
+        defer dummy_vals.deinit();
+        var vals = values orelse &dummy_vals;
+
+        var dummy_opts = std.ArrayList(OptionID).init(allocator);
+        defer dummy_opts.deinit();
+        var opts = options orelse &dummy_opts;
+
         inline for (@typeInfo(@TypeOf(args)).Struct.fields) |struct_field, i| {
-            const field_type_info = @typeInfo(struct_field.field_type);
+            const Type = struct_field.field_type;
+            const field_type_info = @typeInfo(Type);
             const field_name = struct_field.name;
 
             const arg = @field(args, field_name);
@@ -236,6 +291,14 @@ pub const Client = struct {
             var value: Value = undefined;
             switch (field_type_info) {
                 .Int => |info| {
+                    switch (Type) {
+                        i8, u8 => try opts.append(.Tinyint),
+                        i16, u16 => try opts.append(.Smallint),
+                        i32, u32 => try opts.append(.Int),
+                        i64, u64 => try opts.append(.Bigint),
+                        else => @compileError("field type " ++ @typeName(Type) ++ " is not compatible with CQL"),
+                    }
+
                     const buf = try allocator.alloc(u8, info.bits / 8);
 
                     mem.writeIntSliceBig(struct_field.field_type, buf, arg);
@@ -244,8 +307,12 @@ pub const Client = struct {
                 else => @compileError("field type " ++ @typeName(Type) ++ " not handled yet"),
             }
 
-            try values.append(value);
+            try vals.append(value);
         }
+    }
+
+    fn areOptionIDsEqual(prepared: []OptionID, computed: []OptionID) bool {
+        return mem.eql(OptionID, prepared, computed);
     }
 
     fn handshake(self: *Self, diags: *InitOptions.Diagnostics) !void {
