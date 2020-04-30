@@ -121,6 +121,27 @@ pub const Client = struct {
         self.consistency = consistency;
     }
 
+    pub const QueryOptions = struct {
+        /// If this is provided, cquery will populate some information about failures.
+        /// This will provide more detail than an error can.
+        diags: ?*Diagnostics = null,
+
+        pub const Diagnostics = struct {
+            /// The error message returned by the Cassandra node.
+            message: []const u8 = "",
+
+            unavailable_replicas: ?UnavailableReplicasError = null,
+            function_failure: ?FunctionFailureError = null,
+            write_timeout: ?WriteError.Timeout = null,
+            read_timeout: ?ReadError.Timeout = null,
+            write_failure: ?WriteError.Failure = null,
+            read_failure: ?ReadError.Failure = null,
+            cas_write_unknown: ?WriteError.CASUnknown = null,
+            already_exists: ?AlreadyExistsError = null,
+            unprepared: ?UnpreparedError = null,
+        };
+    };
+
     pub fn cprepare(self: *Self, allocator: *mem.Allocator, options: QueryOptions, comptime query_string: []const u8, args: var) ![]const u8 {
         var dummy_diags = QueryOptions.Diagnostics{};
         var diags = options.diags orelse &dummy_diags;
@@ -156,27 +177,6 @@ pub const Client = struct {
             else => return error.InvalidServerResponse,
         }
     }
-
-    pub const QueryOptions = struct {
-        /// If this is provided, cquery will populate some information about failures.
-        /// This will provide more detail than an error can.
-        diags: ?*Diagnostics = null,
-
-        pub const Diagnostics = struct {
-            /// The error message returned by the Cassandra node.
-            message: []const u8 = "",
-
-            unavailable_replicas: ?UnavailableReplicasError = null,
-            function_failure: ?FunctionFailureError = null,
-            write_timeout: ?WriteError.Timeout = null,
-            read_timeout: ?ReadError.Timeout = null,
-            write_failure: ?WriteError.Failure = null,
-            read_failure: ?ReadError.Failure = null,
-            cas_write_unknown: ?WriteError.CASUnknown = null,
-            already_exists: ?AlreadyExistsError = null,
-            unprepared: ?UnpreparedError = null,
-        };
-    };
 
     // TODO(vincent): maybe add not comptime equivalent ?
 

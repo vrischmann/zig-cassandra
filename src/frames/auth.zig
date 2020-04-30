@@ -80,7 +80,7 @@ test "authenticate frame" {
 
     const frame = try AuthenticateFrame.read(&arena.allocator, &pr);
 
-    testing.expectEqualString("org.apache.cassandra.auth.PasswordAuthenticator", frame.authenticator);
+    testing.expectEqualStrings("org.apache.cassandra.auth.PasswordAuthenticator", frame.authenticator);
 }
 
 test "auth challenge frame" {

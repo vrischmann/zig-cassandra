@@ -494,8 +494,8 @@ test "iterator scan: incompatible metadata" {
         testing.expectError(error.IncompatibleMetadata, err);
         testing.expectEqual(@as(usize, 0), diags.incompatible_metadata.metadata_columns);
         testing.expectEqual(@as(usize, 0), diags.incompatible_metadata.struct_fields);
-        testing.expectEqualString("Int", diags.incompatible_metadata.incompatible_types.cql_type_name.?);
-        testing.expectEqualString("u8", diags.incompatible_metadata.incompatible_types.native_type_name.?);
+        testing.expectEqualStrings("Int", diags.incompatible_metadata.incompatible_types.cql_type_name.?);
+        testing.expectEqualStrings("u8", diags.incompatible_metadata.incompatible_types.native_type_name.?);
     }
 }
 
@@ -831,7 +831,7 @@ test "iterator scan: blobs, uuids, timeuuids" {
 
     try testIteratorScan(&arena.allocator, column_specs, test_data, null, &row);
 
-    testing.expectEqualString("Vincent", row.blob);
+    testing.expectEqualStrings("Vincent", row.blob);
     testing.expectEqualSlices(u8, "\x02\x9a\x93\xa9\xc3\x27\x4c\x79\xbe\x32\x71\x8e\x22\xb5\x02\x4c", &row.uuid);
     testing.expectEqualSlices(u8, "\xe9\x13\x93\x2e\x7a\xb7\x11\xea\xbf\x1b\x10\xc3\x7b\x6e\x96\xcc", &row.tuuid);
 }
@@ -857,8 +857,8 @@ test "iterator scan: ascii/varchar" {
 
     try testIteratorScan(&arena.allocator, column_specs, test_data, null, &row);
 
-    testing.expectEqualString("Ascii vincent", row.ascii);
-    testing.expectEqualString("Varchar vincent", row.varchar);
+    testing.expectEqualStrings("Ascii vincent", row.ascii);
+    testing.expectEqualStrings("Varchar vincent", row.varchar);
 }
 
 test "iterator scan: set/list" {
@@ -964,7 +964,7 @@ test "iterator scan: set of tinyint into RawBytes" {
 
     testing.expectEqual(@as(u32, 0x10111213), row.age);
     testing.expectEqualSlices(u8, test_data[2], row.set.data);
-    testing.expectEqualString("foobar", row.name);
+    testing.expectEqualStrings("foobar", row.name);
     testing.expectEqual(@as(usize, 2), row.list_timestamp.len);
     testing.expectEqual(@as(u64, 0xbcbcbcbcbcbcbcbc), row.list_timestamp[0]);
     testing.expectEqual(@as(u64, 0xbebebebebebebebe), row.list_timestamp[1]);

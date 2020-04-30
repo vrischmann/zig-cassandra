@@ -41,9 +41,9 @@ test "register frame" {
     const frame = try RegisterFrame.read(&arena.allocator, &pr);
 
     testing.expectEqual(@as(usize, 3), frame.event_types.len);
-    testing.expectEqualString("TOPOLOGY_CHANGE", frame.event_types[0]);
-    testing.expectEqualString("STATUS_CHANGE", frame.event_types[1]);
-    testing.expectEqualString("SCHEMA_CHANGE", frame.event_types[2]);
+    testing.expectEqualStrings("TOPOLOGY_CHANGE", frame.event_types[0]);
+    testing.expectEqualStrings("STATUS_CHANGE", frame.event_types[1]);
+    testing.expectEqualStrings("SCHEMA_CHANGE", frame.event_types[2]);
 
     // write
 

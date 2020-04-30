@@ -232,20 +232,20 @@ test "primitive reader: read strings and bytes" {
     {
         // short string
         pr.reset("\x00\x06foobar");
-        testing.expectEqualString("foobar", try pr.readString(&arena.allocator));
+        testing.expectEqualStrings("foobar", try pr.readString(&arena.allocator));
 
         // long string
         pr.reset("\x00\x00\x00\x06foobar");
-        testing.expectEqualString("foobar", try pr.readLongString(&arena.allocator));
+        testing.expectEqualStrings("foobar", try pr.readLongString(&arena.allocator));
     }
 
     {
         // int32 + bytes
         pr.reset("\x00\x00\x00\x0A123456789A");
-        testing.expectEqualString("123456789A", (try pr.readBytes(&arena.allocator)).?);
+        testing.expectEqualStrings("123456789A", (try pr.readBytes(&arena.allocator)).?);
 
         pr.reset("\x00\x00\x00\x00");
-        testing.expectEqualString("", (try pr.readBytes(&arena.allocator)).?);
+        testing.expectEqualStrings("", (try pr.readBytes(&arena.allocator)).?);
 
         pr.reset("\xff\xff\xff\xff");
         testing.expect((try pr.readBytes(&arena.allocator)) == null);
@@ -254,10 +254,10 @@ test "primitive reader: read strings and bytes" {
     {
         // int16 + bytes
         pr.reset("\x00\x0A123456789A");
-        testing.expectEqualString("123456789A", (try pr.readShortBytes(&arena.allocator)).?);
+        testing.expectEqualStrings("123456789A", (try pr.readShortBytes(&arena.allocator)).?);
 
         pr.reset("\x00\x00");
-        testing.expectEqualString("", (try pr.readShortBytes(&arena.allocator)).?);
+        testing.expectEqualStrings("", (try pr.readShortBytes(&arena.allocator)).?);
 
         pr.reset("\xff\xff");
         testing.expect((try pr.readShortBytes(&arena.allocator)) == null);
@@ -289,10 +289,10 @@ test "primitive reader: read string list" {
     testing.expectEqual(@as(usize, 2), result.len);
 
     var tmp = result[0];
-    testing.expectEqualString("foo", tmp);
+    testing.expectEqualStrings("foo", tmp);
 
     tmp = result[1];
-    testing.expectEqualString("bar", tmp);
+    testing.expectEqualStrings("bar", tmp);
 }
 
 test "primitive reader: read value" {
@@ -306,7 +306,7 @@ test "primitive reader: read value" {
 
     var value = try pr.readValue(&arena.allocator);
     testing.expect(value == .Set);
-    testing.expectEqualString("ab", value.Set);
+    testing.expectEqualStrings("ab", value.Set);
 
     // Null value
 
@@ -408,7 +408,7 @@ test "primitive reader: read stringmap" {
     var it = result.iterator();
     while (it.next()) |entry| {
         testing.expect(std.mem.eql(u8, "foo", entry.key) or std.mem.eql(u8, "bar", entry.key));
-        testing.expectEqualString("baz", entry.value);
+        testing.expectEqualStrings("baz", entry.value);
     }
 }
 
@@ -426,6 +426,6 @@ test "primitive reader: read string multimap" {
     testing.expectEqual(@as(usize, 1), result.count());
 
     const slice = result.get("foo").?;
-    testing.expectEqualString("bar", slice[0]);
-    testing.expectEqualString("baz", slice[1]);
+    testing.expectEqualStrings("bar", slice[0]);
+    testing.expectEqualStrings("baz", slice[1]);
 }

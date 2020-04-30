@@ -310,7 +310,7 @@ test "error frame: invalid query, no keyspace specified" {
     const frame = try ErrorFrame.read(&arena.allocator, &pr);
 
     testing.expectEqual(ErrorCode.InvalidQuery, frame.error_code);
-    testing.expectEqualString("No keyspace has been specified. USE a keyspace, or explicitly specify keyspace.tablename", frame.message);
+    testing.expectEqualStrings("No keyspace has been specified. USE a keyspace, or explicitly specify keyspace.tablename", frame.message);
 }
 
 test "error frame: already exists" {
@@ -328,10 +328,10 @@ test "error frame: already exists" {
     const frame = try ErrorFrame.read(&arena.allocator, &pr);
 
     testing.expectEqual(ErrorCode.AlreadyExists, frame.error_code);
-    testing.expectEqualString("Cannot add already existing table \"hello\" to keyspace \"foobar\"", frame.message);
+    testing.expectEqualStrings("Cannot add already existing table \"hello\" to keyspace \"foobar\"", frame.message);
     const already_exists_error = frame.already_exists.?;
-    testing.expectEqualString("foobar", already_exists_error.keyspace);
-    testing.expectEqualString("hello", already_exists_error.table);
+    testing.expectEqualStrings("foobar", already_exists_error.keyspace);
+    testing.expectEqualStrings("hello", already_exists_error.table);
 }
 
 test "error frame: syntax error" {
@@ -349,5 +349,5 @@ test "error frame: syntax error" {
     const frame = try ErrorFrame.read(&arena.allocator, &pr);
 
     testing.expectEqual(ErrorCode.SyntaxError, frame.error_code);
-    testing.expectEqualString("line 2:0 mismatched input ';' expecting K_FROM (select*[;])", frame.message);
+    testing.expectEqualStrings("line 2:0 mismatched input ';' expecting K_FROM (select*[;])", frame.message);
 }

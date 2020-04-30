@@ -229,7 +229,7 @@ test "batch frame: query type string" {
     testing.expectEqual(@as(usize, 3), frame.queries.len);
     for (frame.queries) |query| {
         const exp_query = "INSERT INTO foobar.user(id, name) values(uuid(), 'vincent')";
-        testing.expectEqualString(exp_query, query.query_string.?);
+        testing.expectEqualStrings(exp_query, query.query_string.?);
         testing.expect(query.query_id == null);
         testing.expect(query.values == .Normal);
         testing.expectEqual(@as(usize, 0), query.values.Normal.len);
@@ -284,7 +284,7 @@ test "batch frame: query type prepared" {
         testing.expectEqualSlices(u8, expUUIDs[i], value1.Set);
 
         const value2 = query.values.Normal[1];
-        testing.expectEqualString("Vincent", value2.Set);
+        testing.expectEqualStrings("Vincent", value2.Set);
 
         i += 1;
     }

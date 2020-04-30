@@ -127,8 +127,8 @@ test "event frame: schema change/keyspace" {
     testing.expectEqual(SchemaChangeTarget.KEYSPACE, schema_change.target);
 
     const options = schema_change.options;
-    testing.expectEqualString("barbaz", options.keyspace);
-    testing.expectEqualString("", options.object_name);
+    testing.expectEqualStrings("barbaz", options.keyspace);
+    testing.expectEqualStrings("", options.object_name);
     testing.expect(options.arguments == null);
 }
 
@@ -153,8 +153,8 @@ test "event frame: schema change/table" {
     testing.expectEqual(SchemaChangeTarget.TABLE, schema_change.target);
 
     const options = schema_change.options;
-    testing.expectEqualString("foobar", options.keyspace);
-    testing.expectEqualString("salut", options.object_name);
+    testing.expectEqualStrings("foobar", options.keyspace);
+    testing.expectEqualStrings("salut", options.object_name);
     testing.expect(options.arguments == null);
 }
 
@@ -179,9 +179,9 @@ test "event frame: schema change/function" {
     testing.expectEqual(SchemaChangeTarget.FUNCTION, schema_change.target);
 
     const options = schema_change.options;
-    testing.expectEqualString("foobar", options.keyspace);
-    testing.expectEqualString("some_function", options.object_name);
+    testing.expectEqualStrings("foobar", options.keyspace);
+    testing.expectEqualStrings("some_function", options.object_name);
     const arguments = options.arguments.?;
     testing.expectEqual(@as(usize, 1), arguments.len);
-    testing.expectEqualString("int", arguments[0]);
+    testing.expectEqualStrings("int", arguments[0]);
 }

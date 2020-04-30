@@ -62,5 +62,5 @@ test "lz4: compress and decompress" {
     const decompressed = try decompress(testing.allocator, compressed);
     defer testing.allocator.free(decompressed);
 
-    testing.expectEqualString(exp, decompressed);
+    testing.expectEqualStrings(exp, decompressed);
 }

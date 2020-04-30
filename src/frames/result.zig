@@ -175,18 +175,18 @@ test "result frame: rows" {
     const metadata = frame.result.Rows.metadata;
     testing.expect(metadata.paging_state == null);
     testing.expect(metadata.new_metadata_id == null);
-    testing.expectEqualString("foobar", metadata.global_table_spec.?.keyspace);
-    testing.expectEqualString("user", metadata.global_table_spec.?.table);
+    testing.expectEqualStrings("foobar", metadata.global_table_spec.?.keyspace);
+    testing.expectEqualStrings("user", metadata.global_table_spec.?.table);
     testing.expectEqual(@as(usize, 3), metadata.column_specs.len);
 
     const col1 = metadata.column_specs[0];
-    testing.expectEqualString("id", col1.name);
+    testing.expectEqualStrings("id", col1.name);
     testing.expectEqual(OptionID.UUID, col1.option);
     const col2 = metadata.column_specs[1];
-    testing.expectEqualString("age", col2.name);
+    testing.expectEqualStrings("age", col2.name);
     testing.expectEqual(OptionID.Tinyint, col2.option);
     const col3 = metadata.column_specs[2];
-    testing.expectEqualString("name", col3.name);
+    testing.expectEqualStrings("name", col3.name);
     testing.expectEqual(OptionID.Varchar, col3.option);
 
     // check data
@@ -231,18 +231,18 @@ test "result frame: rows, don't skip metadata" {
     const metadata = frame.result.Rows.metadata;
     testing.expect(metadata.paging_state == null);
     testing.expect(metadata.new_metadata_id == null);
-    testing.expectEqualString("foobar", metadata.global_table_spec.?.keyspace);
-    testing.expectEqualString("user", metadata.global_table_spec.?.table);
+    testing.expectEqualStrings("foobar", metadata.global_table_spec.?.keyspace);
+    testing.expectEqualStrings("user", metadata.global_table_spec.?.table);
     testing.expectEqual(@as(usize, 3), metadata.column_specs.len);
 
     const col1 = metadata.column_specs[0];
-    testing.expectEqualString("id", col1.name);
+    testing.expectEqualStrings("id", col1.name);
     testing.expectEqual(OptionID.UUID, col1.option);
     const col2 = metadata.column_specs[1];
-    testing.expectEqualString("age", col2.name);
+    testing.expectEqualStrings("age", col2.name);
     testing.expectEqual(OptionID.Custom, col2.option);
     const col3 = metadata.column_specs[2];
-    testing.expectEqualString("name", col3.name);
+    testing.expectEqualStrings("name", col3.name);
     testing.expectEqual(OptionID.Varchar, col3.option);
 
     // check data
@@ -277,15 +277,15 @@ test "result frame: rows, list of uuid" {
     const metadata = frame.result.Rows.metadata;
     testing.expect(metadata.paging_state == null);
     testing.expect(metadata.new_metadata_id == null);
-    testing.expectEqualString("foobar", metadata.global_table_spec.?.keyspace);
-    testing.expectEqualString("age_to_ids", metadata.global_table_spec.?.table);
+    testing.expectEqualStrings("foobar", metadata.global_table_spec.?.keyspace);
+    testing.expectEqualStrings("age_to_ids", metadata.global_table_spec.?.table);
     testing.expectEqual(@as(usize, 2), metadata.column_specs.len);
 
     const col1 = metadata.column_specs[0];
-    testing.expectEqualString("age", col1.name);
+    testing.expectEqualStrings("age", col1.name);
     testing.expectEqual(OptionID.Int, col1.option);
     const col2 = metadata.column_specs[1];
-    testing.expectEqualString("ids", col2.name);
+    testing.expectEqualStrings("ids", col2.name);
     testing.expectEqual(OptionID.List, col2.option);
 
     // check data
@@ -313,7 +313,7 @@ test "result frame: set keyspace" {
     const frame = try ResultFrame.read(&arena.allocator, raw_frame.header.version, &pr);
 
     testing.expect(frame.result == .SetKeyspace);
-    testing.expectEqualString("foobar", frame.result.SetKeyspace);
+    testing.expectEqualStrings("foobar", frame.result.SetKeyspace);
 }
 
 test "result frame: prepared insert" {
@@ -336,20 +336,20 @@ test "result frame: prepared insert" {
 
     {
         const metadata = frame.result.Prepared.metadata;
-        testing.expectEqualString("foobar", metadata.global_table_spec.?.keyspace);
-        testing.expectEqualString("user", metadata.global_table_spec.?.table);
+        testing.expectEqualStrings("foobar", metadata.global_table_spec.?.keyspace);
+        testing.expectEqualStrings("user", metadata.global_table_spec.?.table);
         testing.expectEqual(@as(usize, 1), metadata.pk_indexes.len);
         testing.expectEqual(@as(u16, 0), metadata.pk_indexes[0]);
         testing.expectEqual(@as(usize, 3), metadata.column_specs.len);
 
         const col1 = metadata.column_specs[0];
-        testing.expectEqualString("id", col1.name);
+        testing.expectEqualStrings("id", col1.name);
         testing.expectEqual(OptionID.UUID, col1.option);
         const col2 = metadata.column_specs[1];
-        testing.expectEqualString("age", col2.name);
+        testing.expectEqualStrings("age", col2.name);
         testing.expectEqual(OptionID.Tinyint, col2.option);
         const col3 = metadata.column_specs[2];
-        testing.expectEqualString("name", col3.name);
+        testing.expectEqualStrings("name", col3.name);
         testing.expectEqual(OptionID.Varchar, col3.option);
     }
 
@@ -382,14 +382,14 @@ test "result frame: prepared select" {
 
     {
         const metadata = frame.result.Prepared.metadata;
-        testing.expectEqualString("foobar", metadata.global_table_spec.?.keyspace);
-        testing.expectEqualString("user", metadata.global_table_spec.?.table);
+        testing.expectEqualStrings("foobar", metadata.global_table_spec.?.keyspace);
+        testing.expectEqualStrings("user", metadata.global_table_spec.?.table);
         testing.expectEqual(@as(usize, 1), metadata.pk_indexes.len);
         testing.expectEqual(@as(u16, 0), metadata.pk_indexes[0]);
         testing.expectEqual(@as(usize, 1), metadata.column_specs.len);
 
         const col1 = metadata.column_specs[0];
-        testing.expectEqualString("id", col1.name);
+        testing.expectEqualStrings("id", col1.name);
         testing.expectEqual(OptionID.UUID, col1.option);
     }
 
@@ -397,18 +397,18 @@ test "result frame: prepared select" {
 
     {
         const metadata = frame.result.Prepared.rows_metadata;
-        testing.expectEqualString("foobar", metadata.global_table_spec.?.keyspace);
-        testing.expectEqualString("user", metadata.global_table_spec.?.table);
+        testing.expectEqualStrings("foobar", metadata.global_table_spec.?.keyspace);
+        testing.expectEqualStrings("user", metadata.global_table_spec.?.table);
         testing.expectEqual(@as(usize, 3), metadata.column_specs.len);
 
         const col1 = metadata.column_specs[0];
-        testing.expectEqualString("id", col1.name);
+        testing.expectEqualStrings("id", col1.name);
         testing.expectEqual(OptionID.UUID, col1.option);
         const col2 = metadata.column_specs[1];
-        testing.expectEqualString("age", col2.name);
+        testing.expectEqualStrings("age", col2.name);
         testing.expectEqual(OptionID.Tinyint, col2.option);
         const col3 = metadata.column_specs[2];
-        testing.expectEqualString("name", col3.name);
+        testing.expectEqualStrings("name", col3.name);
         testing.expectEqual(OptionID.Varchar, col3.option);
     }
 }

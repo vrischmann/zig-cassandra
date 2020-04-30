@@ -67,7 +67,7 @@ test "prepare frame" {
 
     const frame = try PrepareFrame.read(&arena.allocator, raw_frame.header.version, &pr);
 
-    testing.expectEqualString("SELECT age, name from foobar.user where id = ?", frame.query);
+    testing.expectEqualStrings("SELECT age, name from foobar.user where id = ?", frame.query);
     testing.expect(frame.keyspace == null);
 
     // write

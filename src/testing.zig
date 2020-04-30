@@ -6,19 +6,13 @@ pub const expect = std.testing.expect;
 pub const expectError = std.testing.expectError;
 pub const expectEqual = std.testing.expectEqual;
 pub const expectEqualSlices = std.testing.expectEqualSlices;
+pub const expectEqualStrings = std.testing.expectEqualStrings;
 
 const PrimitiveWriter = @import("primitive/writer.zig").PrimitiveWriter;
 const FrameHeader = @import("frame.zig").FrameHeader;
 const RawFrame = @import("frame.zig").RawFrame;
 const RawFrameReader = @import("frame.zig").RawFrameReader;
 const RawFrameWriter = @import("frame.zig").RawFrameWriter;
-
-// Temporary function while waiting for Zig to have something like this.
-pub fn expectEqualString(a: []const u8, b: []const u8) void {
-    if (!std.mem.eql(u8, a, b)) {
-        std.debug.panic("expected string \"{}\", got \"{}\"", .{ a, b });
-    }
-}
 
 pub fn expectInDelta(a: var, b: var, delta: @TypeOf(a)) void {
     const dt = a - b;

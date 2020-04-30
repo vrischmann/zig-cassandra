@@ -47,7 +47,7 @@ test "query frame: no values, no paging state" {
 
     const frame = try QueryFrame.read(&arena.allocator, raw_frame.header.version, &pr);
 
-    testing.expectEqualString("SELECT * FROM foobar.user ;", frame.query);
+    testing.expectEqualStrings("SELECT * FROM foobar.user ;", frame.query);
     testing.expectEqual(Consistency.One, frame.query_parameters.consistency_level);
     testing.expect(frame.query_parameters.values == null);
     testing.expectEqual(@as(u32, 100), frame.query_parameters.page_size.?);
