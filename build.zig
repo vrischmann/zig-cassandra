@@ -13,14 +13,18 @@ pub fn build(b: *Builder) !void {
     // between Debug, ReleaseSafe, ReleaseFast, and ReleaseSmall.
     const mode = b.standardReleaseOptions();
 
-    // Verify target, we only support x86_64-linux for now
+    // Verify target
+
     const cpu_arch = target.cpu_arch orelse builtin.cpu.arch;
-    if (cpu_arch != .x86_64) {
-        std.debug.panic("cpu architecture {} is not supported yet\n", .{cpu_arch});
-    }
     const os_tag = target.os_tag orelse builtin.os.tag;
-    if (os_tag != .linux) {
-        std.debug.panic("os tag {} is not supported yet\n", .{os_tag});
+
+    switch (cpu_arch) {
+        .i386, .x86_64 => {},
+        else => |arch| std.debug.panic("cpu architecture {} is not supported yet\n", .{arch}),
+    }
+    switch (os_tag) {
+        .linux, .windows => {},
+        else => |tag| std.debug.panic("os tag {} is not supported yet\n", .{tag}),
     }
 
     // Build library
@@ -28,6 +32,7 @@ pub fn build(b: *Builder) !void {
     const lib = b.addStaticLibrary("zig-cassandra", "src/lib.zig");
     lib.linkLibC();
     lib.linkSystemLibrary("lz4");
+    if (os_tag == .windows) try lib.addVcpkgPaths(.Static);
     lib.setTarget(target);
     lib.setBuildMode(mode);
     lib.install();
@@ -35,6 +40,7 @@ pub fn build(b: *Builder) !void {
     var main_tests = b.addTest("src/lib.zig");
     main_tests.linkLibC();
     main_tests.linkSystemLibrary("lz4");
+    if (os_tag == .windows) try main_tests.addVcpkgPaths(.Static);
     main_tests.setBuildMode(mode);
 
     const test_step = b.step("test", "Run library tests");
@@ -45,6 +51,7 @@ pub fn build(b: *Builder) !void {
     const cli = b.addExecutable("cqlsh", "src/cli.zig");
     cli.linkLibC();
     cli.linkSystemLibrary("lz4");
+    if (os_tag == .windows) try cli.addVcpkgPaths(.Static);
     cli.setTarget(target);
     cli.setBuildMode(mode);
     cli.install();
