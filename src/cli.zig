@@ -107,6 +107,20 @@ fn iterate(allocator: *mem.Allocator, iter: *cql.Iterator) !void {
     };
     var row: Row = undefined;
 
+    // Just for formatting here
+    const IDs = struct {
+        slice: []u8,
+
+        pub fn format(self: @This(), comptime fmt: []const u8, options: std.fmt.FormatOptions, out_stream: var) !void {
+            try out_stream.writeByte('[');
+            for (self.slice) |item, i| {
+                if (i > 0) try out_stream.writeAll(", ");
+                try std.fmt.format(out_stream, "{d}", .{item});
+            }
+            try out_stream.writeByte(']');
+        }
+    };
+
     while (true) {
         // Use a single arena per iteration.
         // This makes it easy to discard all memory allocated while scanning the current row.
@@ -140,7 +154,9 @@ fn iterate(allocator: *mem.Allocator, iter: *cql.Iterator) !void {
             break;
         }
 
-        std.debug.warn("age: {} id: {x} name: {} {x}\n", .{ row.age, row.ids, row.name, row.name });
+        const ids = IDs{ .slice = row.ids };
+
+        std.debug.warn("age: {} id: {} name: {} {x}\n", .{ row.age, ids, row.name, row.name });
     }
 }
 
