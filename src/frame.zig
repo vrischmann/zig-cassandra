@@ -40,25 +40,22 @@ pub fn RawFrameReader(comptime InStreamType: type) type {
     return struct {
         const Self = @This();
 
-        allocator: *mem.Allocator,
-
         in_stream: InStreamType,
         deserializer: io.Deserializer(.Big, io.Packing.Bit, InStreamType),
 
-        pub fn init(allocator: *mem.Allocator, in: InStreamType) Self {
+        pub fn init(in: InStreamType) Self {
             return Self{
-                .allocator = allocator,
                 .in_stream = in,
                 .deserializer = io.deserializer(std.builtin.Endian.Big, io.Packing.Bit, in),
             };
         }
 
-        pub fn read(self: *Self) !RawFrame {
+        pub fn read(self: *Self, allocator: *mem.Allocator) !RawFrame {
             const header = try self.deserializer.deserialize(FrameHeader);
 
             const len = @as(usize, header.body_len);
 
-            const body = try self.allocator.alloc(u8, len);
+            const body = try allocator.alloc(u8, len);
             const n_read = try self.in_stream.readAll(body);
             if (n_read != len) {
                 return error.UnexpectedEOF;
@@ -146,6 +143,14 @@ pub const ColumnSpec = struct {
     map_value_type_option: ?OptionID,
     custom_class_name: ?[]const u8,
 
+    pub fn deinit(self: Self, allocator: *mem.Allocator) void {
+        if (self.keyspace) |str| allocator.free(str);
+        if (self.table) |str| allocator.free(str);
+        allocator.free(self.name);
+
+        if (self.custom_class_name) |str| allocator.free(str);
+    }
+
     pub fn read(allocator: *mem.Allocator, pr: *PrimitiveReader, has_global_table_spec: bool) !Self {
         var spec = Self{
             .keyspace = null,
@@ -198,6 +203,19 @@ pub const RowsMetadata = struct {
     const FlagHasMorePages = 0x0002;
     const FlagNoMetadata = 0x0004;
     const FlagMetadataChanged = 0x0008;
+
+    pub fn deinit(self: *Self, allocator: *mem.Allocator) void {
+        if (self.paging_state) |ps| allocator.free(ps);
+        if (self.new_metadata_id) |id| allocator.free(id);
+        if (self.global_table_spec) |spec| {
+            allocator.free(spec.keyspace);
+            allocator.free(spec.table);
+        }
+        for (self.column_specs) |spec| {
+            spec.deinit(allocator);
+        }
+        allocator.free(self.column_specs);
+    }
 
     pub fn read(allocator: *mem.Allocator, pr: *PrimitiveReader) !Self {
         var metadata = Self{
@@ -262,6 +280,18 @@ pub const PreparedMetadata = struct {
     column_specs: []const ColumnSpec,
 
     const FlagGlobalTablesSpec = 0x0001;
+
+    pub fn deinit(self: *const Self, allocator: *mem.Allocator) void {
+        if (self.global_table_spec) |spec| {
+            allocator.free(spec.keyspace);
+            allocator.free(spec.table);
+        }
+        allocator.free(self.pk_indexes);
+        for (self.column_specs) |spec| {
+            spec.deinit(allocator);
+        }
+        allocator.free(self.column_specs);
+    }
 
     pub fn read(allocator: *mem.Allocator, pr: *PrimitiveReader) !Self {
         var metadata = Self{
@@ -442,6 +472,74 @@ test "frame header: read and write" {
     _ = try serializer.serialize(header);
 
     testing.expectEqualSlices(u8, exp, new_fbs.getWritten());
+}
+
+test "column spec: deinit" {
+    const allocator = testing.allocator;
+
+    const column_spec = ColumnSpec{
+        .keyspace = try mem.dupe(allocator, u8, "keyspace"),
+        .table = try mem.dupe(allocator, u8, "table"),
+        .name = try mem.dupe(allocator, u8, "name"),
+        .option = .Set,
+        .listset_element_type_option = .Inet,
+        .map_key_type_option = .Varchar,
+        .map_value_type_option = .Varint,
+        .custom_class_name = try mem.dupe(allocator, u8, "custom_class_name"),
+    };
+
+    column_spec.deinit(allocator);
+}
+
+test "prepared metadata: deinit" {
+    const allocator = testing.allocator;
+
+    const column_spec = ColumnSpec{
+        .keyspace = try mem.dupe(allocator, u8, "keyspace"),
+        .table = try mem.dupe(allocator, u8, "table"),
+        .name = try mem.dupe(allocator, u8, "name"),
+        .option = .Set,
+        .listset_element_type_option = .Inet,
+        .map_key_type_option = .Varchar,
+        .map_value_type_option = .Varint,
+        .custom_class_name = try mem.dupe(allocator, u8, "custom_class_name"),
+    };
+
+    var metadata: PreparedMetadata = undefined;
+    metadata.global_table_spec = GlobalTableSpec{
+        .keyspace = try mem.dupe(allocator, u8, "global_keyspace"),
+        .table = try mem.dupe(allocator, u8, "global_table"),
+    };
+    metadata.pk_indexes = try mem.dupe(allocator, u16, &[_]u16{ 0xde, 0xad, 0xbe, 0xef });
+    metadata.column_specs = try mem.dupe(allocator, ColumnSpec, &[_]ColumnSpec{column_spec});
+
+    metadata.deinit(allocator);
+}
+
+test "rows metadata: deinit" {
+    const allocator = testing.allocator;
+
+    const column_spec = ColumnSpec{
+        .keyspace = try mem.dupe(allocator, u8, "keyspace"),
+        .table = try mem.dupe(allocator, u8, "table"),
+        .name = try mem.dupe(allocator, u8, "name"),
+        .option = .Set,
+        .listset_element_type_option = .Inet,
+        .map_key_type_option = .Varchar,
+        .map_value_type_option = .Varint,
+        .custom_class_name = try mem.dupe(allocator, u8, "custom_class_name"),
+    };
+
+    var metadata: RowsMetadata = undefined;
+    metadata.paging_state = try mem.dupe(allocator, u8, "\xbb\xbc\xde\xfe");
+    metadata.new_metadata_id = try mem.dupe(allocator, u8, "\xac\xbd\xde\xad");
+    metadata.global_table_spec = GlobalTableSpec{
+        .keyspace = try mem.dupe(allocator, u8, "global_keyspace"),
+        .table = try mem.dupe(allocator, u8, "global_table"),
+    };
+    metadata.column_specs = try mem.dupe(allocator, ColumnSpec, &[_]ColumnSpec{column_spec});
+
+    metadata.deinit(allocator);
 }
 
 test "schema change options" {

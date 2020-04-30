@@ -89,9 +89,12 @@ fn doExecute(allocator: *mem.Allocator, client: *cql.Client, query_id: []const u
     try iterate(allocator, &(iter.?));
 }
 
-fn doPrepareThenExec(allocator: *mem.Allocator, client: *cql.Client) !void {
-    const query_id = try doPrepare(allocator, client);
-    try doExecute(allocator, client, query_id);
+fn doPrepareThenExec(allocator: *mem.Allocator, client: *cql.Client, n: usize) !void {
+    var i: usize = 0;
+    while (i < n) : (i += 1) {
+        const query_id = try doPrepare(allocator, client);
+        try doExecute(allocator, client, query_id);
+    }
 }
 
 /// Iterate over every row in the iterator provided.
@@ -201,6 +204,17 @@ pub fn main() anyerror!void {
     } else if (mem.eql(u8, cmd, "prepare")) {
         _ = try doPrepare(allocator, &client);
     } else if (mem.eql(u8, cmd, "prepare-then-exec")) {
-        return doPrepareThenExec(allocator, &client);
+        if (args.len < 3) {
+            try std.fmt.format(stderr, "Usage: {} prepared-then-exec <iterations>\n", .{args[0]});
+            std.process.exit(1);
+        }
+
+        const n = try std.fmt.parseInt(usize, args[2], 10);
+
+        return doPrepareThenExec(allocator, &client, n);
+    } else {
+        try stderr.writeAll("expected command argument\n\n");
+        try stderr.writeAll(usage);
+        std.process.exit(1);
     }
 }

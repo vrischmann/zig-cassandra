@@ -43,10 +43,16 @@ pub const Client = struct {
         cql_version: CQLVersion,
     };
 
-    /// Maps a prepared statement id to the types of the arguments needed when executing it.
-    const PreparedStatementsMetadata = std.HashMap([]const u8, []OptionID, std.hash_map.hashString, std.hash_map.eqlString);
+    const PreparedStatementMetadataValue = struct {
+        metadata: PreparedMetadata,
+        rows_metadata: RowsMetadata,
+    };
 
-    arena: std.heap.ArenaAllocator,
+    /// Maps a prepared statement id to the types of the arguments needed when executing it.
+    const PreparedStatementsMetadata = std.HashMap([]const u8, PreparedStatementMetadataValue, std.hash_map.hashString, std.hash_map.eqlString);
+
+    allocator: *mem.Allocator,
+
     options: InitOptions,
 
     /// The socket to talk to the Cassandra node.
@@ -58,6 +64,7 @@ pub const Client = struct {
     primitive_reader: PrimitiveReader,
     primitive_writer: PrimitiveWriter,
 
+    /// TODO(vincent): need to implement some sort of TLL or size limit for this.
     prepared_statements_metadata: PreparedStatementsMetadata,
 
     // Negotiated with the server
@@ -89,7 +96,7 @@ pub const Client = struct {
     };
 
     pub fn init(self: *Self, allocator: *mem.Allocator, options: InitOptions) !void {
-        self.arena = std.heap.ArenaAllocator.init(allocator);
+        self.allocator = allocator;
         self.options = options;
 
         const socket = try net.tcpConnectToAddress(self.options.seed_address);
@@ -98,12 +105,12 @@ pub const Client = struct {
 
         self.socket = socket;
 
-        self.raw_frame_reader = RawFrameReaderType.init(allocator, socket_in_stream);
+        self.raw_frame_reader = RawFrameReaderType.init(socket_in_stream);
         self.raw_frame_writer = RawFrameWriterType.init(socket_out_stream);
         self.primitive_reader = PrimitiveReader.init();
         self.primitive_writer = PrimitiveWriter.init();
 
-        self.prepared_statements_metadata = PreparedStatementsMetadata.init(&self.arena.allocator);
+        self.prepared_statements_metadata = PreparedStatementsMetadata.init(allocator);
 
         var dummy_diags = InitOptions.Diagnostics{};
         var diags = options.diags orelse &dummy_diags;
@@ -166,12 +173,23 @@ pub const Client = struct {
         // while adding the flag Skip_Metadata.
         // See §4.1.4 in the protocol spec.
 
-        var result = try self.writePrepare(allocator, diags, query_string);
+        var result = try self.writePrepare(self.allocator, allocator, diags, query_string);
         switch (result) {
             .Prepared => |prepared| {
                 const id = prepared.query_id;
 
-                _ = try self.prepared_statements_metadata.put(id, option_ids.toOwnedSlice());
+                // Store the metadata for later use with `execute`.
+
+                const gop = try self.prepared_statements_metadata.getOrPut(id);
+                if (gop.found_existing) {
+                    gop.kv.value.metadata.deinit(self.allocator);
+                    gop.kv.value.rows_metadata.deinit(self.allocator);
+                }
+
+                gop.kv.value = undefined;
+                gop.kv.value.metadata = prepared.metadata;
+                gop.kv.value.rows_metadata = prepared.rows_metadata;
+
                 return id;
             },
             else => return error.InvalidServerResponse,
@@ -217,7 +235,9 @@ pub const Client = struct {
 
         var result = try self.writeQuery(allocator, diags, query_string, parameters);
         return switch (result) {
-            .Rows => |rows| Iterator.init(rows.metadata, rows.data),
+            .Rows => |rows| blk: {
+                break :blk Iterator.init(rows.metadata, rows.data);
+            },
             else => null,
         };
     }
@@ -227,8 +247,8 @@ pub const Client = struct {
         var diags = options.diags orelse &dummy_diags;
 
         // If the metadata doesn't exist we can't proceed.
-        const prepared_option_ids = self.prepared_statements_metadata.get(query_id);
-        if (prepared_option_ids == null) {
+        const prepared_statement_metadata_kv = self.prepared_statements_metadata.get(query_id);
+        if (prepared_statement_metadata_kv == null) {
             return error.InvalidPreparedQueryID;
         }
 
@@ -238,7 +258,7 @@ pub const Client = struct {
         try computeValues(allocator, &values, &option_ids, args);
 
         // Now that we have both prepared and compute option IDs, check that they're compatible
-        if (!areOptionIDsEqual(prepared_option_ids.?.value, option_ids.span())) {
+        if (!areOptionIDsEqual(prepared_statement_metadata_kv.?.value.metadata.column_specs, option_ids.span())) {
             // TODO(vincent): do we want diags here ?
             return error.InvalidPreparedStatementExecuteArgs;
         }
@@ -262,7 +282,9 @@ pub const Client = struct {
 
         var result = try self.writeExecute(allocator, diags, query_id, parameters);
         return switch (result) {
-            .Rows => |rows| Iterator.init(rows.metadata, rows.data),
+            .Rows => |rows| blk: {
+                break :blk Iterator.init(rows.metadata, rows.data);
+            },
             else => null,
         };
     }
@@ -311,8 +333,14 @@ pub const Client = struct {
         }
     }
 
-    fn areOptionIDsEqual(prepared: []OptionID, computed: []OptionID) bool {
-        return mem.eql(OptionID, prepared, computed);
+    fn areOptionIDsEqual(prepared: []const ColumnSpec, computed: []const OptionID) bool {
+        if (prepared.len != computed.len) return false;
+
+        for (prepared) |column_spec, i| {
+            if (column_spec.option != computed[i]) return false;
+        }
+
+        return true;
     }
 
     fn handshake(self: *Self, diags: *InitOptions.Diagnostics) !void {
@@ -512,7 +540,7 @@ pub const Client = struct {
         };
     }
 
-    fn writePrepare(self: *Self, allocator: *mem.Allocator, diags: *Client.QueryOptions.Diagnostics, query: []const u8) !Result {
+    fn writePrepare(self: *Self, allocator: *mem.Allocator, metadata_allocator: *mem.Allocator, diags: *Client.QueryOptions.Diagnostics, query: []const u8) !Result {
         // Write PREPARE
         {
             var frame = PrepareFrame{
@@ -536,7 +564,9 @@ pub const Client = struct {
 
         return switch (raw_frame.header.opcode) {
             .Result => blk: {
-                var frame = try ResultFrame.read(allocator, self.negotiated_state.protocol_version, &self.primitive_reader);
+                // Since we want to retain the metadata from the result frame for later use we can't use the default allocator which will only be valid per-call.
+                // Instead take a dedicated metadata_allocator for this.
+                var frame = try ResultFrame.read(metadata_allocator, self.negotiated_state.protocol_version, &self.primitive_reader);
                 break :blk frame.result;
             },
             .Error => {
@@ -587,7 +617,7 @@ pub const Client = struct {
     }
 
     fn readRawFrame(self: *Self, allocator: *mem.Allocator) !RawFrame {
-        var raw_frame = try self.raw_frame_reader.read();
+        var raw_frame = try self.raw_frame_reader.read(allocator);
 
         if (raw_frame.header.flags & FrameFlags.Compression == FrameFlags.Compression) blk: {
             const decompressed_data = try lz4.decompress(allocator, raw_frame.body);

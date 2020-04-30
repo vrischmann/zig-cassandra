@@ -32,8 +32,8 @@ TODO
 * Add an abstraction for a Stream
 * Compression (snappy)
 * Handle named values in a statement
-* Store the prepared statement metadata for use with EXECUTE
 * Batching
 * Setting a keyspace
 * Paging
 * Cluster client / client pool capable of maintaining a connection to each node in the cluster + autodiscovery with events
+* Implement token-aware routing
