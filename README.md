@@ -12,6 +12,8 @@ You need to have lz4 and its headers installed:
 
 * Fedora: install `lz4-devel`
 
+NOTE: cross compiling from `x86_64` to `i386` doesn't work yet.
+
 ## Windows
 
 We're using [vcpkg](https://github.com/microsoft/vcpkg). Once you set it up correctly, install `lz4` like this:
