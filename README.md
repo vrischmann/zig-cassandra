@@ -38,3 +38,9 @@ TODO
 * Cluster client / client pool capable of maintaining a connection to each node in the cluster + autodiscovery with events
 * Implement token-aware routing
 * Expose the low level parsing stuff so users can simply give us bytes and get back frames ?
+
+# License
+
+The files `src/lz4.c` and `src/lz4.h` are from [github.com/lz4/lz4](https://github.com/lz4/lz4/tree/dev) use the license in `LICENSE.lz4`.
+
+All other files use the license in `LICENSE`.
