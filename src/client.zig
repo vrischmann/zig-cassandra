@@ -129,7 +129,19 @@ pub const Client = struct {
     }
 
     pub const QueryOptions = struct {
-        /// If this is provided, cquery will populate some information about failures.
+        /// If this is provided the client will try to limit the size of the resultset.
+        /// Note that even if the query is paged, cassandra doesn't guarantee that there will
+        /// be at most `page_size` rows, it can be slightly smaller or bigger.
+        ///
+        /// If page_size is not null, after execution the `paging_state` field in this struct will be
+        /// populated if paging is necessary, otherwise it will be null.
+        page_size: ?u32 = null,
+
+        /// If this is provided it will be used to page the result of the query.
+        /// Additionally, this will be populated by the client with the next paging state if any.
+        paging_state: ?[]const u8 = null,
+
+        /// If this is provided it will be populated in case of failures.
         /// This will provide more detail than an error can.
         diags: ?*Diagnostics = null,
 
@@ -224,8 +236,8 @@ pub const Client = struct {
             .consistency_level = self.options.consistency,
             .values = undefined,
             .skip_metadata = false,
-            .page_size = null,
-            .paging_state = null,
+            .page_size = options.page_size,
+            .paging_state = options.paging_state,
             .serial_consistency_level = null,
             .timestamp = null,
             .keyspace = null,
@@ -271,8 +283,8 @@ pub const Client = struct {
             .consistency_level = self.options.consistency,
             .values = undefined,
             .skip_metadata = false,
-            .page_size = null,
-            .paging_state = null,
+            .page_size = options.page_size,
+            .paging_state = options.paging_state,
             .serial_consistency_level = null,
             .timestamp = null,
             .keyspace = null,

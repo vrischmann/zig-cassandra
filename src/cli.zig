@@ -5,32 +5,47 @@ const net = std.net;
 const cql = @import("lib.zig");
 
 fn doQuery(allocator: *mem.Allocator, client: *cql.Client) !void {
-    var result_arena = std.heap.ArenaAllocator.init(allocator);
-    defer result_arena.deinit();
-    const result_allocator = &result_arena.allocator;
-
     // We want query diagonistics in case of failure.
     var diags = cql.Client.QueryOptions.Diagnostics{};
+    errdefer {
+        std.debug.warn("diags: {}\n", .{diags});
+    }
+
+    var paging_state_buffer: [1024]u8 = undefined;
+    var paging_state_allocator = std.heap.FixedBufferAllocator.init(&paging_state_buffer);
+
     var options = cql.Client.QueryOptions{
+        .page_size = 48,
+        .paging_state = null,
         .diags = &diags,
     };
 
-    var iter = client.cquery(
-        result_allocator,
-        options,
-        "SELECT ids, age, name FROM foobar.age_to_ids WHERE age in (?, ?)",
-        .{
-            .age1 = @as(u32, 120),
-            .age2 = @as(u32, 124),
-        },
-    ) catch |err| switch (err) {
-        error.QueryExecutionFailed => {
-            std.debug.panic("query execution failed, received cassandra error: {}\n", .{diags.message});
-        },
-        else => return err,
-    };
+    var total: usize = 0;
+    var has_more = true;
 
-    try iterate(allocator, &(iter.?));
+    while (has_more) {
+        var arena = std.heap.ArenaAllocator.init(allocator);
+        defer arena.deinit();
+
+        var iter = (try client.cquery(
+            &arena.allocator,
+            options,
+            "SELECT ids, age, name FROM foobar.age_to_ids",
+            .{},
+        )).?;
+
+        const count = try iterate(&arena.allocator, &iter);
+        total += count;
+
+        if (iter.metadata.paging_state) |paging_state| {
+            paging_state_allocator.reset();
+            options.paging_state = try mem.dupe(&paging_state_allocator.allocator, u8, paging_state);
+        } else {
+            break;
+        }
+    }
+
+    std.debug.warn("read {} rows\n", .{total});
 }
 
 fn doPrepare(allocator: *mem.Allocator, client: *cql.Client) ![]const u8 {
@@ -71,7 +86,7 @@ fn doExecute(allocator: *mem.Allocator, client: *cql.Client, query_id: []const u
         .diags = &diags,
     };
 
-    var iter = client.execute(
+    var iter = (try client.execute(
         result_allocator,
         options,
         query_id,
@@ -79,14 +94,9 @@ fn doExecute(allocator: *mem.Allocator, client: *cql.Client, query_id: []const u
             .age1 = @as(u32, 120),
             .age2 = @as(u32, 124),
         },
-    ) catch |err| switch (err) {
-        error.QueryExecutionFailed => {
-            std.debug.panic("query execution failed, received cassandra error: {}\n", .{diags.message});
-        },
-        else => return err,
-    };
+    )).?;
 
-    try iterate(allocator, &(iter.?));
+    _ = try iterate(allocator, &iter);
 }
 
 fn doPrepareThenExec(allocator: *mem.Allocator, client: *cql.Client, n: usize) !void {
@@ -98,7 +108,7 @@ fn doPrepareThenExec(allocator: *mem.Allocator, client: *cql.Client, n: usize) !
 }
 
 /// Iterate over every row in the iterator provided.
-fn iterate(allocator: *mem.Allocator, iter: *cql.Iterator) !void {
+fn iterate(allocator: *mem.Allocator, iter: *cql.Iterator) !usize {
     // Define a Row struct with a 1:1 mapping with the fields selected.
     const Row = struct {
         ids: []u8,
@@ -121,7 +131,9 @@ fn iterate(allocator: *mem.Allocator, iter: *cql.Iterator) !void {
         }
     };
 
-    while (true) {
+    var count: usize = 0;
+
+    while (true) : (count += 1) {
         // Use a single arena per iteration.
         // This makes it easy to discard all memory allocated while scanning the current row.
         var row_arena = std.heap.ArenaAllocator.init(allocator);
@@ -158,6 +170,8 @@ fn iterate(allocator: *mem.Allocator, iter: *cql.Iterator) !void {
 
         std.debug.warn("age: {} id: {} name: {} {x}\n", .{ row.age, ids, row.name, row.name });
     }
+
+    return count;
 }
 
 const usage =
@@ -193,7 +207,7 @@ pub fn main() anyerror!void {
 
     var init_options = cql.Client.InitOptions{};
     init_options.seed_address = address;
-    init_options.compression = cql.CompressionAlgorithm.LZ4;
+    // init_options.compression = cql.CompressionAlgorithm.LZ4;
     init_options.username = "cassandra";
     init_options.password = "cassandra";
 
