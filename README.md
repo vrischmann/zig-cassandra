@@ -10,26 +10,6 @@ The goal is only to support CQL.
 * Preparing a query and executing it later, with type-checked arguments.
 * Comprehensive errors and diagnostics in case of failure.
 
-# Building
-
-## Linux
-
-You need to have lz4 and its headers installed:
-
-* Fedora: install `lz4-devel`
-
-NOTE: cross compiling from `x86_64` to `i386` doesn't work yet.
-
-## Windows
-
-We're using [vcpkg](https://github.com/microsoft/vcpkg). Once you set it up correctly, install `lz4` like this:
-
-```
-$ vcpkg install --triplet x64-windows-static lz4
-```
-
-If you're building for another architecture reinstall the correct triplet.
-
 TODO
 ====
 
