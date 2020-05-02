@@ -4,6 +4,12 @@ Experiment with writing a Cassandra client in Zig.
 
 The goal is only to support CQL.
 
+# Available features
+
+* Executing a single query without preparation
+* Preparing a query and executing it later, with type-checked arguments.
+* Comprehensive errors and diagnostics in case of failure.
+
 # Building
 
 ## Linux
@@ -38,6 +44,7 @@ TODO
 * Cluster client / client pool capable of maintaining a connection to each node in the cluster + autodiscovery with events
 * Implement token-aware routing
 * Expose the low level parsing stuff so users can simply give us bytes and get back frames ?
+* Use a new syntax for bind marker ala-fmt.format to type check the args
 
 # License
 
