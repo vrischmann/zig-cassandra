@@ -37,3 +37,4 @@ TODO
 * Paging
 * Cluster client / client pool capable of maintaining a connection to each node in the cluster + autodiscovery with events
 * Implement token-aware routing
+* Expose the low level parsing stuff so users can simply give us bytes and get back frames ?
