@@ -1,7 +1,7 @@
 const std = @import("std");
 const mem = std.mem;
 
-const c = @import("c.zig");
+const c = @cImport(@cInclude("lz4.h"));
 const testing = @import("testing.zig");
 
 const length_size = 4;
