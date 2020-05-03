@@ -678,6 +678,7 @@ fn computeValues(allocator: *mem.Allocator, values: ?*std.ArrayList(Value), opti
 
                 try opts.append(.Boolean);
                 value = Value{ .Set = buf };
+                try vals.append(value);
             },
             .Float => |info| {
                 switch (Type) {
@@ -692,6 +693,7 @@ fn computeValues(allocator: *mem.Allocator, values: ?*std.ArrayList(Value), opti
                 @ptrCast(*align(1) Type, buf).* = arg;
 
                 value = Value{ .Set = buf };
+                try vals.append(value);
             },
             .Int => |info| {
                 switch (Type) {
@@ -716,11 +718,33 @@ fn computeValues(allocator: *mem.Allocator, values: ?*std.ArrayList(Value), opti
                 }
 
                 value = Value{ .Set = buf };
+                try vals.append(value);
+            },
+            .Pointer => |pointer| switch (pointer.size) {
+                .One => {
+                    try computeValues(allocator, values, options, .{arg.*});
+                    continue;
+                },
+                .Slice => {
+                    // Special case []const u8 because it's used for strings.
+                    if (pointer.is_const and pointer.child == u8) {
+                        try opts.append(.Varchar);
+                        value = Value{ .Set = arg };
+                        try vals.append(value);
+
+                        continue;
+                    }
+
+                    // Otherwise it's a list or a set.
+
+                    for (arg) |item| {
+                        try computeValues(allocator, values, options, .{item});
+                    }
+                },
+                else => @compileError("invalid pointer size " ++ @tagName(pointer.size)),
             },
             else => @compileError("field type " ++ @typeName(Type) ++ " not handled yet"),
         }
-
-        try vals.append(value);
     }
 }
 
@@ -732,6 +756,8 @@ test "compute values: ints" {
     var values = std.ArrayList(Value).init(allocator);
     var options = std.ArrayList(OptionID).init(allocator);
 
+    const my_u64 = @as(u64, 20000);
+
     _ = try computeValues(allocator, &values, &options, .{
         .i_tinyint = @as(i8, 0x7f),
         .u_tinyint = @as(u8, 0xff),
@@ -741,13 +767,14 @@ test "compute values: ints" {
         .u_int = @as(u32, 0xabababaf),
         .i_bigint = @as(i64, 0x7fffffffffffffff),
         .u_bigint = @as(u64, 0xdcdcdcdcdcdcdcdf),
+        .u_bigint_ptr = &my_u64,
     });
 
     var v = values.span();
     var o = options.span();
 
-    testing.expectEqual(@as(usize, 8), v.len);
-    testing.expectEqual(@as(usize, 8), o.len);
+    testing.expectEqual(@as(usize, 9), v.len);
+    testing.expectEqual(@as(usize, 9), o.len);
 
     testing.expectEqualSlices(u8, "\x7f", v[0].Set);
     testing.expectEqual(OptionID.Tinyint, o[0]);
@@ -768,6 +795,9 @@ test "compute values: ints" {
     testing.expectEqual(OptionID.Bigint, o[6]);
     testing.expectEqualSlices(u8, "\xdf\xdc\xdc\xdc\xdc\xdc\xdc\xdc", v[7].Set);
     testing.expectEqual(OptionID.Bigint, o[7]);
+
+    testing.expectEqualSlices(u8, "\x20\x4e\x00\x00\x00\x00\x00\x00", v[8].Set);
+    testing.expectEqual(OptionID.Bigint, o[8]);
 }
 
 test "compute values: floats" {
@@ -778,21 +808,48 @@ test "compute values: floats" {
     var values = std.ArrayList(Value).init(allocator);
     var options = std.ArrayList(OptionID).init(allocator);
 
+    const my_f64 = @as(f64, 402.240);
+
     _ = try computeValues(allocator, &values, &options, .{
         .f32 = @as(f32, 0.002),
         .f64 = @as(f64, 245601.000240305603),
+        .f64_ptr = &my_f64,
     });
 
     var v = values.span();
     var o = options.span();
 
-    testing.expectEqual(@as(usize, 2), v.len);
-    testing.expectEqual(@as(usize, 2), o.len);
+    testing.expectEqual(@as(usize, 3), v.len);
+    testing.expectEqual(@as(usize, 3), o.len);
 
     testing.expectEqualSlices(u8, "\x6f\x12\x03\x3b", v[0].Set);
     testing.expectEqual(OptionID.Float, o[0]);
     testing.expectEqualSlices(u8, "\x46\xfd\x7d\x00\x08\xfb\x0d\x41", v[1].Set);
     testing.expectEqual(OptionID.Double, o[1]);
+    testing.expectEqualSlices(u8, "\xa4\x70\x3d\x0a\xd7\x23\x79\x40", v[2].Set);
+    testing.expectEqual(OptionID.Double, o[2]);
+}
+
+test "compute values: strings" {
+    var arenaAllocator = testing.arenaAllocator();
+    defer arenaAllocator.deinit();
+    var allocator = &arenaAllocator.allocator;
+
+    var values = std.ArrayList(Value).init(allocator);
+    var options = std.ArrayList(OptionID).init(allocator);
+
+    _ = try computeValues(allocator, &values, &options, .{
+        .string = @as([]const u8, try mem.dupe(allocator, u8, "foobar")),
+    });
+
+    var v = values.span();
+    var o = options.span();
+
+    testing.expectEqual(@as(usize, 1), v.len);
+    testing.expectEqual(@as(usize, 1), o.len);
+
+    testing.expectEqualStrings("foobar", v[0].Set);
+    testing.expectEqual(OptionID.Varchar, o[0]);
 }
 
 test "compute values: bool" {
