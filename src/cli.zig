@@ -4,9 +4,9 @@ const net = std.net;
 
 const cql = @import("lib.zig");
 
-fn doQuery(allocator: *mem.Allocator, client: *cql.Client) !void {
+fn doQuery(allocator: *mem.Allocator, client: *cql.TCPClient) !void {
     // We want query diagonistics in case of failure.
-    var diags = cql.Client.QueryOptions.Diagnostics{};
+    var diags = cql.QueryOptions.Diagnostics{};
     errdefer {
         std.debug.warn("diags: {}\n", .{diags});
     }
@@ -14,7 +14,7 @@ fn doQuery(allocator: *mem.Allocator, client: *cql.Client) !void {
     var paging_state_buffer: [1024]u8 = undefined;
     var paging_state_allocator = std.heap.FixedBufferAllocator.init(&paging_state_buffer);
 
-    var options = cql.Client.QueryOptions{
+    var options = cql.QueryOptions{
         .page_size = 48,
         .paging_state = null,
         .diags = &diags,
@@ -27,7 +27,7 @@ fn doQuery(allocator: *mem.Allocator, client: *cql.Client) !void {
         var arena = std.heap.ArenaAllocator.init(allocator);
         defer arena.deinit();
 
-        var iter = (try client.cquery(
+        var iter = (try client.query(
             &arena.allocator,
             options,
             "SELECT ids, age, name FROM foobar.age_to_ids",
@@ -48,14 +48,14 @@ fn doQuery(allocator: *mem.Allocator, client: *cql.Client) !void {
     std.debug.warn("read {} rows\n", .{total});
 }
 
-fn doPrepare(allocator: *mem.Allocator, client: *cql.Client) ![]const u8 {
+fn doPrepare(allocator: *mem.Allocator, client: *cql.TCPClient) ![]const u8 {
     // We want query diagonistics in case of failure.
-    var diags = cql.Client.QueryOptions.Diagnostics{};
-    var options = cql.Client.QueryOptions{
+    var diags = cql.QueryOptions.Diagnostics{};
+    var options = cql.QueryOptions{
         .diags = &diags,
     };
 
-    const query_id = client.cprepare(
+    const query_id = client.prepare(
         allocator,
         options,
         "SELECT ids, age, name FROM foobar.age_to_ids WHERE age in (?, ?)",
@@ -75,14 +75,14 @@ fn doPrepare(allocator: *mem.Allocator, client: *cql.Client) ![]const u8 {
     return query_id;
 }
 
-fn doExecute(allocator: *mem.Allocator, client: *cql.Client, query_id: []const u8) !void {
+fn doExecute(allocator: *mem.Allocator, client: *cql.TCPClient, query_id: []const u8) !void {
     var result_arena = std.heap.ArenaAllocator.init(allocator);
     defer result_arena.deinit();
     const result_allocator = &result_arena.allocator;
 
     // We want query diagonistics in case of failure.
-    var diags = cql.Client.QueryOptions.Diagnostics{};
-    var options = cql.Client.QueryOptions{
+    var diags = cql.QueryOptions.Diagnostics{};
+    var options = cql.QueryOptions{
         .diags = &diags,
     };
 
@@ -99,7 +99,7 @@ fn doExecute(allocator: *mem.Allocator, client: *cql.Client, query_id: []const u
     _ = try iterate(allocator, &iter);
 }
 
-fn doPrepareThenExec(allocator: *mem.Allocator, client: *cql.Client, n: usize) !void {
+fn doPrepareThenExec(allocator: *mem.Allocator, client: *cql.TCPClient, n: usize) !void {
     var i: usize = 0;
     while (i < n) : (i += 1) {
         const query_id = try doPrepare(allocator, client);
@@ -181,7 +181,7 @@ const usage =
     \\
     \\    query
     \\    prepare
-    \\    execute [query id]
+    \\    prepare-then-exec <iterations>
     \\
 ;
 
@@ -205,20 +205,21 @@ pub fn main() anyerror!void {
 
     // Connect to the seed node
 
-    var init_options = cql.Client.InitOptions{};
+    var init_options = cql.InitOptions{};
     init_options.seed_address = address;
     // init_options.compression = cql.CompressionAlgorithm.LZ4;
     init_options.username = "cassandra";
     init_options.password = "cassandra";
 
-    var init_diags = cql.Client.InitOptions.Diagnostics{};
+    var init_diags = cql.InitOptions.Diagnostics{};
     init_options.diags = &init_diags;
 
-    var client: cql.Client = undefined;
-    client.init(allocator, init_options) catch |err| switch (err) {
-        error.ConnectionRefused => {
-            std.debug.panic("connection refused to {}\n", .{address});
-        },
+    var client: cql.TCPClient = undefined;
+
+    client.init(
+        allocator,
+        init_options,
+    ) catch |err| switch (err) {
         error.NoUsername, error.NoPassword => {
             std.debug.panic("the server requires authentication, please set the username and password", .{});
         },
