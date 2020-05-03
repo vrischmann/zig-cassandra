@@ -740,7 +740,7 @@ fn computeValues(allocator: *mem.Allocator, values: ?*std.ArrayList(Value), opti
 
                     // TODO(vincent): how de we know it's a set or list ?
                     try opts.append(.Set);
-                    value = Value{ .Set = try concatenateValues(allocator, inner_values.toOwnedSlice()) };
+                    value = Value{ .Set = try serializeValues(allocator, inner_values.toOwnedSlice()) };
                     try vals.append(value);
                 },
                 else => @compileError("invalid pointer size " ++ @tagName(pointer.size)),
@@ -764,7 +764,7 @@ fn computeValues(allocator: *mem.Allocator, values: ?*std.ArrayList(Value), opti
 
                 // TODO(vincent): how de we know it's a set or list ?
                 try opts.append(.Set);
-                value = Value{ .Set = try concatenateValues(allocator, inner_values.toOwnedSlice()) };
+                value = Value{ .Set = try serializeValues(allocator, inner_values.toOwnedSlice()) };
                 try vals.append(value);
             },
             else => @compileError("field type " ++ @typeName(Type) ++ " not handled yet"),
@@ -772,42 +772,35 @@ fn computeValues(allocator: *mem.Allocator, values: ?*std.ArrayList(Value), opti
     }
 }
 
-fn concatenateValues(allocator: *mem.Allocator, values: []const Value) ![]const u8 {
-    var size: usize = 0;
-    for (values) |value| {
-        switch (value) {
-            .Set => |v| size += v.len,
-            else => {},
-        }
-    }
+fn serializeValues(allocator: *mem.Allocator, values: []const Value) ![]const u8 {
+    var pw = PrimitiveWriter.init();
+    pw.reset(allocator);
 
-    const buf = try allocator.alloc(u8, size);
-    errdefer allocator.free(buf);
+    try pw.writeInt(u32, @intCast(u32, values.len));
 
-    var idx: usize = 0;
     for (values) |value| {
         switch (value) {
             .Set => |v| {
-                mem.copy(u8, buf[idx..], v);
-                idx += v.len;
+                try pw.writeBytes(v);
             },
             else => {},
         }
     }
 
-    return buf;
+    return pw.toOwnedSlice();
 }
 
-test "concatenate values" {
+test "serialize values" {
     var arenaAllocator = testing.arenaAllocator();
     defer arenaAllocator.deinit();
 
     var v1 = Value{ .Set = "foobar" };
     var v2 = Value{ .Set = "barbaz" };
 
-    var data = try concatenateValues(&arenaAllocator.allocator, &[_]Value{ v1, v2 });
-    testing.expectEqual(@as(usize, 12), data.len);
-    testing.expectEqualStrings("foobarbarbaz", data);
+    var data = try serializeValues(&arenaAllocator.allocator, &[_]Value{ v1, v2 });
+    testing.expectEqual(@as(usize, 24), data.len);
+    testing.expectEqualSlices(u8, "\x00\x00\x00\x02", data[0..4]);
+    testing.expectEqualStrings("\x00\x00\x00\x06foobar\x00\x00\x00\x06barbaz", data[4..]);
 }
 
 test "compute values: ints" {
@@ -843,22 +836,22 @@ test "compute values: ints" {
     testing.expectEqualSlices(u8, "\xff", v[1].Set);
     testing.expectEqual(OptionID.Tinyint, o[1]);
 
-    testing.expectEqualSlices(u8, "\xff\x7f", v[2].Set);
+    testing.expectEqualSlices(u8, "\x7f\xff", v[2].Set);
     testing.expectEqual(OptionID.Smallint, o[2]);
-    testing.expectEqualSlices(u8, "\xdf\xde", v[3].Set);
+    testing.expectEqualSlices(u8, "\xde\xdf", v[3].Set);
     testing.expectEqual(OptionID.Smallint, o[3]);
 
-    testing.expectEqualSlices(u8, "\xff\xff\xff\x7f", v[4].Set);
+    testing.expectEqualSlices(u8, "\x7f\xff\xff\xff", v[4].Set);
     testing.expectEqual(OptionID.Int, o[4]);
-    testing.expectEqualSlices(u8, "\xaf\xab\xab\xab", v[5].Set);
+    testing.expectEqualSlices(u8, "\xab\xab\xab\xaf", v[5].Set);
     testing.expectEqual(OptionID.Int, o[5]);
 
-    testing.expectEqualSlices(u8, "\xff\xff\xff\xff\xff\xff\xff\x7f", v[6].Set);
+    testing.expectEqualSlices(u8, "\x7f\xff\xff\xff\xff\xff\xff\xff", v[6].Set);
     testing.expectEqual(OptionID.Bigint, o[6]);
-    testing.expectEqualSlices(u8, "\xdf\xdc\xdc\xdc\xdc\xdc\xdc\xdc", v[7].Set);
+    testing.expectEqualSlices(u8, "\xdc\xdc\xdc\xdc\xdc\xdc\xdc\xdf", v[7].Set);
     testing.expectEqual(OptionID.Bigint, o[7]);
 
-    testing.expectEqualSlices(u8, "\x20\x4e\x00\x00\x00\x00\x00\x00", v[8].Set);
+    testing.expectEqualSlices(u8, "\x00\x00\x00\x00\x00\x00\x4e\x20", v[8].Set);
     testing.expectEqual(OptionID.Bigint, o[8]);
 }
 
@@ -958,10 +951,10 @@ test "compute values: list" {
     testing.expectEqual(@as(usize, 2), v.len);
     testing.expectEqual(@as(usize, 2), o.len);
 
-    testing.expectEqualSlices(u8, "\x01\x00\x50\x20", v[0].Set);
+    testing.expectEqualSlices(u8, "\x00\x00\x00\x02\x00\x00\x00\x02\x00\x01\x00\x00\x00\x02\x20\x50", v[0].Set);
     testing.expectEqual(OptionID.Set, o[0]);
 
-    testing.expectEqualSlices(u8, "\x01\x00\x50\x20", v[1].Set);
+    testing.expectEqualSlices(u8, "\x00\x00\x00\x02\x00\x00\x00\x02\x00\x01\x00\x00\x00\x02\x20\x50", v[1].Set);
     testing.expectEqual(OptionID.Set, o[1]);
 }
 
