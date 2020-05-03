@@ -107,6 +107,48 @@ fn doPrepareThenExec(allocator: *mem.Allocator, client: *cql.TCPClient, n: usize
     }
 }
 
+fn doInsert(allocator: *mem.Allocator, client: *cql.TCPClient, n: usize) !void {
+
+    // We want query diagonistics in case of failure.
+    var diags = cql.QueryOptions.Diagnostics{};
+    var options = cql.QueryOptions{
+        .diags = &diags,
+    };
+
+    const query_id = try client.prepare(
+        allocator,
+        options,
+        "INSERT INTO foobar.age_to_ids(age, ids, name) VALUES(?, ?, ?)",
+        .{
+            .age = @as(u32, 0),
+            .ids = [_]u8{0} ** 4,
+            .name = "",
+        },
+    );
+
+    var i: usize = 0;
+    while (i < n) : (i += 1) {
+        var arena = std.heap.ArenaAllocator.init(allocator);
+        defer arena.deinit();
+
+        _ = client.execute(
+            &arena.allocator,
+            options,
+            query_id,
+            .{
+                .age = @intCast(u32, i) * @as(u32, 10),
+                .ids = &[_]u8{ 0, 2, 4, 8 },
+                .name = @as([]const u8, try std.fmt.allocPrint(&arena.allocator, "Vincent {}", .{i})),
+            },
+        ) catch |err| switch (err) {
+            error.QueryExecutionFailed => {
+                std.debug.warn("error message: {}\n", .{diags.message});
+            },
+            else => |e| return e,
+        };
+    }
+}
+
 /// Iterate over every row in the iterator provided.
 fn iterate(allocator: *mem.Allocator, iter: *cql.Iterator) !usize {
     // Define a Row struct with a 1:1 mapping with the fields selected.
@@ -179,6 +221,7 @@ const usage =
     \\
     \\Commands:
     \\
+    \\    insert
     \\    query
     \\    prepare
     \\    prepare-then-exec <iterations>
@@ -234,6 +277,15 @@ pub fn main() anyerror!void {
         return doQuery(allocator, &client);
     } else if (mem.eql(u8, cmd, "prepare")) {
         _ = try doPrepare(allocator, &client);
+    } else if (mem.eql(u8, cmd, "insert")) {
+        if (args.len < 3) {
+            try std.fmt.format(stderr, "Usage: {} insert <iterations>\n", .{args[0]});
+            std.process.exit(1);
+        }
+
+        const n = try std.fmt.parseInt(usize, args[2], 10);
+
+        return doInsert(allocator, &client, n);
     } else if (mem.eql(u8, cmd, "prepare-then-exec")) {
         if (args.len < 3) {
             try std.fmt.format(stderr, "Usage: {} prepared-then-exec <iterations>\n", .{args[0]});
