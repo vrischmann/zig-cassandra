@@ -679,9 +679,18 @@ fn computeValues(allocator: *mem.Allocator, values: ?*std.ArrayList(Value), opti
                     else => @compileError("field type " ++ @typeName(Type) ++ " is not compatible with CQL"),
                 }
 
-                const buf = try allocator.alloc(u8, info.bits / 8);
+                var buf = try allocator.alloc(u8, info.bits / 8);
 
-                mem.writeIntSliceBig(struct_field.field_type, buf, arg);
+                // THe std lib provides writIngBig and writeIntSliceBig which we could use, but:
+                // * the first one takes a pointer to N bytes which requires a @ptrCast anyway
+                //   since we need to use buf.
+                // * the second doesn't work with signed integers right now.
+
+                switch (builtin.endian) {
+                    .Little => @ptrCast(*align(1) Type, buf).* = arg,
+                    .Big => @ptrCast(*align(1) Type, buf).* = @byteSwap(Type, arg),
+                }
+
                 value = Value{ .Set = buf };
             },
             else => @compileError("field type " ++ @typeName(Type) ++ " not handled yet"),
@@ -689,6 +698,52 @@ fn computeValues(allocator: *mem.Allocator, values: ?*std.ArrayList(Value), opti
 
         try vals.append(value);
     }
+}
+
+test "compute values: ints" {
+    var arenaAllocator = testing.arenaAllocator();
+    defer arenaAllocator.deinit();
+    var allocator = &arenaAllocator.allocator;
+
+    var values = std.ArrayList(Value).init(allocator);
+    var options = std.ArrayList(OptionID).init(allocator);
+
+    _ = try computeValues(allocator, &values, &options, .{
+        .i_tinyint = @as(i8, 0x7f),
+        .u_tinyint = @as(u8, 0xff),
+        .i_smallint = @as(i16, 0x7fff),
+        .u_smallint = @as(u16, 0xdedf),
+        .i_int = @as(i32, 0x7fffffff),
+        .u_int = @as(u32, 0xabababaf),
+        .i_bigint = @as(i64, 0x7fffffffffffffff),
+        .u_bigint = @as(u64, 0xdcdcdcdcdcdcdcdf),
+    });
+
+    var v = values.span();
+    var o = options.span();
+
+    testing.expectEqual(@as(usize, 8), v.len);
+    testing.expectEqual(@as(usize, 8), o.len);
+
+    testing.expectEqualSlices(u8, "\x7f", v[0].Set);
+    testing.expectEqual(OptionID.Tinyint, o[0]);
+    testing.expectEqualSlices(u8, "\xff", v[1].Set);
+    testing.expectEqual(OptionID.Tinyint, o[1]);
+
+    testing.expectEqualSlices(u8, "\xff\x7f", v[2].Set);
+    testing.expectEqual(OptionID.Smallint, o[2]);
+    testing.expectEqualSlices(u8, "\xdf\xde", v[3].Set);
+    testing.expectEqual(OptionID.Smallint, o[3]);
+
+    testing.expectEqualSlices(u8, "\xff\xff\xff\x7f", v[4].Set);
+    testing.expectEqual(OptionID.Int, o[4]);
+    testing.expectEqualSlices(u8, "\xaf\xab\xab\xab", v[5].Set);
+    testing.expectEqual(OptionID.Int, o[5]);
+
+    testing.expectEqualSlices(u8, "\xff\xff\xff\xff\xff\xff\xff\x7f", v[6].Set);
+    testing.expectEqual(OptionID.Bigint, o[6]);
+    testing.expectEqualSlices(u8, "\xdf\xdc\xdc\xdc\xdc\xdc\xdc\xdc", v[7].Set);
+    testing.expectEqual(OptionID.Bigint, o[7]);
 }
 
 fn areOptionIDsEqual(prepared: []const ColumnSpec, computed: []const OptionID) bool {
