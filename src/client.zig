@@ -743,6 +743,11 @@ fn computeValues(allocator: *mem.Allocator, values: ?*std.ArrayList(Value), opti
                 },
                 else => @compileError("invalid pointer size " ++ @tagName(pointer.size)),
             },
+            .Array => {
+                for (arg) |item| {
+                    try computeValues(allocator, values, options, .{item});
+                }
+            },
             else => @compileError("field type " ++ @typeName(Type) ++ " not handled yet"),
         }
     }
@@ -875,6 +880,36 @@ test "compute values: bool" {
     testing.expectEqual(OptionID.Boolean, o[0]);
     testing.expectEqualSlices(u8, "\x00", v[1].Set);
     testing.expectEqual(OptionID.Boolean, o[1]);
+}
+
+test "compute values: list" {
+    var arenaAllocator = testing.arenaAllocator();
+    defer arenaAllocator.deinit();
+    var allocator = &arenaAllocator.allocator;
+
+    var values = std.ArrayList(Value).init(allocator);
+    var options = std.ArrayList(OptionID).init(allocator);
+
+    _ = try computeValues(allocator, &values, &options, .{
+        .string = &[_]u16{ 0x01, 0x2050 },
+        .string2 = @as([]const u16, &[_]u16{ 0x01, 0x2050 }),
+    });
+
+    var v = values.span();
+    var o = options.span();
+
+    testing.expectEqual(@as(usize, 4), v.len);
+    testing.expectEqual(@as(usize, 4), o.len);
+
+    testing.expectEqualSlices(u8, "\x01\x00", v[0].Set);
+    testing.expectEqual(OptionID.Smallint, o[0]);
+    testing.expectEqualSlices(u8, "\x50\x20", v[1].Set);
+    testing.expectEqual(OptionID.Smallint, o[1]);
+
+    testing.expectEqualSlices(u8, "\x01\x00", v[2].Set);
+    testing.expectEqual(OptionID.Smallint, o[2]);
+    testing.expectEqualSlices(u8, "\x50\x20", v[3].Set);
+    testing.expectEqual(OptionID.Smallint, o[3]);
 }
 
 fn areOptionIDsEqual(prepared: []const ColumnSpec, computed: []const OptionID) bool {
