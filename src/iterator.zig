@@ -132,7 +132,6 @@ pub const Iterator = struct {
         std.debug.assert(slice.len <= len);
 
         // See readIntFromSlice below for an explanation as to why we do this.
-        // TODO(vincent): do we need the temp buffer ?
 
         var buf = [_]u8{0} ** len;
 
