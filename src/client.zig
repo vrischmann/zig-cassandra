@@ -670,6 +670,15 @@ fn computeValues(allocator: *mem.Allocator, values: ?*std.ArrayList(Value), opti
 
         var value: Value = undefined;
         switch (field_type_info) {
+            .Bool => {
+                var buf = try allocator.alloc(u8, 1);
+                errdefer allocator.free(buf);
+
+                buf[0] = if (arg) 0x01 else 0x00;
+
+                try opts.append(.Boolean);
+                value = Value{ .Set = buf };
+            },
             .Int => |info| {
                 switch (Type) {
                     i8, u8 => try opts.append(.Tinyint),
@@ -680,6 +689,7 @@ fn computeValues(allocator: *mem.Allocator, values: ?*std.ArrayList(Value), opti
                 }
 
                 var buf = try allocator.alloc(u8, info.bits / 8);
+                errdefer allocator.free(buf);
 
                 // THe std lib provides writIngBig and writeIntSliceBig which we could use, but:
                 // * the first one takes a pointer to N bytes which requires a @ptrCast anyway
@@ -744,6 +754,31 @@ test "compute values: ints" {
     testing.expectEqual(OptionID.Bigint, o[6]);
     testing.expectEqualSlices(u8, "\xdf\xdc\xdc\xdc\xdc\xdc\xdc\xdc", v[7].Set);
     testing.expectEqual(OptionID.Bigint, o[7]);
+}
+
+test "compute values: bool" {
+    var arenaAllocator = testing.arenaAllocator();
+    defer arenaAllocator.deinit();
+    var allocator = &arenaAllocator.allocator;
+
+    var values = std.ArrayList(Value).init(allocator);
+    var options = std.ArrayList(OptionID).init(allocator);
+
+    _ = try computeValues(allocator, &values, &options, .{
+        .bool1 = true,
+        .bool2 = false,
+    });
+
+    var v = values.span();
+    var o = options.span();
+
+    testing.expectEqual(@as(usize, 2), v.len);
+    testing.expectEqual(@as(usize, 2), o.len);
+
+    testing.expectEqualSlices(u8, "\x01", v[0].Set);
+    testing.expectEqual(OptionID.Boolean, o[0]);
+    testing.expectEqualSlices(u8, "\x00", v[1].Set);
+    testing.expectEqual(OptionID.Boolean, o[1]);
 }
 
 fn areOptionIDsEqual(prepared: []const ColumnSpec, computed: []const OptionID) bool {
