@@ -621,7 +621,7 @@ pub fn Client(comptime InStreamType: type, comptime OutStreamType: type) type {
             };
 
             if (force_no_compression) {
-                raw_frame.body = self.primitive_writer.getWritten();
+                raw_frame.body = written;
             } else {
                 raw_frame.body = if (self.options.compression) |compression| blk: {
                     switch (compression) {
@@ -635,8 +635,7 @@ pub fn Client(comptime InStreamType: type, comptime OutStreamType: type) type {
                         },
                         else => std.debug.panic("compression algorithm {} not handled yet", .{compression}),
                     }
-                } else
-                    self.primitive_writer.getWritten();
+                } else written;
             }
 
             // TODO(vincent): implement streams
