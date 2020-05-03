@@ -181,7 +181,7 @@ const usage =
     \\
     \\    query
     \\    prepare
-    \\    execute [query id]
+    \\    prepare-then-exec <iterations>
     \\
 ;
 
