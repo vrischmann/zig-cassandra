@@ -30,6 +30,10 @@ pub const PrimitiveWriter = struct {
         self.wbuf = std.ArrayList(u8).init(allocator);
     }
 
+    pub fn toOwnedSlice(self: *Self) []u8 {
+        return self.wbuf.toOwnedSlice();
+    }
+
     pub fn getWritten(self: *Self) []u8 {
         return self.wbuf.span();
     }
