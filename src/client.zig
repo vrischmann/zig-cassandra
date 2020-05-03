@@ -710,15 +710,7 @@ fn computeValues(allocator: *mem.Allocator, values: ?*std.ArrayList(Value), opti
                 var buf = try allocator.alloc(u8, info.bits / 8);
                 errdefer allocator.free(buf);
 
-                // THe std lib provides writIngBig and writeIntSliceBig which we could use, but:
-                // * the first one takes a pointer to N bytes which requires a @ptrCast anyway
-                //   since we need to use buf.
-                // * the second doesn't work with signed integers right now.
-
-                switch (builtin.endian) {
-                    .Little => @ptrCast(*align(1) Type, buf).* = arg,
-                    .Big => @ptrCast(*align(1) Type, buf).* = @byteSwap(Type, arg),
-                }
+                mem.writeIntBig(Type, @ptrCast(*[info.bits / 8]u8, buf), arg);
 
                 value = Value{ .Set = buf };
                 try vals.append(value);
