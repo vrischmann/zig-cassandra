@@ -25,6 +25,7 @@ TODO
 * Expose the low level parsing stuff so users can simply give us bytes and get back frames ?
 * Use a new syntax for bind marker ala-fmt.format to type check the args
 * Need to add custom types for thins we can't infer with Zig's meta programming (things like Counter, Time, Timestamp, Timeuuid, Varint).
+* Add a way to use Value.Unset
 
 # License
 
