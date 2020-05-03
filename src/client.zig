@@ -648,6 +648,10 @@ pub fn Client(comptime InStreamType: type, comptime OutStreamType: type) type {
 }
 
 /// Compute a list of Value and OptionID for each field in the tuple or struct args.
+///
+/// TODO(vincent): it's not clear to the caller that data in `args` must outlive `values` because we don't duplicating memory
+/// unless absolutely necessary in the case of arrays.
+/// Think of a way to communicate that.
 fn computeValues(allocator: *mem.Allocator, values: ?*std.ArrayList(Value), options: ?*std.ArrayList(OptionID), args: var) !void {
     if (@typeInfo(@TypeOf(args)) != .Struct) {
         @compileError("Expected tuple or struct argument, found " ++ @typeName(args) ++ " of type " ++ @tagName(@typeInfo(args)));
@@ -729,6 +733,7 @@ fn computeValues(allocator: *mem.Allocator, values: ?*std.ArrayList(Value), opti
                     // Special case []const u8 because it's used for strings.
                     if (pointer.is_const and pointer.child == u8) {
                         try opts.append(.Varchar);
+                        // TODO(vincent): should we make a copy ?
                         value = Value{ .Set = arg };
                         try vals.append(value);
 
@@ -743,7 +748,18 @@ fn computeValues(allocator: *mem.Allocator, values: ?*std.ArrayList(Value), opti
                 },
                 else => @compileError("invalid pointer size " ++ @tagName(pointer.size)),
             },
-            .Array => {
+            .Array => |array| {
+                // Special case [16]u8 since we consider it a UUID.
+                if (array.len == 16 and array.child == u8) {
+                    try opts.append(.UUID);
+                    value = Value{ .Set = try mem.dupe(allocator, u8, &arg) };
+                    try vals.append(value);
+
+                    continue;
+                }
+
+                // Otherwise it's a list or a set
+
                 for (arg) |item| {
                     try computeValues(allocator, values, options, .{item});
                 }
@@ -910,6 +926,33 @@ test "compute values: list" {
     testing.expectEqual(OptionID.Smallint, o[2]);
     testing.expectEqualSlices(u8, "\x50\x20", v[3].Set);
     testing.expectEqual(OptionID.Smallint, o[3]);
+}
+
+test "compute values: uuid" {
+    var arenaAllocator = testing.arenaAllocator();
+    defer arenaAllocator.deinit();
+    var allocator = &arenaAllocator.allocator;
+
+    var values = std.ArrayList(Value).init(allocator);
+    var options = std.ArrayList(OptionID).init(allocator);
+
+    _ = try computeValues(allocator, &values, &options, .{
+        .uuid = [16]u8{
+            0x55, 0x94, 0xd5, 0xb1,
+            0xef, 0x84, 0x41, 0xc4,
+            0xb2, 0x4e, 0x68, 0x48,
+            0x8d, 0xcf, 0xa1, 0xc9,
+        },
+    });
+
+    var v = values.span();
+    var o = options.span();
+
+    testing.expectEqual(@as(usize, 1), v.len);
+    testing.expectEqual(@as(usize, 1), o.len);
+
+    testing.expectEqualSlices(u8, "\x55\x94\xd5\xb1\xef\x84\x41\xc4\xb2\x4e\x68\x48\x8d\xcf\xa1\xc9", v[0].Set);
+    testing.expectEqual(OptionID.UUID, o[0]);
 }
 
 fn areOptionIDsEqual(prepared: []const ColumnSpec, computed: []const OptionID) bool {
