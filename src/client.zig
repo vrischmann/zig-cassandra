@@ -679,6 +679,20 @@ fn computeValues(allocator: *mem.Allocator, values: ?*std.ArrayList(Value), opti
                 try opts.append(.Boolean);
                 value = Value{ .Set = buf };
             },
+            .Float => |info| {
+                switch (Type) {
+                    f32 => try opts.append(.Float),
+                    f64 => try opts.append(.Double),
+                    else => @compileError("field type " ++ @typeName(Type) ++ " is not compatible with CQL"),
+                }
+
+                var buf = try allocator.alloc(u8, info.bits / 8);
+                errdefer allocator.free(buf);
+
+                @ptrCast(*align(1) Type, buf).* = arg;
+
+                value = Value{ .Set = buf };
+            },
             .Int => |info| {
                 switch (Type) {
                     i8, u8 => try opts.append(.Tinyint),
@@ -754,6 +768,31 @@ test "compute values: ints" {
     testing.expectEqual(OptionID.Bigint, o[6]);
     testing.expectEqualSlices(u8, "\xdf\xdc\xdc\xdc\xdc\xdc\xdc\xdc", v[7].Set);
     testing.expectEqual(OptionID.Bigint, o[7]);
+}
+
+test "compute values: floats" {
+    var arenaAllocator = testing.arenaAllocator();
+    defer arenaAllocator.deinit();
+    var allocator = &arenaAllocator.allocator;
+
+    var values = std.ArrayList(Value).init(allocator);
+    var options = std.ArrayList(OptionID).init(allocator);
+
+    _ = try computeValues(allocator, &values, &options, .{
+        .f32 = @as(f32, 0.002),
+        .f64 = @as(f64, 245601.000240305603),
+    });
+
+    var v = values.span();
+    var o = options.span();
+
+    testing.expectEqual(@as(usize, 2), v.len);
+    testing.expectEqual(@as(usize, 2), o.len);
+
+    testing.expectEqualSlices(u8, "\x6f\x12\x03\x3b", v[0].Set);
+    testing.expectEqual(OptionID.Float, o[0]);
+    testing.expectEqualSlices(u8, "\x46\xfd\x7d\x00\x08\xfb\x0d\x41", v[1].Set);
+    testing.expectEqual(OptionID.Double, o[1]);
 }
 
 test "compute values: bool" {
