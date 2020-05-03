@@ -675,6 +675,12 @@ fn computeValues(allocator: *mem.Allocator, values: ?*std.ArrayList(Value), opti
 }
 
 fn resolveOption(comptime Type: type) OptionID {
+    // Special case [16]u8 since we consider it a UUID.
+    if (Type == [16]u8) return .UUID;
+
+    // Special case []const u8 because it's used for strings.
+    if (Type == []const u8) return .Varchar;
+
     const type_info = @typeInfo(Type);
     switch (type_info) {
         .Bool => return .Boolean,
