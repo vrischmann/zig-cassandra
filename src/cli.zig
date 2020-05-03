@@ -115,15 +115,18 @@ fn doInsert(allocator: *mem.Allocator, client: *cql.TCPClient, n: usize) !void {
         .diags = &diags,
     };
 
+    const Args = struct {
+        age: u32,
+        ids: [4]u8,
+        name: ?[]const u8,
+    };
+    var empty_args: Args = undefined;
+
     const query_id = try client.prepare(
         allocator,
         options,
         "INSERT INTO foobar.age_to_ids(age, ids, name) VALUES(?, ?, ?)",
-        .{
-            .age = @as(u32, 0),
-            .ids = [_]u8{0} ** 4,
-            .name = "",
-        },
+        empty_args,
     );
 
     var i: usize = 0;
@@ -131,15 +134,17 @@ fn doInsert(allocator: *mem.Allocator, client: *cql.TCPClient, n: usize) !void {
         var arena = std.heap.ArenaAllocator.init(allocator);
         defer arena.deinit();
 
+        const args = Args{
+            .age = @intCast(u32, i) * @as(u32, 10),
+            .ids = [_]u8{ 0, 2, 4, 8 },
+            .name = if (i % 2 == 0) @as([]const u8, try std.fmt.allocPrint(&arena.allocator, "Vincent {}", .{i})) else null,
+        };
+
         _ = client.execute(
             &arena.allocator,
             options,
             query_id,
-            .{
-                .age = @intCast(u32, i) * @as(u32, 10),
-                .ids = &[_]u8{ 0, 2, 4, 8 },
-                .name = @as([]const u8, try std.fmt.allocPrint(&arena.allocator, "Vincent {}", .{i})),
-            },
+            args,
         ) catch |err| switch (err) {
             error.QueryExecutionFailed => {
                 std.debug.warn("error message: {}\n", .{diags.message});
