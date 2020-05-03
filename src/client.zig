@@ -647,6 +647,7 @@ pub fn Client(comptime InStreamType: type, comptime OutStreamType: type) type {
 }
 
 /// Compute a list of Value and OptionID for each field in the tuple or struct args.
+/// It resolves the values recursively too.
 ///
 /// TODO(vincent): it's not clear to the caller that data in `args` must outlive `values` because we don't duplicating memory
 /// unless absolutely necessary in the case of arrays.
@@ -666,109 +667,151 @@ fn computeValues(allocator: *mem.Allocator, values: ?*std.ArrayList(Value), opti
 
     inline for (@typeInfo(@TypeOf(args)).Struct.fields) |struct_field, i| {
         const Type = struct_field.field_type;
-        const field_type_info = @typeInfo(Type);
-        const field_name = struct_field.name;
 
-        const arg = @field(args, field_name);
+        const arg = @field(args, struct_field.name);
 
-        var value: Value = undefined;
-        switch (field_type_info) {
-            .Bool => {
-                var buf = try allocator.alloc(u8, 1);
-                errdefer allocator.free(buf);
+        try computeSingleValue(allocator, vals, opts, Type, arg);
+    }
+}
 
-                buf[0] = if (arg) 0x01 else 0x00;
-
-                try opts.append(.Boolean);
-                value = Value{ .Set = buf };
-                try vals.append(value);
+fn resolveOption(comptime Type: type) OptionID {
+    const type_info = @typeInfo(Type);
+    switch (type_info) {
+        .Bool => return .Boolean,
+        .Int => |info| switch (Type) {
+            i8, u8 => return .Tinyint,
+            i16, u16 => return .Smallint,
+            i32, u32 => return .Int,
+            i64, u64 => return .Bigint,
+            else => @compileError("field type " ++ @typeName(Type) ++ " is not compatible with CQL"),
+        },
+        .Float => |info| switch (Type) {
+            f32 => return .Float,
+            f64 => return .Double,
+            else => @compileError("field type " ++ @typeName(Type) ++ " is not compatible with CQL"),
+        },
+        .Pointer => |pointer| switch (pointer.size) {
+            .One => {
+                return resolveOption(pointer.child);
             },
-            .Float => |info| {
-                switch (Type) {
-                    f32 => try opts.append(.Float),
-                    f64 => try opts.append(.Double),
-                    else => @compileError("field type " ++ @typeName(Type) ++ " is not compatible with CQL"),
-                }
+            else => @compileError("invalid pointer size " ++ @tagName(pointer.size)),
+        },
+        .Optional => |optional| {
+            return resolveOption(optional.child);
+        },
+        else => @compileError("field type " ++ @typeName(Type) ++ " not handled yet (type id: " ++ @tagName(type_info) ++ ")"),
+    }
+}
 
-                var buf = try allocator.alloc(u8, info.bits / 8);
-                errdefer allocator.free(buf);
+fn computeSingleValue(allocator: *mem.Allocator, values: *std.ArrayList(Value), options: *std.ArrayList(OptionID), comptime Type: type, arg: Type) !void {
+    const type_info = @typeInfo(Type);
 
-                @ptrCast(*align(1) Type, buf).* = arg;
+    var value: Value = undefined;
 
-                value = Value{ .Set = buf };
-                try vals.append(value);
+    // Special case [16]u8 since we consider it a UUID.
+    if (Type == [16]u8) {
+        try options.append(.UUID);
+        value = Value{ .Set = try mem.dupe(allocator, u8, &arg) };
+        try values.append(value);
+
+        return;
+    }
+
+    // Special case []const u8 because it's used for strings.
+    if (Type == []const u8) {
+        try options.append(.Varchar);
+        // TODO(vincent): should we make a copy ?
+        value = Value{ .Set = arg };
+        try values.append(value);
+
+        return;
+    }
+
+    // The NotSet struct allows the caller to not set a value, which according to the
+    // protocol will not result in any change to the existing value.
+    if (Type == NotSet) {
+        try options.append(resolveOption(arg.type));
+        value = Value{ .NotSet = {} };
+        try values.append(value);
+
+        return;
+    }
+
+    switch (type_info) {
+        .Bool => {
+            var buf = try allocator.alloc(u8, 1);
+            errdefer allocator.free(buf);
+
+            buf[0] = if (arg) 0x01 else 0x00;
+
+            try options.append(.Boolean);
+            value = Value{ .Set = buf };
+            try values.append(value);
+        },
+        .Int => |info| {
+            try options.append(resolveOption(Type));
+
+            var buf = try allocator.alloc(u8, info.bits / 8);
+            errdefer allocator.free(buf);
+
+            mem.writeIntBig(Type, @ptrCast(*[info.bits / 8]u8, buf), arg);
+
+            value = Value{ .Set = buf };
+            try values.append(value);
+        },
+        .Float => |info| {
+            try options.append(resolveOption(Type));
+
+            var buf = try allocator.alloc(u8, info.bits / 8);
+            errdefer allocator.free(buf);
+
+            @ptrCast(*align(1) Type, buf).* = arg;
+
+            value = Value{ .Set = buf };
+            try values.append(value);
+        },
+        .Pointer => |pointer| switch (pointer.size) {
+            .One => {
+                try computeValues(allocator, values, options, .{arg.*});
+                return;
             },
-            .Int => |info| {
-                switch (Type) {
-                    i8, u8 => try opts.append(.Tinyint),
-                    i16, u16 => try opts.append(.Smallint),
-                    i32, u32 => try opts.append(.Int),
-                    i64, u64 => try opts.append(.Bigint),
-                    else => @compileError("field type " ++ @typeName(Type) ++ " is not compatible with CQL"),
-                }
-
-                var buf = try allocator.alloc(u8, info.bits / 8);
-                errdefer allocator.free(buf);
-
-                mem.writeIntBig(Type, @ptrCast(*[info.bits / 8]u8, buf), arg);
-
-                value = Value{ .Set = buf };
-                try vals.append(value);
-            },
-            .Pointer => |pointer| switch (pointer.size) {
-                .One => {
-                    try computeValues(allocator, values, options, .{arg.*});
-                    continue;
-                },
-                .Slice => {
-                    // Special case []const u8 because it's used for strings.
-                    if (pointer.is_const and pointer.child == u8) {
-                        try opts.append(.Varchar);
-                        // TODO(vincent): should we make a copy ?
-                        value = Value{ .Set = arg };
-                        try vals.append(value);
-
-                        continue;
-                    }
-
-                    // Otherwise it's a list or a set, encode a new list of values.
-
-                    var inner_values = std.ArrayList(Value).init(allocator);
-                    for (arg) |item| {
-                        try computeValues(allocator, &inner_values, null, .{item});
-                    }
-
-                    // TODO(vincent): how de we know it's a set or list ?
-                    try opts.append(.Set);
-                    value = Value{ .Set = try serializeValues(allocator, inner_values.toOwnedSlice()) };
-                    try vals.append(value);
-                },
-                else => @compileError("invalid pointer size " ++ @tagName(pointer.size)),
-            },
-            .Array => |array| {
-                // Special case [16]u8 since we consider it a UUID.
-                if (array.len == 16 and array.child == u8) {
-                    try opts.append(.UUID);
-                    value = Value{ .Set = try mem.dupe(allocator, u8, &arg) };
-                    try vals.append(value);
-
-                    continue;
-                }
-
+            .Slice => {
                 // Otherwise it's a list or a set, encode a new list of values.
-
                 var inner_values = std.ArrayList(Value).init(allocator);
                 for (arg) |item| {
                     try computeValues(allocator, &inner_values, null, .{item});
                 }
 
                 // TODO(vincent): how de we know it's a set or list ?
-                try opts.append(.Set);
+                try options.append(.Set);
                 value = Value{ .Set = try serializeValues(allocator, inner_values.toOwnedSlice()) };
-                try vals.append(value);
+                try values.append(value);
             },
-            else => @compileError("field type " ++ @typeName(Type) ++ " not handled yet"),
-        }
+            else => @compileError("invalid pointer size " ++ @tagName(pointer.size)),
+        },
+        .Array => |array| {
+
+            // Otherwise it's a list or a set, encode a new list of values.
+            var inner_values = std.ArrayList(Value).init(allocator);
+            for (arg) |item| {
+                try computeValues(allocator, &inner_values, null, .{item});
+            }
+
+            // TODO(vincent): how de we know it's a set or list ?
+            try options.append(.Set);
+            value = Value{ .Set = try serializeValues(allocator, inner_values.toOwnedSlice()) };
+            try values.append(value);
+        },
+        .Optional => |optional| {
+            if (arg) |a| {
+                try computeSingleValue(allocator, values, options, optional.child, a);
+            } else {
+                try options.append(resolveOption(optional.child));
+                value = Value{ .Null = {} };
+                try values.append(value);
+            }
+        },
+        else => @compileError("field type " ++ @typeName(Type) ++ " not handled yet (type id: " ++ @tagName(type_info) ++ ")"),
     }
 }
 
@@ -983,6 +1026,37 @@ test "compute values: uuid" {
 
     testing.expectEqualSlices(u8, "\x55\x94\xd5\xb1\xef\x84\x41\xc4\xb2\x4e\x68\x48\x8d\xcf\xa1\xc9", v[0].Set);
     testing.expectEqual(OptionID.UUID, o[0]);
+}
+
+test "compute values: not set and null" {
+    var arenaAllocator = testing.arenaAllocator();
+    defer arenaAllocator.deinit();
+    var allocator = &arenaAllocator.allocator;
+
+    var values = std.ArrayList(Value).init(allocator);
+    var options = std.ArrayList(OptionID).init(allocator);
+
+    const Args = struct {
+        not_set: NotSet,
+        nullable: ?u64,
+    };
+
+    _ = try computeValues(allocator, &values, &options, Args{
+        .not_set = NotSet{ .type = i32 },
+        .nullable = null,
+    });
+
+    var v = values.span();
+    var o = options.span();
+
+    testing.expectEqual(@as(usize, 2), v.len);
+    testing.expectEqual(@as(usize, 2), o.len);
+
+    testing.expect(v[0] == .NotSet);
+    testing.expectEqual(OptionID.Int, o[0]);
+
+    testing.expect(v[1] == .Null);
+    testing.expectEqual(OptionID.Bigint, o[1]);
 }
 
 fn areOptionIDsEqual(prepared: []const ColumnSpec, computed: []const OptionID) bool {

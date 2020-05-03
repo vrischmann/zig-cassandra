@@ -18,6 +18,22 @@ pub const Value = union(ValueTag) {
     Null: void,
 };
 
+/// This struct is intended to be used as a field in a struct/tuple argument
+/// passed to query/execute.
+///
+/// For example if you have a prepared update query where you don't want to touch
+/// the second field, you can pass a struct/tuple like this:
+///
+/// .{
+///    .arg1 = ...,
+///    .arg2 = NotSet{ .type = i64 },
+/// }
+///
+/// TODO(vincent): the `type` field is necessary for now to make NotSet work but it's not great.
+pub const NotSet = struct {
+    type: type,
+};
+
 pub const NamedValue = struct {
     name: []const u8,
     value: Value,
