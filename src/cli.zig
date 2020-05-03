@@ -27,7 +27,7 @@ fn doQuery(allocator: *mem.Allocator, client: *cql.TCPClient) !void {
         var arena = std.heap.ArenaAllocator.init(allocator);
         defer arena.deinit();
 
-        var iter = (try client.cquery(
+        var iter = (try client.query(
             &arena.allocator,
             options,
             "SELECT ids, age, name FROM foobar.age_to_ids",
@@ -55,7 +55,7 @@ fn doPrepare(allocator: *mem.Allocator, client: *cql.TCPClient) ![]const u8 {
         .diags = &diags,
     };
 
-    const query_id = client.cprepare(
+    const query_id = client.prepare(
         allocator,
         options,
         "SELECT ids, age, name FROM foobar.age_to_ids WHERE age in (?, ?)",

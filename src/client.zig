@@ -106,16 +106,16 @@ pub const TCPClient = struct {
         );
     }
 
-    pub inline fn cprepare(self: *Self, allocator: *mem.Allocator, options: QueryOptions, comptime query_string: []const u8, args: var) ![]const u8 {
-        return self.u.cprepare(allocator, options, query_string, args);
+    pub inline fn prepare(self: *Self, allocator: *mem.Allocator, options: QueryOptions, comptime query_string: []const u8, args: var) ![]const u8 {
+        return self.u.prepare(allocator, options, query_string, args);
     }
 
     pub inline fn execute(self: *Self, allocator: *mem.Allocator, options: QueryOptions, query_id: []const u8, args: var) !?Iterator {
         return self.u.execute(allocator, options, query_id, args);
     }
 
-    pub inline fn cquery(self: *Self, allocator: *mem.Allocator, options: QueryOptions, comptime query_string: []const u8, args: var) !?Iterator {
-        return self.u.cquery(allocator, options, query_string, args);
+    pub inline fn query(self: *Self, allocator: *mem.Allocator, options: QueryOptions, comptime query_string: []const u8, args: var) !?Iterator {
+        return self.u.query(allocator, options, query_string, args);
     }
 };
 
@@ -183,7 +183,7 @@ pub fn Client(comptime InStreamType: type, comptime OutStreamType: type) type {
             self.consistency = consistency;
         }
 
-        pub fn cprepare(self: *Self, allocator: *mem.Allocator, options: QueryOptions, comptime query_string: []const u8, args: var) ![]const u8 {
+        pub fn prepare(self: *Self, allocator: *mem.Allocator, options: QueryOptions, comptime query_string: []const u8, args: var) ![]const u8 {
             var dummy_diags = QueryOptions.Diagnostics{};
             var diags = options.diags orelse &dummy_diags;
 
@@ -232,7 +232,7 @@ pub fn Client(comptime InStreamType: type, comptime OutStreamType: type) type {
 
         // TODO(vincent): maybe add not comptime equivalent ?
 
-        pub fn cquery(self: *Self, allocator: *mem.Allocator, options: QueryOptions, comptime query_string: []const u8, args: var) !?Iterator {
+        pub fn query(self: *Self, allocator: *mem.Allocator, options: QueryOptions, comptime query_string: []const u8, args: var) !?Iterator {
             var dummy_diags = QueryOptions.Diagnostics{};
             var diags = options.diags orelse &dummy_diags;
 
@@ -484,11 +484,11 @@ pub fn Client(comptime InStreamType: type, comptime OutStreamType: type) type {
             }
         }
 
-        fn writeQuery(self: *Self, allocator: *mem.Allocator, diags: *QueryOptions.Diagnostics, query: []const u8, query_parameters: QueryParameters) !Result {
+        fn writeQuery(self: *Self, allocator: *mem.Allocator, diags: *QueryOptions.Diagnostics, query_string: []const u8, query_parameters: QueryParameters) !Result {
             // Write QUERY
             {
                 var frame = QueryFrame{
-                    .query = query,
+                    .query = query_string,
                     .query_parameters = query_parameters,
                 };
 
@@ -520,11 +520,11 @@ pub fn Client(comptime InStreamType: type, comptime OutStreamType: type) type {
             };
         }
 
-        fn writePrepare(self: *Self, allocator: *mem.Allocator, metadata_allocator: *mem.Allocator, diags: *QueryOptions.Diagnostics, query: []const u8) !Result {
+        fn writePrepare(self: *Self, allocator: *mem.Allocator, metadata_allocator: *mem.Allocator, diags: *QueryOptions.Diagnostics, query_string: []const u8) !Result {
             // Write PREPARE
             {
                 var frame = PrepareFrame{
-                    .query = query,
+                    .query = query_string,
                     .keyspace = null,
                 };
 
