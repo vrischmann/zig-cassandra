@@ -740,11 +740,17 @@ fn computeValues(allocator: *mem.Allocator, values: ?*std.ArrayList(Value), opti
                         continue;
                     }
 
-                    // Otherwise it's a list or a set.
+                    // Otherwise it's a list or a set, encode a new list of values.
 
+                    var inner_values = std.ArrayList(Value).init(allocator);
                     for (arg) |item| {
-                        try computeValues(allocator, values, options, .{item});
+                        try computeValues(allocator, &inner_values, null, .{item});
                     }
+
+                    // TODO(vincent): how de we know it's a set or list ?
+                    try opts.append(.Set);
+                    value = Value{ .Set = try concatenateValues(allocator, inner_values.toOwnedSlice()) };
+                    try vals.append(value);
                 },
                 else => @compileError("invalid pointer size " ++ @tagName(pointer.size)),
             },
@@ -758,15 +764,59 @@ fn computeValues(allocator: *mem.Allocator, values: ?*std.ArrayList(Value), opti
                     continue;
                 }
 
-                // Otherwise it's a list or a set
+                // Otherwise it's a list or a set, encode a new list of values.
 
+                var inner_values = std.ArrayList(Value).init(allocator);
                 for (arg) |item| {
-                    try computeValues(allocator, values, options, .{item});
+                    try computeValues(allocator, &inner_values, null, .{item});
                 }
+
+                // TODO(vincent): how de we know it's a set or list ?
+                try opts.append(.Set);
+                value = Value{ .Set = try concatenateValues(allocator, inner_values.toOwnedSlice()) };
+                try vals.append(value);
             },
             else => @compileError("field type " ++ @typeName(Type) ++ " not handled yet"),
         }
     }
+}
+
+fn concatenateValues(allocator: *mem.Allocator, values: []const Value) ![]const u8 {
+    var size: usize = 0;
+    for (values) |value| {
+        switch (value) {
+            .Set => |v| size += v.len,
+            else => {},
+        }
+    }
+
+    const buf = try allocator.alloc(u8, size);
+    errdefer allocator.free(buf);
+
+    var idx: usize = 0;
+    for (values) |value| {
+        switch (value) {
+            .Set => |v| {
+                mem.copy(u8, buf[idx..], v);
+                idx += v.len;
+            },
+            else => {},
+        }
+    }
+
+    return buf;
+}
+
+test "concatenate values" {
+    var arenaAllocator = testing.arenaAllocator();
+    defer arenaAllocator.deinit();
+
+    var v1 = Value{ .Set = "foobar" };
+    var v2 = Value{ .Set = "barbaz" };
+
+    var data = try concatenateValues(&arenaAllocator.allocator, &[_]Value{ v1, v2 });
+    testing.expectEqual(@as(usize, 12), data.len);
+    testing.expectEqualStrings("foobarbarbaz", data);
 }
 
 test "compute values: ints" {
@@ -914,18 +964,14 @@ test "compute values: list" {
     var v = values.span();
     var o = options.span();
 
-    testing.expectEqual(@as(usize, 4), v.len);
-    testing.expectEqual(@as(usize, 4), o.len);
+    testing.expectEqual(@as(usize, 2), v.len);
+    testing.expectEqual(@as(usize, 2), o.len);
 
-    testing.expectEqualSlices(u8, "\x01\x00", v[0].Set);
-    testing.expectEqual(OptionID.Smallint, o[0]);
-    testing.expectEqualSlices(u8, "\x50\x20", v[1].Set);
-    testing.expectEqual(OptionID.Smallint, o[1]);
+    testing.expectEqualSlices(u8, "\x01\x00\x50\x20", v[0].Set);
+    testing.expectEqual(OptionID.Set, o[0]);
 
-    testing.expectEqualSlices(u8, "\x01\x00", v[2].Set);
-    testing.expectEqual(OptionID.Smallint, o[2]);
-    testing.expectEqualSlices(u8, "\x50\x20", v[3].Set);
-    testing.expectEqual(OptionID.Smallint, o[3]);
+    testing.expectEqualSlices(u8, "\x01\x00\x50\x20", v[1].Set);
+    testing.expectEqual(OptionID.Set, o[1]);
 }
 
 test "compute values: uuid" {
