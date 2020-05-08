@@ -30,9 +30,6 @@ usingnamespace @import("frames/batch.zig");
 const testing = @import("testing.zig");
 
 pub const InitOptions = struct {
-    /// The address of a seed node.
-    seed_address: net.Address = undefined,
-
     /// The compression algorithm to use if possible.
     compression: ?CompressionAlgorithm = null,
 
@@ -95,8 +92,8 @@ pub const TCPClient = struct {
 
     u: ClientType,
 
-    pub fn init(self: *Self, allocator: *mem.Allocator, options: InitOptions) !void {
-        self.socket = try net.tcpConnectToAddress(options.seed_address);
+    pub fn init(self: *Self, allocator: *mem.Allocator, seed_address: net.Address, options: InitOptions) !void {
+        self.socket = try net.tcpConnectToAddress(seed_address);
 
         _ = try self.u.init(
             allocator,

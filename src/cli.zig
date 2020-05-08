@@ -254,7 +254,6 @@ pub fn main() anyerror!void {
     // Connect to the seed node
 
     var init_options = cql.InitOptions{};
-    init_options.seed_address = address;
     // init_options.compression = cql.CompressionAlgorithm.LZ4;
     init_options.username = "cassandra";
     init_options.password = "cassandra";
@@ -266,6 +265,7 @@ pub fn main() anyerror!void {
 
     client.init(
         allocator,
+        address,
         init_options,
     ) catch |err| switch (err) {
         error.NoUsername, error.NoPassword => {
