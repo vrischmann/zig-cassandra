@@ -44,8 +44,7 @@ const Rows = struct {
             var j: usize = 0;
             while (j < rows.metadata.column_specs.len) : (j += 1) {
                 const column_spec = rows.metadata.column_specs[j];
-                // TODO(vincent): can this ever be null ?
-                const column_data = (try pr.readBytes(allocator)) orelse unreachable;
+                const column_data = (try pr.readBytes(allocator)) orelse &[_]u8{};
 
                 _ = try row_data.append(ColumnData{
                     .slice = column_data,
