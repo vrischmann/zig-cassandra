@@ -4,7 +4,15 @@ const io = std.io;
 const mem = std.mem;
 
 usingnamespace @import("primitive_types.zig");
-usingnamespace @import("frame.zig");
+
+const PrimitiveReader = @import("primitive/reader.zig").PrimitiveReader;
+
+const RowData = @import("frame.zig").RowData;
+const ColumnData = @import("frame.zig").ColumnData;
+
+const GlobalTableSpec = @import("metadata.zig").GlobalTableSpec;
+const RowsMetadata = @import("metadata.zig").RowsMetadata;
+const ColumnSpec = @import("metadata.zig").ColumnSpec;
 
 const testing = @import("testing.zig");
 

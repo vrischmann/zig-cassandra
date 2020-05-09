@@ -2,8 +2,18 @@ const std = @import("std");
 const mem = std.mem;
 const meta = std.meta;
 
-usingnamespace @import("../frame.zig");
 usingnamespace @import("../primitive_types.zig");
+usingnamespace @import("../event.zig");
+
+const PrimitiveReader = @import("../primitive/reader.zig").PrimitiveReader;
+
+const RowData = @import("../frame.zig").RowData;
+const ColumnData = @import("../frame.zig").ColumnData;
+
+const PreparedMetadata = @import("../metadata.zig").PreparedMetadata;
+const RowsMetadata = @import("../metadata.zig").RowsMetadata;
+
+const checkHeader = @import("../frame.zig").checkHeader;
 const testing = @import("../testing.zig");
 
 const ResultKind = packed enum(u32) {

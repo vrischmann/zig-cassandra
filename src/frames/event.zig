@@ -3,8 +3,12 @@ const mem = std.mem;
 const meta = std.meta;
 const net = std.net;
 
-usingnamespace @import("../frame.zig");
 usingnamespace @import("../primitive_types.zig");
+usingnamespace @import("../event.zig");
+
+const PrimitiveReader = @import("../primitive/reader.zig").PrimitiveReader;
+
+const checkHeader = @import("../frame.zig").checkHeader;
 const testing = @import("../testing.zig");
 
 /// EVENT is an event pushed by the server.

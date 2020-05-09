@@ -6,7 +6,19 @@ const net = std.net;
 
 const lz4 = @import("lz4.zig");
 
-usingnamespace @import("frame.zig");
+const FrameHeader = @import("frame.zig").FrameHeader;
+const FrameFlags = @import("frame.zig").FrameFlags;
+const RawFrame = @import("frame.zig").RawFrame;
+const RawFrameReader = @import("frame.zig").RawFrameReader;
+const RawFrameWriter = @import("frame.zig").RawFrameWriter;
+
+const PrimitiveReader = @import("primitive/reader.zig").PrimitiveReader;
+const PrimitiveWriter = @import("primitive/writer.zig").PrimitiveWriter;
+
+const PreparedMetadata = @import("metadata.zig").PreparedMetadata;
+const RowsMetadata = @import("metadata.zig").RowsMetadata;
+const ColumnSpec = @import("metadata.zig").ColumnSpec;
+
 usingnamespace @import("primitive_types.zig");
 usingnamespace @import("iterator.zig");
 usingnamespace @import("query_parameters.zig");
