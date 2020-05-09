@@ -22,7 +22,6 @@ TODO
 * Setting a keyspace
 * Cluster client / client pool capable of maintaining a connection to each node in the cluster + autodiscovery with events
 * Implement token-aware routing
-* Use a new syntax for bind marker ala-fmt.format to type check the args
 * Need to add custom types for thins we can't infer with Zig's meta programming (things like Counter, Time, Timestamp, Timeuuid, Varint).
 * Expose as a C library ?
 
