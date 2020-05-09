@@ -209,12 +209,8 @@ pub fn Client(comptime InStreamType: type, comptime OutStreamType: type) type {
                 }
             }
 
-            var option_ids = std.ArrayList(OptionID).init(allocator);
+            var option_ids = std.ArrayList(?OptionID).init(allocator);
             try computeValues(allocator, null, &option_ids, args);
-
-            // TODO(vincent): need to store the metadata if present so that it can later be used with EXECUTE
-            // while adding the flag Skip_Metadata.
-            // See §4.1.4 in the protocol spec.
 
             var result = try self.writePrepare(self.allocator, allocator, diags, query_string);
             switch (result) {
@@ -262,7 +258,7 @@ pub fn Client(comptime InStreamType: type, comptime OutStreamType: type) type {
             try computeValues(allocator, &values, null, args);
 
             // TODO(vincent): handle named values
-            // TODO(vincent): handle skip_metadata (see §4.1.4 in the spec
+            // TODO(vincent): handle skip_metadata (see §4.1.4 in the spec)
             var parameters = QueryParameters{
                 .consistency_level = self.options.consistency,
                 .values = undefined,
@@ -299,7 +295,7 @@ pub fn Client(comptime InStreamType: type, comptime OutStreamType: type) type {
             const ps_rows_metadata = prepared_statement_metadata_kv.?.value.rows_metadata;
 
             var values = std.ArrayList(Value).init(allocator);
-            var option_ids = std.ArrayList(OptionID).init(allocator);
+            var option_ids = std.ArrayList(?OptionID).init(allocator);
             defer option_ids.deinit();
             try computeValues(allocator, &values, &option_ids, args);
 
@@ -312,7 +308,6 @@ pub fn Client(comptime InStreamType: type, comptime OutStreamType: type) type {
             // Check that the values provided are compatible with the prepared statement
 
             // TODO(vincent): handle named values
-            // TODO(vincent): handle skip_metadata (see §4.1.4 in the spec
             var parameters = QueryParameters{
                 .consistency_level = self.options.consistency,
                 .values = undefined,
@@ -425,7 +420,6 @@ pub fn Client(comptime InStreamType: type, comptime OutStreamType: type) type {
 
             var supported_frame = try SupportedFrame.read(allocator, &self.primitive_reader);
 
-            // TODO(vincent): handle compression
             if (supported_frame.protocol_versions.len > 0) {
                 self.negotiated_state.protocol_version = supported_frame.protocol_versions[0];
             } else {
@@ -669,7 +663,7 @@ pub fn Client(comptime InStreamType: type, comptime OutStreamType: type) type {
 /// TODO(vincent): it's not clear to the caller that data in `args` must outlive `values` because we don't duplicating memory
 /// unless absolutely necessary in the case of arrays.
 /// Think of a way to communicate that.
-fn computeValues(allocator: *mem.Allocator, values: ?*std.ArrayList(Value), options: ?*std.ArrayList(OptionID), args: var) !void {
+fn computeValues(allocator: *mem.Allocator, values: ?*std.ArrayList(Value), options: ?*std.ArrayList(?OptionID), args: var) !void {
     if (@typeInfo(@TypeOf(args)) != .Struct) {
         @compileError("Expected tuple or struct argument, found " ++ @typeName(args) ++ " of type " ++ @tagName(@typeInfo(args)));
     }
@@ -678,7 +672,7 @@ fn computeValues(allocator: *mem.Allocator, values: ?*std.ArrayList(Value), opti
     defer dummy_vals.deinit();
     var vals = values orelse &dummy_vals;
 
-    var dummy_opts = std.ArrayList(OptionID).init(allocator);
+    var dummy_opts = std.ArrayList(?OptionID).init(allocator);
     defer dummy_opts.deinit();
     var opts = options orelse &dummy_opts;
 
@@ -726,7 +720,7 @@ fn resolveOption(comptime Type: type) OptionID {
     }
 }
 
-fn computeSingleValue(allocator: *mem.Allocator, values: *std.ArrayList(Value), options: *std.ArrayList(OptionID), comptime Type: type, arg: Type) !void {
+fn computeSingleValue(allocator: *mem.Allocator, values: *std.ArrayList(Value), options: *std.ArrayList(?OptionID), comptime Type: type, arg: Type) !void {
     const type_info = @typeInfo(Type);
 
     var value: Value = undefined;
@@ -805,8 +799,7 @@ fn computeSingleValue(allocator: *mem.Allocator, values: *std.ArrayList(Value), 
                     try computeValues(allocator, &inner_values, null, .{item});
                 }
 
-                // TODO(vincent): how de we know it's a set or list ?
-                try options.append(.Set);
+                try options.append(null);
                 value = Value{ .Set = try serializeValues(allocator, inner_values.toOwnedSlice()) };
                 try values.append(value);
             },
@@ -820,8 +813,7 @@ fn computeSingleValue(allocator: *mem.Allocator, values: *std.ArrayList(Value), 
                 try computeValues(allocator, &inner_values, null, .{item});
             }
 
-            // TODO(vincent): how de we know it's a set or list ?
-            try options.append(.Set);
+            try options.append(null);
             value = Value{ .Set = try serializeValues(allocator, inner_values.toOwnedSlice()) };
             try values.append(value);
         },
@@ -875,7 +867,7 @@ test "compute values: ints" {
     var allocator = &arenaAllocator.allocator;
 
     var values = std.ArrayList(Value).init(allocator);
-    var options = std.ArrayList(OptionID).init(allocator);
+    var options = std.ArrayList(?OptionID).init(allocator);
 
     const my_u64 = @as(u64, 20000);
 
@@ -898,27 +890,27 @@ test "compute values: ints" {
     testing.expectEqual(@as(usize, 9), o.len);
 
     testing.expectEqualSlices(u8, "\x7f", v[0].Set);
-    testing.expectEqual(OptionID.Tinyint, o[0]);
+    testing.expectEqual(OptionID.Tinyint, o[0].?);
     testing.expectEqualSlices(u8, "\xff", v[1].Set);
-    testing.expectEqual(OptionID.Tinyint, o[1]);
+    testing.expectEqual(OptionID.Tinyint, o[1].?);
 
     testing.expectEqualSlices(u8, "\x7f\xff", v[2].Set);
-    testing.expectEqual(OptionID.Smallint, o[2]);
+    testing.expectEqual(OptionID.Smallint, o[2].?);
     testing.expectEqualSlices(u8, "\xde\xdf", v[3].Set);
-    testing.expectEqual(OptionID.Smallint, o[3]);
+    testing.expectEqual(OptionID.Smallint, o[3].?);
 
     testing.expectEqualSlices(u8, "\x7f\xff\xff\xff", v[4].Set);
-    testing.expectEqual(OptionID.Int, o[4]);
+    testing.expectEqual(OptionID.Int, o[4].?);
     testing.expectEqualSlices(u8, "\xab\xab\xab\xaf", v[5].Set);
-    testing.expectEqual(OptionID.Int, o[5]);
+    testing.expectEqual(OptionID.Int, o[5].?);
 
     testing.expectEqualSlices(u8, "\x7f\xff\xff\xff\xff\xff\xff\xff", v[6].Set);
-    testing.expectEqual(OptionID.Bigint, o[6]);
+    testing.expectEqual(OptionID.Bigint, o[6].?);
     testing.expectEqualSlices(u8, "\xdc\xdc\xdc\xdc\xdc\xdc\xdc\xdf", v[7].Set);
-    testing.expectEqual(OptionID.Bigint, o[7]);
+    testing.expectEqual(OptionID.Bigint, o[7].?);
 
     testing.expectEqualSlices(u8, "\x00\x00\x00\x00\x00\x00\x4e\x20", v[8].Set);
-    testing.expectEqual(OptionID.Bigint, o[8]);
+    testing.expectEqual(OptionID.Bigint, o[8].?);
 }
 
 test "compute values: floats" {
@@ -927,7 +919,7 @@ test "compute values: floats" {
     var allocator = &arenaAllocator.allocator;
 
     var values = std.ArrayList(Value).init(allocator);
-    var options = std.ArrayList(OptionID).init(allocator);
+    var options = std.ArrayList(?OptionID).init(allocator);
 
     const my_f64 = @as(f64, 402.240);
 
@@ -944,11 +936,11 @@ test "compute values: floats" {
     testing.expectEqual(@as(usize, 3), o.len);
 
     testing.expectEqualSlices(u8, "\x6f\x12\x03\x3b", v[0].Set);
-    testing.expectEqual(OptionID.Float, o[0]);
+    testing.expectEqual(OptionID.Float, o[0].?);
     testing.expectEqualSlices(u8, "\x46\xfd\x7d\x00\x08\xfb\x0d\x41", v[1].Set);
-    testing.expectEqual(OptionID.Double, o[1]);
+    testing.expectEqual(OptionID.Double, o[1].?);
     testing.expectEqualSlices(u8, "\xa4\x70\x3d\x0a\xd7\x23\x79\x40", v[2].Set);
-    testing.expectEqual(OptionID.Double, o[2]);
+    testing.expectEqual(OptionID.Double, o[2].?);
 }
 
 test "compute values: strings" {
@@ -957,7 +949,7 @@ test "compute values: strings" {
     var allocator = &arenaAllocator.allocator;
 
     var values = std.ArrayList(Value).init(allocator);
-    var options = std.ArrayList(OptionID).init(allocator);
+    var options = std.ArrayList(?OptionID).init(allocator);
 
     _ = try computeValues(allocator, &values, &options, .{
         .string = @as([]const u8, try mem.dupe(allocator, u8, "foobar")),
@@ -970,7 +962,7 @@ test "compute values: strings" {
     testing.expectEqual(@as(usize, 1), o.len);
 
     testing.expectEqualStrings("foobar", v[0].Set);
-    testing.expectEqual(OptionID.Varchar, o[0]);
+    testing.expectEqual(OptionID.Varchar, o[0].?);
 }
 
 test "compute values: bool" {
@@ -979,7 +971,7 @@ test "compute values: bool" {
     var allocator = &arenaAllocator.allocator;
 
     var values = std.ArrayList(Value).init(allocator);
-    var options = std.ArrayList(OptionID).init(allocator);
+    var options = std.ArrayList(?OptionID).init(allocator);
 
     _ = try computeValues(allocator, &values, &options, .{
         .bool1 = true,
@@ -993,18 +985,18 @@ test "compute values: bool" {
     testing.expectEqual(@as(usize, 2), o.len);
 
     testing.expectEqualSlices(u8, "\x01", v[0].Set);
-    testing.expectEqual(OptionID.Boolean, o[0]);
+    testing.expectEqual(OptionID.Boolean, o[0].?);
     testing.expectEqualSlices(u8, "\x00", v[1].Set);
-    testing.expectEqual(OptionID.Boolean, o[1]);
+    testing.expectEqual(OptionID.Boolean, o[1].?);
 }
 
-test "compute values: list" {
+test "compute values: set/list" {
     var arenaAllocator = testing.arenaAllocator();
     defer arenaAllocator.deinit();
     var allocator = &arenaAllocator.allocator;
 
     var values = std.ArrayList(Value).init(allocator);
-    var options = std.ArrayList(OptionID).init(allocator);
+    var options = std.ArrayList(?OptionID).init(allocator);
 
     _ = try computeValues(allocator, &values, &options, .{
         .string = &[_]u16{ 0x01, 0x2050 },
@@ -1018,10 +1010,10 @@ test "compute values: list" {
     testing.expectEqual(@as(usize, 2), o.len);
 
     testing.expectEqualSlices(u8, "\x00\x00\x00\x02\x00\x00\x00\x02\x00\x01\x00\x00\x00\x02\x20\x50", v[0].Set);
-    testing.expectEqual(OptionID.Set, o[0]);
+    testing.expect(o[0] == null);
 
     testing.expectEqualSlices(u8, "\x00\x00\x00\x02\x00\x00\x00\x02\x00\x01\x00\x00\x00\x02\x20\x50", v[1].Set);
-    testing.expectEqual(OptionID.Set, o[1]);
+    testing.expect(o[1] == null);
 }
 
 test "compute values: uuid" {
@@ -1030,7 +1022,7 @@ test "compute values: uuid" {
     var allocator = &arenaAllocator.allocator;
 
     var values = std.ArrayList(Value).init(allocator);
-    var options = std.ArrayList(OptionID).init(allocator);
+    var options = std.ArrayList(?OptionID).init(allocator);
 
     _ = try computeValues(allocator, &values, &options, .{
         .uuid = [16]u8{
@@ -1048,7 +1040,7 @@ test "compute values: uuid" {
     testing.expectEqual(@as(usize, 1), o.len);
 
     testing.expectEqualSlices(u8, "\x55\x94\xd5\xb1\xef\x84\x41\xc4\xb2\x4e\x68\x48\x8d\xcf\xa1\xc9", v[0].Set);
-    testing.expectEqual(OptionID.UUID, o[0]);
+    testing.expectEqual(OptionID.UUID, o[0].?);
 }
 
 test "compute values: not set and null" {
@@ -1057,7 +1049,7 @@ test "compute values: not set and null" {
     var allocator = &arenaAllocator.allocator;
 
     var values = std.ArrayList(Value).init(allocator);
-    var options = std.ArrayList(OptionID).init(allocator);
+    var options = std.ArrayList(?OptionID).init(allocator);
 
     const Args = struct {
         not_set: NotSet,
@@ -1076,17 +1068,19 @@ test "compute values: not set and null" {
     testing.expectEqual(@as(usize, 2), o.len);
 
     testing.expect(v[0] == .NotSet);
-    testing.expectEqual(OptionID.Int, o[0]);
+    testing.expectEqual(OptionID.Int, o[0].?);
 
     testing.expect(v[1] == .Null);
-    testing.expectEqual(OptionID.Bigint, o[1]);
+    testing.expectEqual(OptionID.Bigint, o[1].?);
 }
 
-fn areOptionIDsEqual(prepared: []const ColumnSpec, computed: []const OptionID) bool {
+fn areOptionIDsEqual(prepared: []const ColumnSpec, computed: []const ?OptionID) bool {
     if (prepared.len != computed.len) return false;
 
     for (prepared) |column_spec, i| {
-        if (column_spec.option != computed[i]) return false;
+        if (computed[i]) |option| {
+            if (column_spec.option != option) return false;
+        }
     }
 
     return true;
