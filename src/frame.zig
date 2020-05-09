@@ -197,6 +197,10 @@ pub const RowsMetadata = struct {
     paging_state: ?[]const u8,
     new_metadata_id: ?[]const u8,
     global_table_spec: ?GlobalTableSpec,
+
+    /// Store the column count as well as the column specs because
+    /// with FlagNoMetadata the specs are empty
+    columns_count: usize,
     column_specs: []const ColumnSpec,
 
     const FlagGlobalTablesSpec = 0x0001;
@@ -222,11 +226,12 @@ pub const RowsMetadata = struct {
             .paging_state = null,
             .new_metadata_id = null,
             .global_table_spec = null,
+            .columns_count = 0,
             .column_specs = undefined,
         };
 
         const flags = try pr.readInt(u32);
-        const columns_count = @as(usize, try pr.readInt(u32));
+        metadata.columns_count = @as(usize, try pr.readInt(u32));
 
         if (flags & FlagHasMorePages == FlagHasMorePages) {
             metadata.paging_state = try pr.readBytes(allocator);
@@ -248,9 +253,9 @@ pub const RowsMetadata = struct {
             metadata.global_table_spec = spec;
         }
 
-        var column_specs = try allocator.alloc(ColumnSpec, columns_count);
+        var column_specs = try allocator.alloc(ColumnSpec, metadata.columns_count);
         var i: usize = 0;
-        while (i < columns_count) : (i += 1) {
+        while (i < metadata.columns_count) : (i += 1) {
             column_specs[i] = try ColumnSpec.read(allocator, pr, metadata.global_table_spec != null);
         }
         metadata.column_specs = column_specs;

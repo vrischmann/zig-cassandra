@@ -437,6 +437,7 @@ fn testIteratorScan(allocator: *mem.Allocator, column_specs: []ColumnSpec, data:
             .keyspace = "foobar",
             .table = "user",
         },
+        .columns_count = column_specs.len,
         .column_specs = column_specs,
     };
 

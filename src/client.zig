@@ -283,13 +283,16 @@ pub fn Client(comptime InStreamType: type, comptime OutStreamType: type) type {
                 return error.InvalidPreparedQueryID;
             }
 
+            const ps_metadata = prepared_statement_metadata_kv.?.value.metadata;
+            const ps_rows_metadata = prepared_statement_metadata_kv.?.value.rows_metadata;
+
             var values = std.ArrayList(Value).init(allocator);
             var option_ids = std.ArrayList(OptionID).init(allocator);
             defer option_ids.deinit();
             try computeValues(allocator, &values, &option_ids, args);
 
             // Now that we have both prepared and compute option IDs, check that they're compatible
-            if (!areOptionIDsEqual(prepared_statement_metadata_kv.?.value.metadata.column_specs, option_ids.span())) {
+            if (!areOptionIDsEqual(ps_metadata.column_specs, option_ids.span())) {
                 // TODO(vincent): do we want diags here ?
                 return error.InvalidPreparedStatementExecuteArgs;
             }
@@ -301,7 +304,7 @@ pub fn Client(comptime InStreamType: type, comptime OutStreamType: type) type {
             var parameters = QueryParameters{
                 .consistency_level = self.options.consistency,
                 .values = undefined,
-                .skip_metadata = false,
+                .skip_metadata = true,
                 .page_size = options.page_size,
                 .paging_state = options.paging_state,
                 .serial_consistency_level = null,
@@ -314,7 +317,12 @@ pub fn Client(comptime InStreamType: type, comptime OutStreamType: type) type {
             var result = try self.writeExecute(allocator, diags, query_id, parameters);
             return switch (result) {
                 .Rows => |rows| blk: {
-                    break :blk Iterator.init(rows.metadata, rows.data);
+                    const metadata = if (rows.metadata.column_specs.len > 0)
+                        rows.metadata
+                    else
+                        ps_rows_metadata;
+
+                    break :blk Iterator.init(metadata, rows.data);
                 },
                 else => null,
             };
