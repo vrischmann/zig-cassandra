@@ -204,6 +204,35 @@ pub const BatchType = packed enum(u8) {
     Counter = 2,
 };
 
+pub const OptionID = packed enum(u16) {
+    Custom = 0x0000,
+    Ascii = 0x0001,
+    Bigint = 0x0002,
+    Blob = 0x0003,
+    Boolean = 0x0004,
+    Counter = 0x0005,
+    Decimal = 0x0006,
+    Double = 0x0007,
+    Float = 0x0008,
+    Int = 0x0009,
+    Timestamp = 0x000B,
+    UUID = 0x000C,
+    Varchar = 0x000D,
+    Varint = 0x000E,
+    Timeuuid = 0x000F,
+    Inet = 0x0010,
+    Date = 0x0011,
+    Time = 0x0012,
+    Smallint = 0x0013,
+    Tinyint = 0x0014,
+    Duration = 0x0015,
+    List = 0x0020,
+    Map = 0x0021,
+    Set = 0x0022,
+    UDT = 0x0030,
+    Tuple = 0x0031,
+};
+
 test "cql version: fromString" {
     testing.expectEqual(CQLVersion{ .major = 3, .minor = 0, .patch = 0 }, try CQLVersion.fromString("3.0.0"));
     testing.expectEqual(CQLVersion{ .major = 3, .minor = 4, .patch = 0 }, try CQLVersion.fromString("3.4.0"));

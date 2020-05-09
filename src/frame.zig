@@ -90,43 +90,14 @@ pub fn RawFrameWriter(comptime OutStreamType: type) type {
     };
 }
 
-pub const OptionID = packed enum(u16) {
-    Custom = 0x0000,
-    Ascii = 0x0001,
-    Bigint = 0x0002,
-    Blob = 0x0003,
-    Boolean = 0x0004,
-    Counter = 0x0005,
-    Decimal = 0x0006,
-    Double = 0x0007,
-    Float = 0x0008,
-    Int = 0x0009,
-    Timestamp = 0x000B,
-    UUID = 0x000C,
-    Varchar = 0x000D,
-    Varint = 0x000E,
-    Timeuuid = 0x000F,
-    Inet = 0x0010,
-    Date = 0x0011,
-    Time = 0x0012,
-    Smallint = 0x0013,
-    Tinyint = 0x0014,
-    Duration = 0x0015,
-    List = 0x0020,
-    Map = 0x0021,
-    Set = 0x0022,
-    UDT = 0x0030,
-    Tuple = 0x0031,
-
-    pub fn read(pr: *PrimitiveReader) !OptionID {
-        return @intToEnum(OptionID, try pr.readInt(u16));
-    }
-};
-
 pub const GlobalTableSpec = struct {
     keyspace: []const u8,
     table: []const u8,
 };
+
+fn readOptionID(pr: *PrimitiveReader) !OptionID {
+    return @intToEnum(OptionID, try pr.readInt(u16));
+}
 
 pub const ColumnSpec = struct {
     const Self = @This();
@@ -168,7 +139,7 @@ pub const ColumnSpec = struct {
             spec.table = try pr.readString(allocator);
         }
         spec.name = try pr.readString(allocator);
-        spec.option = try OptionID.read(pr);
+        spec.option = try readOptionID(pr);
 
         switch (spec.option) {
             .Tuple => unreachable,
@@ -177,11 +148,11 @@ pub const ColumnSpec = struct {
                 spec.custom_class_name = try pr.readString(allocator);
             },
             .List, .Set => {
-                spec.listset_element_type_option = try OptionID.read(pr);
+                spec.listset_element_type_option = try readOptionID(pr);
             },
             .Map => {
-                spec.map_key_type_option = try OptionID.read(pr);
-                spec.map_value_type_option = try OptionID.read(pr);
+                spec.map_key_type_option = try readOptionID(pr);
+                spec.map_value_type_option = try readOptionID(pr);
             },
             else => {},
         }
