@@ -107,6 +107,15 @@ fn doPrepareThenExec(allocator: *mem.Allocator, client: *cql.TCPClient, n: usize
     }
 }
 
+fn doPrepareOnceThenExec(allocator: *mem.Allocator, client: *cql.TCPClient, n: usize) !void {
+    const query_id = try doPrepare(allocator, client);
+
+    var i: usize = 0;
+    while (i < n) : (i += 1) {
+        try doExecute(allocator, client, query_id);
+    }
+}
+
 fn doInsert(allocator: *mem.Allocator, client: *cql.TCPClient, n: usize) !void {
 
     // We want query diagonistics in case of failure.
@@ -230,6 +239,7 @@ const usage =
     \\    query
     \\    prepare
     \\    prepare-then-exec <iterations>
+    \\    prepare-once-then-exec <iterations>
     \\
 ;
 
@@ -300,6 +310,15 @@ pub fn main() anyerror!void {
         const n = try std.fmt.parseInt(usize, args[2], 10);
 
         return doPrepareThenExec(allocator, &client, n);
+    } else if (mem.eql(u8, cmd, "prepare-once-then-exec")) {
+        if (args.len < 3) {
+            try std.fmt.format(stderr, "Usage: {} prepared-then-exec <iterations>\n", .{args[0]});
+            std.process.exit(1);
+        }
+
+        const n = try std.fmt.parseInt(usize, args[2], 10);
+
+        return doPrepareOnceThenExec(allocator, &client, n);
     } else {
         try stderr.writeAll("expected command argument\n\n");
         try stderr.writeAll(usage);
