@@ -85,18 +85,24 @@ pub fn RawFrameWriter(comptime OutStreamType: type) type {
         const Self = @This();
 
         out_stream: OutStreamType,
-        serializer: io.Serializer(std.builtin.Endian.Big, io.Packing.Bit, OutStreamType),
 
         pub fn init(out: OutStreamType) Self {
             return Self{
                 .out_stream = out,
-                .serializer = io.serializer(std.builtin.Endian.Big, io.Packing.Bit, out),
             };
         }
 
         pub fn write(self: *Self, raw_frame: RawFrame) !void {
-            _ = try self.serializer.serialize(raw_frame.header);
-            _ = try self.out_stream.writeAll(raw_frame.body);
+            var buf: [@sizeOf(FrameHeader)]u8 = undefined;
+
+            buf[0] = raw_frame.header.version.version;
+            buf[1] = raw_frame.header.flags;
+            mem.writeIntBig(i16, @ptrCast(*[2]u8, buf[2..4]), raw_frame.header.stream);
+            buf[4] = @enumToInt(raw_frame.header.opcode);
+            mem.writeIntBig(u32, @ptrCast(*[4]u8, buf[5..9]), raw_frame.header.body_len);
+
+            try self.out_stream.writeAll(&buf);
+            try self.out_stream.writeAll(raw_frame.body);
         }
     };
 }
