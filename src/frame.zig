@@ -41,17 +41,28 @@ pub fn RawFrameReader(comptime InStreamType: type) type {
         const Self = @This();
 
         in_stream: InStreamType,
-        deserializer: io.Deserializer(.Big, io.Packing.Bit, InStreamType),
 
         pub fn init(in: InStreamType) Self {
             return Self{
                 .in_stream = in,
-                .deserializer = io.deserializer(std.builtin.Endian.Big, io.Packing.Bit, in),
             };
         }
 
         pub fn read(self: *Self, allocator: *mem.Allocator) !RawFrame {
-            const header = try self.deserializer.deserialize(FrameHeader);
+            var buf: [@sizeOf(FrameHeader)]u8 = undefined;
+
+            const n_header_read = try self.in_stream.readAll(&buf);
+            if (n_header_read != @sizeOf(FrameHeader)) {
+                return error.UnexpectedEOF;
+            }
+
+            var header = FrameHeader{
+                .version = ProtocolVersion{ .version = buf[0] },
+                .flags = buf[1],
+                .stream = mem.readIntBig(i16, @ptrCast(*[2]u8, buf[2..4])),
+                .opcode = @intToEnum(Opcode, buf[4]),
+                .body_len = mem.readIntBig(u32, @ptrCast(*[4]u8, buf[5..9])),
+            };
 
             const len = @as(usize, header.body_len);
 
