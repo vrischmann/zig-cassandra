@@ -304,8 +304,8 @@ pub fn Client(comptime InStreamType: type, comptime OutStreamType: type) type {
             const ps_metadata = prepared_statement_metadata_kv.?.value.metadata;
             const ps_rows_metadata = prepared_statement_metadata_kv.?.value.rows_metadata;
 
-            var values = std.ArrayList(Value).init(allocator);
-            var option_ids = std.ArrayList(?OptionID).init(allocator);
+            var values = try std.ArrayList(Value).initCapacity(allocator, 16);
+            var option_ids = try std.ArrayList(?OptionID).initCapacity(allocator, 16);
             defer option_ids.deinit();
             try computeValues(allocator, &values, &option_ids, args);
 
@@ -684,11 +684,11 @@ fn computeValues(allocator: *mem.Allocator, values: ?*std.ArrayList(Value), opti
         @compileError("Expected tuple or struct argument, found " ++ @typeName(args) ++ " of type " ++ @tagName(@typeInfo(args)));
     }
 
-    var dummy_vals = std.ArrayList(Value).init(allocator);
+    var dummy_vals = try std.ArrayList(Value).initCapacity(allocator, 16);
     defer dummy_vals.deinit();
     var vals = values orelse &dummy_vals;
 
-    var dummy_opts = std.ArrayList(?OptionID).init(allocator);
+    var dummy_opts = try std.ArrayList(?OptionID).initCapacity(allocator, 16);
     defer dummy_opts.deinit();
     var opts = options orelse &dummy_opts;
 
