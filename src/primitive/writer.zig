@@ -16,18 +16,12 @@ pub const PrimitiveWriter = struct {
 
     wbuf: std.ArrayList(u8),
 
-    pub fn init() Self {
-        return Self{
-            .wbuf = undefined,
-        };
-    }
-
     pub fn deinit(self: *Self, allocator: *mem.Allocator) void {
         self.wbuf.deinit();
     }
 
-    pub fn reset(self: *Self, allocator: *mem.Allocator) void {
-        self.wbuf = std.ArrayList(u8).init(allocator);
+    pub fn reset(self: *Self, allocator: *mem.Allocator) !void {
+        self.wbuf = try std.ArrayList(u8).initCapacity(allocator, 1024);
     }
 
     pub fn toOwnedSlice(self: *Self) []u8 {
@@ -164,7 +158,7 @@ test "primitive writer: write int" {
     defer arena.deinit();
 
     var pw: PrimitiveWriter = undefined;
-    pw.reset(&arena.allocator);
+    try pw.reset(&arena.allocator);
 
     try pw.writeInt(i32, 2101504);
     testing.expectEqualSlices(u8, "\x00\x20\x11\x00", pw.getWritten()[0..4]);
@@ -184,7 +178,7 @@ test "primitive writer: write strings and bytes" {
     defer arena.deinit();
 
     var pw: PrimitiveWriter = undefined;
-    pw.reset(&arena.allocator);
+    try pw.reset(&arena.allocator);
 
     {
         // short string
@@ -227,7 +221,7 @@ test "primitive writer: write uuid" {
     defer arena.deinit();
 
     var pw: PrimitiveWriter = undefined;
-    pw.reset(&arena.allocator);
+    try pw.reset(&arena.allocator);
 
     var uuid: [16]u8 = undefined;
     try std.os.getrandom(&uuid);
@@ -241,7 +235,7 @@ test "primitive writer: write string list" {
     defer arena.deinit();
 
     var pw: PrimitiveWriter = undefined;
-    pw.reset(&arena.allocator);
+    try pw.reset(&arena.allocator);
 
     const list = &[_][]const u8{ "foo", "bar" };
 
@@ -254,7 +248,7 @@ test "primitive writer: write value" {
     defer arena.deinit();
 
     var pw: PrimitiveWriter = undefined;
-    pw.reset(&arena.allocator);
+    try pw.reset(&arena.allocator);
 
     // Normal value
     _ = try pw.writeValue(Value{ .Set = "ab" });
@@ -274,7 +268,7 @@ test "primitive writer: write inet and inetaddr" {
     defer arena.deinit();
 
     var pw: PrimitiveWriter = undefined;
-    pw.reset(&arena.allocator);
+    try pw.reset(&arena.allocator);
 
     // IPv4
     _ = try pw.writeInet(net.Address.initIp4([_]u8{ 0x78, 0x56, 0x34, 0x12 }, 34));
@@ -298,7 +292,7 @@ test "primitive writer: write consistency" {
     defer arena.deinit();
 
     var pw: PrimitiveWriter = undefined;
-    pw.reset(&arena.allocator);
+    try pw.reset(&arena.allocator);
 
     const testCase = struct {
         consistency: Consistency,
@@ -320,7 +314,7 @@ test "primitive writer: write consistency" {
     };
 
     for (testCases) |tc| {
-        pw.reset(&arena.allocator);
+        try pw.reset(&arena.allocator);
         _ = try pw.writeConsistency(tc.consistency);
         testing.expectEqualSlices(u8, tc.exp, pw.getWritten()[0..2]);
     }

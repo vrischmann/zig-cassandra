@@ -180,7 +180,6 @@ pub fn Client(comptime InStreamType: type, comptime OutStreamType: type) type {
             self.raw_frame_reader = RawFrameReaderType.init(in_stream);
             self.raw_frame_writer = RawFrameWriterType.init(out_stream);
             self.primitive_reader = PrimitiveReader.init();
-            self.primitive_writer = PrimitiveWriter.init();
 
             self.prepared_statements_metadata = PreparedStatementsMetadata.init(allocator);
 
@@ -445,7 +444,7 @@ pub fn Client(comptime InStreamType: type, comptime OutStreamType: type) type {
                 };
 
                 // Encode body
-                self.primitive_writer.reset(allocator);
+                try self.primitive_writer.reset(allocator);
                 defer self.primitive_writer.deinit(allocator);
                 _ = try frame.write(&self.primitive_writer);
 
@@ -478,7 +477,7 @@ pub fn Client(comptime InStreamType: type, comptime OutStreamType: type) type {
                 var frame = AuthResponseFrame{ .token = token };
 
                 // Encode body
-                self.primitive_writer.reset(allocator);
+                try self.primitive_writer.reset(allocator);
                 defer self.primitive_writer.deinit(allocator);
                 _ = try frame.write(&self.primitive_writer);
 
@@ -512,7 +511,7 @@ pub fn Client(comptime InStreamType: type, comptime OutStreamType: type) type {
                 };
 
                 // Encode body
-                self.primitive_writer.reset(allocator);
+                try self.primitive_writer.reset(allocator);
                 defer self.primitive_writer.deinit(allocator);
                 _ = try frame.write(self.negotiated_state.protocol_version, &self.primitive_writer);
 
@@ -548,7 +547,7 @@ pub fn Client(comptime InStreamType: type, comptime OutStreamType: type) type {
                 };
 
                 // Encode body
-                self.primitive_writer.reset(allocator);
+                try self.primitive_writer.reset(allocator);
                 defer self.primitive_writer.deinit(allocator);
                 _ = try frame.write(self.negotiated_state.protocol_version, &self.primitive_writer);
 
@@ -587,7 +586,7 @@ pub fn Client(comptime InStreamType: type, comptime OutStreamType: type) type {
                 };
 
                 // Encode body
-                self.primitive_writer.reset(allocator);
+                try self.primitive_writer.reset(allocator);
                 defer self.primitive_writer.deinit(allocator);
                 _ = try frame.write(self.negotiated_state.protocol_version, &self.primitive_writer);
 
@@ -839,8 +838,8 @@ fn computeSingleValue(allocator: *mem.Allocator, values: *std.ArrayList(Value), 
 }
 
 fn serializeValues(allocator: *mem.Allocator, values: []const Value) ![]const u8 {
-    var pw = PrimitiveWriter.init();
-    pw.reset(allocator);
+    var pw: PrimitiveWriter = undefined;
+    try pw.reset(allocator);
 
     try pw.writeInt(u32, @intCast(u32, values.len));
 

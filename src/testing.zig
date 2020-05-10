@@ -72,7 +72,9 @@ pub fn expectSameRawFrame(frame: var, header: FrameHeader, exp: []const u8) void
 
     // Write frame body
     var pw: PrimitiveWriter = undefined;
-    pw.reset(&arena.allocator);
+    pw.reset(&arena.allocator) catch |err| {
+        std.debug.panic("unable to initialize writer. err: {}\n", .{err});
+    };
 
     const function = @typeInfo(@TypeOf(frame.write)).BoundFn;
     if (function.args.len == 2) {
