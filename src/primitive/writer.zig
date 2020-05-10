@@ -12,8 +12,6 @@ const testing = @import("../testing.zig");
 pub const PrimitiveWriter = struct {
     const Self = @This();
 
-    // TODO(vincent): I don't like recreating the outStream() everytime but for now it's fine.
-
     wbuf: std.ArrayList(u8),
 
     pub fn deinit(self: *Self, allocator: *mem.Allocator) void {
@@ -34,7 +32,10 @@ pub const PrimitiveWriter = struct {
 
     /// Write either a short, a int or a long to the buffer.
     pub fn writeInt(self: *Self, comptime T: type, value: T) !void {
-        return self.wbuf.outStream().writeIntBig(T, value);
+        var buf: [(T.bit_count + 7) / 8]u8 = undefined;
+        mem.writeIntBig(T, &buf, value);
+
+        return self.wbuf.appendSlice(&buf);
     }
 
     /// Write a byte to the buffer.
@@ -57,10 +58,10 @@ pub const PrimitiveWriter = struct {
     /// Write bytes from the stream in a generic way.
     fn writeBytesGeneric(self: *Self, comptime LenType: type, value: ?[]const u8) !void {
         if (value) |v| {
-            _ = try self.wbuf.outStream().writeIntBig(LenType, @intCast(LenType, v.len));
+            try self.writeInt(LenType, @intCast(LenType, v.len));
             return self.wbuf.appendSlice(v);
         } else {
-            return self.wbuf.outStream().writeIntBig(LenType, -1);
+            try self.writeInt(LenType, @intCast(LenType, -1));
         }
     }
 
@@ -83,7 +84,7 @@ pub const PrimitiveWriter = struct {
 
     /// Write a list of string to the buffer.
     pub fn writeStringList(self: *Self, list: []const []const u8) !void {
-        _ = try self.wbuf.outStream().writeIntBig(u16, @intCast(u16, list.len));
+        try self.writeInt(u16, @intCast(u16, list.len));
         for (list) |value| {
             _ = try self.writeString(value);
         }
@@ -92,11 +93,11 @@ pub const PrimitiveWriter = struct {
     /// Write a value to the buffer.
     pub fn writeValue(self: *Self, value: Value) !void {
         return switch (value) {
-            .Null => self.wbuf.outStream().writeIntBig(i32, @as(i32, -1)),
-            .NotSet => self.wbuf.outStream().writeIntBig(i32, @as(i32, -2)),
+            .Null => self.writeInt(i32, @as(i32, -1)),
+            .NotSet => self.writeInt(i32, @as(i32, -2)),
             .Set => |data| {
-                _ = try self.wbuf.outStream().writeIntBig(i32, @intCast(i32, data.len));
-                return self.wbuf.outStream().writeAll(data);
+                try self.writeInt(i32, @intCast(i32, data.len));
+                return self.wbuf.appendSlice(data);
             },
         };
     }
@@ -117,12 +118,12 @@ pub const PrimitiveWriter = struct {
                     buf[0] = 4;
                     mem.writeIntNative(u32, buf[1..5], inet.in.addr);
                     mem.writeIntBig(u32, buf[5..9], inet.getPort());
-                    return self.wbuf.outStream().writeAll(&buf);
+                    return self.wbuf.appendSlice(&buf);
                 } else {
                     var buf: [5]u8 = undefined;
                     buf[0] = 4;
                     mem.writeIntNative(u32, buf[1..5], inet.in.addr);
-                    return self.wbuf.outStream().writeAll(&buf);
+                    return self.wbuf.appendSlice(&buf);
                 }
             },
             os.AF_INET6 => {
@@ -131,12 +132,12 @@ pub const PrimitiveWriter = struct {
                     buf[0] = 16;
                     mem.copy(u8, buf[1..17], &inet.in6.addr);
                     mem.writeIntBig(u32, buf[17..21], inet.getPort());
-                    return self.wbuf.outStream().writeAll(&buf);
+                    return self.wbuf.appendSlice(&buf);
                 } else {
                     var buf: [17]u8 = undefined;
                     buf[0] = 16;
                     mem.copy(u8, buf[1..17], &inet.in6.addr);
-                    return self.wbuf.outStream().writeAll(&buf);
+                    return self.wbuf.appendSlice(&buf);
                 }
             },
             else => |af| std.debug.panic("invalid address family {}\n", .{af}),
@@ -145,11 +146,11 @@ pub const PrimitiveWriter = struct {
 
     pub fn writeConsistency(self: *Self, consistency: Consistency) !void {
         const n = @intCast(u16, @enumToInt(consistency));
-        return self.wbuf.outStream().writeIntBig(u16, n);
+        return self.writeInt(u16, n);
     }
 
     pub fn startStringMap(self: *Self, size: usize) !void {
-        _ = try self.wbuf.outStream().writeIntBig(u16, @intCast(u16, size));
+        _ = try self.writeInt(u16, @intCast(u16, size));
     }
 };
 
