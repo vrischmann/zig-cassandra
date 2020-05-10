@@ -1,4 +1,5 @@
 const std = @import("std");
+const heap = std.heap;
 const mem = std.mem;
 const net = std.net;
 
@@ -117,7 +118,6 @@ fn doPrepareOnceThenExec(allocator: *mem.Allocator, client: *cql.TCPClient, n: u
 }
 
 fn doInsert(allocator: *mem.Allocator, client: *cql.TCPClient, n: usize) !void {
-
     // We want query diagonistics in case of failure.
     var diags = cql.QueryOptions.Diagnostics{};
     var options = cql.QueryOptions{
@@ -140,17 +140,17 @@ fn doInsert(allocator: *mem.Allocator, client: *cql.TCPClient, n: usize) !void {
 
     var i: usize = 0;
     while (i < n) : (i += 1) {
-        var arena = std.heap.ArenaAllocator.init(allocator);
-        defer arena.deinit();
+        var buffer: [4096]u8 = undefined;
+        var fba = heap.FixedBufferAllocator.init(&buffer);
 
         const args = Args{
             .age = @intCast(u32, i) * @as(u32, 10),
             .ids = [_]u8{ 0, 2, 4, 8 },
-            .name = if (i % 2 == 0) @as([]const u8, try std.fmt.allocPrint(&arena.allocator, "Vincent {}", .{i})) else null,
+            .name = if (i % 2 == 0) @as([]const u8, try std.fmt.allocPrint(&fba.allocator, "Vincent {}", .{i})) else null,
         };
 
         _ = client.execute(
-            &arena.allocator,
+            &fba.allocator,
             options,
             query_id,
             args,
@@ -244,9 +244,7 @@ const usage =
 ;
 
 pub fn main() anyerror!void {
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer arena.deinit();
-    const allocator = &arena.allocator;
+    const allocator = std.heap.page_allocator;
 
     const stderr = std.io.getStdErr().outStream();
 
