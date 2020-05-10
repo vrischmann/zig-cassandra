@@ -1,6 +1,7 @@
 const builtin = @import("builtin");
 const std = @import("std");
 const heap = std.heap;
+const io = std.io;
 const mem = std.mem;
 const net = std.net;
 
@@ -98,19 +99,26 @@ pub const QueryOptions = struct {
 
 pub const TCPClient = struct {
     const Self = @This();
-    const ClientType = Client(std.fs.File.InStream, std.fs.File.OutStream);
+
+    const BufferedInStreamType = io.BufferedInStream(4096, std.fs.File.InStream);
+    const ClientType = Client(BufferedInStreamType.InStream, std.fs.File.OutStream);
 
     socket: std.fs.File,
+    buffered_in_stream: BufferedInStreamType,
 
     u: ClientType,
 
     pub fn init(self: *Self, allocator: *mem.Allocator, seed_address: net.Address, options: InitOptions) !void {
         self.socket = try net.tcpConnectToAddress(seed_address);
 
+        self.buffered_in_stream = BufferedInStreamType{
+            .unbuffered_in_stream = self.socket.inStream(),
+        };
+
         _ = try self.u.init(
             allocator,
             options,
-            self.socket.inStream(),
+            self.buffered_in_stream.inStream(),
             self.socket.outStream(),
         );
     }
