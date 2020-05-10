@@ -138,10 +138,13 @@ fn doInsert(allocator: *mem.Allocator, client: *cql.TCPClient, n: usize) !void {
         empty_args,
     );
 
+    var buffer: [16384]u8 = undefined;
+    var fba = heap.FixedBufferAllocator.init(&buffer);
+
     var i: usize = 0;
+
     while (i < n) : (i += 1) {
-        var buffer: [4096]u8 = undefined;
-        var fba = heap.FixedBufferAllocator.init(&buffer);
+        fba.reset();
 
         const args = Args{
             .age = @intCast(u32, i) * @as(u32, 10),
