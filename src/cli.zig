@@ -125,11 +125,11 @@ fn doInsert(allocator: *mem.Allocator, client: *cql.TCPClient, n: usize) !void {
     };
 
     const Args = struct {
-        age: u32,
-        ids: [4]u8,
-        name: ?[]const u8,
+        age: u32 = 0,
+        ids: [4]u8 = undefined,
+        name: ?[]const u8 = null,
     };
-    var empty_args: Args = undefined;
+    var empty_args = Args{};
 
     const query_id = try client.prepare(
         allocator,
