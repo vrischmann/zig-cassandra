@@ -219,7 +219,7 @@ pub fn Client(comptime InStreamType: type, comptime OutStreamType: type) type {
                 }
             }
 
-            var option_ids = std.ArrayList(?OptionID).init(allocator);
+            var option_ids = OptionIDArrayList{};
             try computeValues(allocator, null, &option_ids, args);
 
             var result = try self.writePrepare(self.allocator, allocator, diags, query_string);
@@ -305,8 +305,7 @@ pub fn Client(comptime InStreamType: type, comptime OutStreamType: type) type {
             const ps_rows_metadata = prepared_statement_metadata_kv.?.value.rows_metadata;
 
             var values = try std.ArrayList(Value).initCapacity(allocator, 16);
-            var option_ids = try std.ArrayList(?OptionID).initCapacity(allocator, 16);
-            defer option_ids.deinit();
+            var option_ids = OptionIDArrayList{};
             try computeValues(allocator, &values, &option_ids, args);
 
             // Now that we have both prepared and compute option IDs, check that they're compatible
@@ -673,13 +672,41 @@ pub fn Client(comptime InStreamType: type, comptime OutStreamType: type) type {
     };
 }
 
+const OptionIDArrayList = struct {
+    const Self = @This();
+
+    items: [128]?OptionID = undefined,
+    pos: usize = 0,
+
+    pub fn append(self: *Self, option_id: ?OptionID) !void {
+        self.items[self.pos] = option_id;
+        self.pos += 1;
+    }
+
+    pub fn span(self: *Self) []?OptionID {
+        return self.items[0..self.pos];
+    }
+};
+
+test "option id array list" {
+    var option_ids = OptionIDArrayList{};
+
+    try option_ids.append(.Tinyint);
+    try option_ids.append(.Smallint);
+
+    const items = option_ids.span();
+    testing.expectEqual(@as(usize, 2), items.len);
+    testing.expectEqual(OptionID.Tinyint, items[0].?);
+    testing.expectEqual(OptionID.Smallint, items[1].?);
+}
+
 /// Compute a list of Value and OptionID for each field in the tuple or struct args.
 /// It resolves the values recursively too.
 ///
 /// TODO(vincent): it's not clear to the caller that data in `args` must outlive `values` because we don't duplicating memory
 /// unless absolutely necessary in the case of arrays.
 /// Think of a way to communicate that.
-fn computeValues(allocator: *mem.Allocator, values: ?*std.ArrayList(Value), options: ?*std.ArrayList(?OptionID), args: var) !void {
+fn computeValues(allocator: *mem.Allocator, values: ?*std.ArrayList(Value), options: ?*OptionIDArrayList, args: var) !void {
     if (@typeInfo(@TypeOf(args)) != .Struct) {
         @compileError("Expected tuple or struct argument, found " ++ @typeName(args) ++ " of type " ++ @tagName(@typeInfo(args)));
     }
@@ -688,8 +715,7 @@ fn computeValues(allocator: *mem.Allocator, values: ?*std.ArrayList(Value), opti
     defer dummy_vals.deinit();
     var vals = values orelse &dummy_vals;
 
-    var dummy_opts = try std.ArrayList(?OptionID).initCapacity(allocator, 16);
-    defer dummy_opts.deinit();
+    var dummy_opts = OptionIDArrayList{};
     var opts = options orelse &dummy_opts;
 
     inline for (@typeInfo(@TypeOf(args)).Struct.fields) |struct_field, i| {
@@ -736,7 +762,7 @@ fn resolveOption(comptime Type: type) OptionID {
     }
 }
 
-fn computeSingleValue(allocator: *mem.Allocator, values: *std.ArrayList(Value), options: *std.ArrayList(?OptionID), comptime Type: type, arg: Type) !void {
+fn computeSingleValue(allocator: *mem.Allocator, values: *std.ArrayList(Value), options: *OptionIDArrayList, comptime Type: type, arg: Type) !void {
     const type_info = @typeInfo(Type);
 
     var value: Value = undefined;
@@ -883,7 +909,7 @@ test "compute values: ints" {
     var allocator = &arenaAllocator.allocator;
 
     var values = std.ArrayList(Value).init(allocator);
-    var options = std.ArrayList(?OptionID).init(allocator);
+    var options = OptionIDArrayList{};
 
     const my_u64 = @as(u64, 20000);
 
@@ -935,7 +961,7 @@ test "compute values: floats" {
     var allocator = &arenaAllocator.allocator;
 
     var values = std.ArrayList(Value).init(allocator);
-    var options = std.ArrayList(?OptionID).init(allocator);
+    var options = OptionIDArrayList{};
 
     const my_f64 = @as(f64, 402.240);
 
@@ -965,7 +991,7 @@ test "compute values: strings" {
     var allocator = &arenaAllocator.allocator;
 
     var values = std.ArrayList(Value).init(allocator);
-    var options = std.ArrayList(?OptionID).init(allocator);
+    var options = OptionIDArrayList{};
 
     _ = try computeValues(allocator, &values, &options, .{
         .string = @as([]const u8, try mem.dupe(allocator, u8, "foobar")),
@@ -987,7 +1013,7 @@ test "compute values: bool" {
     var allocator = &arenaAllocator.allocator;
 
     var values = std.ArrayList(Value).init(allocator);
-    var options = std.ArrayList(?OptionID).init(allocator);
+    var options = OptionIDArrayList{};
 
     _ = try computeValues(allocator, &values, &options, .{
         .bool1 = true,
@@ -1012,7 +1038,7 @@ test "compute values: set/list" {
     var allocator = &arenaAllocator.allocator;
 
     var values = std.ArrayList(Value).init(allocator);
-    var options = std.ArrayList(?OptionID).init(allocator);
+    var options = OptionIDArrayList{};
 
     _ = try computeValues(allocator, &values, &options, .{
         .string = &[_]u16{ 0x01, 0x2050 },
@@ -1038,7 +1064,7 @@ test "compute values: uuid" {
     var allocator = &arenaAllocator.allocator;
 
     var values = std.ArrayList(Value).init(allocator);
-    var options = std.ArrayList(?OptionID).init(allocator);
+    var options = OptionIDArrayList{};
 
     _ = try computeValues(allocator, &values, &options, .{
         .uuid = [16]u8{
@@ -1065,7 +1091,7 @@ test "compute values: not set and null" {
     var allocator = &arenaAllocator.allocator;
 
     var values = std.ArrayList(Value).init(allocator);
-    var options = std.ArrayList(?OptionID).init(allocator);
+    var options = OptionIDArrayList{};
 
     const Args = struct {
         not_set: NotSet,
