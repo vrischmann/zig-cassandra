@@ -24,6 +24,13 @@ fn doQuery(allocator: *mem.Allocator, client: *cql.TCPClient) !void {
     var total: usize = 0;
     var has_more = true;
 
+    {
+        var arena = std.heap.ArenaAllocator.init(allocator);
+        defer arena.deinit();
+
+        _ = try client.query(&arena.allocator, options, "USE foobar", .{});
+    }
+
     while (has_more) {
         var arena = std.heap.ArenaAllocator.init(allocator);
         defer arena.deinit();
@@ -31,7 +38,7 @@ fn doQuery(allocator: *mem.Allocator, client: *cql.TCPClient) !void {
         var iter = (try client.query(
             &arena.allocator,
             options,
-            "SELECT ids, age, name FROM foobar.age_to_ids",
+            "SELECT ids, age, name FROM age_to_ids",
             .{},
         )).?;
 
