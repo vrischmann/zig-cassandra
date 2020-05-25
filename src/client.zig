@@ -192,16 +192,6 @@ pub fn Client(comptime InStreamType: type, comptime OutStreamType: type) type {
             _ = try self.handshake(diags);
         }
 
-        pub fn setUsername(self: *Self, username: []const u8) void {
-            self.username = username;
-        }
-        pub fn setPassword(self: *Self, password: []const u8) void {
-            self.password = password;
-        }
-        pub fn setConsistency(self: *Self, consistency: Consistency) void {
-            self.consistency = consistency;
-        }
-
         pub fn prepare(self: *Self, allocator: *mem.Allocator, options: QueryOptions, comptime query_string: []const u8, args: var) ![]const u8 {
             var dummy_diags = QueryOptions.Diagnostics{};
             var diags = options.diags orelse &dummy_diags;
