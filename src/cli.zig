@@ -138,12 +138,17 @@ fn doInsert(allocator: *mem.Allocator, client: *cql.TCPClient, n: usize) !void {
     };
     var empty_args = Args{};
 
-    const query_id = try client.prepare(
+    const query_id = client.prepare(
         allocator,
         options,
         "INSERT INTO foobar.age_to_ids(age, ids, name) VALUES(?, ?, ?)",
         empty_args,
-    );
+    ) catch |err| switch (err) {
+        error.QueryPreparationFailed => {
+            std.debug.panic("query preparation failed, received cassandra error: {}\n", .{diags.message});
+        },
+        else => return err,
+    };
 
     var buffer: [16384]u8 = undefined;
     var fba = heap.FixedBufferAllocator.init(&buffer);
