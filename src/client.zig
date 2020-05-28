@@ -43,6 +43,9 @@ usingnamespace @import("frames/batch.zig");
 const testing = @import("testing.zig");
 
 pub const InitOptions = struct {
+    /// the protocl version to use.
+    protocol_version: ProtocolVersion = ProtocolVersion{ .version = @as(u8, 4) },
+
     /// The compression algorithm to use if possible.
     compression: ?CompressionAlgorithm = null,
 
@@ -142,7 +145,6 @@ pub fn Client(comptime InStreamType: type, comptime OutStreamType: type) type {
 
         /// Contains the state that is negotiated with a node as part of the handshake.
         const NegotiatedState = struct {
-            protocol_version: ProtocolVersion,
             cql_version: CQLVersion,
         };
 
@@ -400,7 +402,7 @@ pub fn Client(comptime InStreamType: type, comptime OutStreamType: type) type {
             {
                 const raw_frame = RawFrame{
                     .header = FrameHeader{
-                        .version = ProtocolVersion{ .version = 4 },
+                        .version = self.options.protocol_version,
                         .flags = 0,
                         .stream = 0,
                         .opcode = .Options,
@@ -424,11 +426,6 @@ pub fn Client(comptime InStreamType: type, comptime OutStreamType: type) type {
 
             var supported_frame = try SupportedFrame.read(allocator, &self.primitive_reader);
 
-            if (supported_frame.protocol_versions.len > 0) {
-                self.negotiated_state.protocol_version = supported_frame.protocol_versions[0];
-            } else {
-                self.negotiated_state.protocol_version = ProtocolVersion{ .version = 4 };
-            }
             self.negotiated_state.cql_version = supported_frame.cql_versions[0];
         }
 
@@ -515,7 +512,7 @@ pub fn Client(comptime InStreamType: type, comptime OutStreamType: type) type {
                 // Encode body
                 try self.primitive_writer.reset(allocator);
                 defer self.primitive_writer.deinit(allocator);
-                _ = try frame.write(self.negotiated_state.protocol_version, &self.primitive_writer);
+                _ = try frame.write(self.options.protocol_version, &self.primitive_writer);
 
                 // Write raw frame
                 const raw_frame = try self.makeRawFrame(allocator, .Query, false);
@@ -529,7 +526,7 @@ pub fn Client(comptime InStreamType: type, comptime OutStreamType: type) type {
 
             return switch (raw_frame.header.opcode) {
                 .Result => blk: {
-                    var frame = try ResultFrame.read(allocator, self.negotiated_state.protocol_version, &self.primitive_reader);
+                    var frame = try ResultFrame.read(allocator, self.options.protocol_version, &self.primitive_reader);
                     break :blk frame.result;
                 },
                 .Error => {
@@ -552,7 +549,7 @@ pub fn Client(comptime InStreamType: type, comptime OutStreamType: type) type {
                 // Encode body
                 try self.primitive_writer.reset(allocator);
                 defer self.primitive_writer.deinit(allocator);
-                _ = try frame.write(self.negotiated_state.protocol_version, &self.primitive_writer);
+                _ = try frame.write(self.options.protocol_version, &self.primitive_writer);
 
                 // Write raw frame
                 const raw_frame = try self.makeRawFrame(allocator, .Prepare, false);
@@ -568,7 +565,7 @@ pub fn Client(comptime InStreamType: type, comptime OutStreamType: type) type {
                 .Result => blk: {
                     // Since we want to retain the metadata from the result frame for later use we can't use the default allocator which will only be valid per-call.
                     // Instead take a dedicated metadata_allocator for this.
-                    var frame = try ResultFrame.read(metadata_allocator, self.negotiated_state.protocol_version, &self.primitive_reader);
+                    var frame = try ResultFrame.read(metadata_allocator, self.options.protocol_version, &self.primitive_reader);
                     break :blk frame.result;
                 },
                 .Error => {
@@ -592,7 +589,7 @@ pub fn Client(comptime InStreamType: type, comptime OutStreamType: type) type {
                 // Encode body
                 try self.primitive_writer.reset(allocator);
                 defer self.primitive_writer.deinit(allocator);
-                _ = try frame.write(self.negotiated_state.protocol_version, &self.primitive_writer);
+                _ = try frame.write(self.options.protocol_version, &self.primitive_writer);
 
                 // Write raw frame
                 const raw_frame = try self.makeRawFrame(allocator, .Execute, false);
@@ -607,7 +604,7 @@ pub fn Client(comptime InStreamType: type, comptime OutStreamType: type) type {
 
             return switch (raw_frame.header.opcode) {
                 .Result => blk: {
-                    var frame = try ResultFrame.read(allocator, self.negotiated_state.protocol_version, &self.primitive_reader);
+                    var frame = try ResultFrame.read(allocator, self.options.protocol_version, &self.primitive_reader);
                     break :blk frame.result;
                 },
                 .Error => {
@@ -636,7 +633,7 @@ pub fn Client(comptime InStreamType: type, comptime OutStreamType: type) type {
             const written = self.primitive_writer.getWritten();
 
             raw_frame.header = FrameHeader{
-                .version = self.negotiated_state.protocol_version,
+                .version = self.options.protocol_version,
                 .flags = 0,
                 .stream = 0,
                 .opcode = opcode,
