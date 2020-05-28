@@ -368,6 +368,10 @@ pub fn Client(comptime InStreamType: type, comptime OutStreamType: type) type {
                 .Authenticate => |frame| {
                     try self.authenticate(&fba.allocator, diags, frame.authenticator);
                 },
+                .Error => |err| {
+                    diags.message = err.message;
+                    return error.HandshakeFailed;
+                },
             }
         }
 
@@ -457,6 +461,9 @@ pub fn Client(comptime InStreamType: type, comptime OutStreamType: type) type {
                 .Ready => StartupResponse{ .Ready = .{} },
                 .Authenticate => StartupResponse{
                     .Authenticate = try AuthenticateFrame.read(allocator, &self.primitive_reader),
+                },
+                .Error => StartupResponse{
+                    .Error = try ErrorFrame.read(allocator, &self.primitive_reader),
                 },
                 else => error.InvalidServerResponse,
             };
@@ -1139,10 +1146,12 @@ test "count bind markers" {
 const StartupResponseTag = enum {
     Ready,
     Authenticate,
+    Error,
 };
 const StartupResponse = union(StartupResponseTag) {
     Ready: ReadyFrame,
     Authenticate: AuthenticateFrame,
+    Error: ErrorFrame,
 };
 
 test "" {
