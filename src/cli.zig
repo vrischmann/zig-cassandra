@@ -292,6 +292,9 @@ pub fn main() anyerror!void {
         error.AuthenticationFailed => {
             std.debug.panic("server authentication failed, error was: {}", .{init_diags.message});
         },
+        error.HandshakeFailed => {
+            std.debug.panic("server handshake failed, error was: {}", .{init_diags.message});
+        },
         else => return err,
     };
 
