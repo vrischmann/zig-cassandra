@@ -5,7 +5,7 @@ const net = std.net;
 
 const cql = @import("lib.zig");
 
-fn doQuery(allocator: *mem.Allocator, client: *cql.TCPClient) !void {
+fn doQuery(allocator: *mem.Allocator, client: *cql.Client) !void {
     // We want query diagonistics in case of failure.
     var diags = cql.QueryOptions.Diagnostics{};
     errdefer {
@@ -56,7 +56,7 @@ fn doQuery(allocator: *mem.Allocator, client: *cql.TCPClient) !void {
     std.debug.warn("read {} rows\n", .{total});
 }
 
-fn doPrepare(allocator: *mem.Allocator, client: *cql.TCPClient) ![]const u8 {
+fn doPrepare(allocator: *mem.Allocator, client: *cql.Client) ![]const u8 {
     // We want query diagonistics in case of failure.
     var diags = cql.QueryOptions.Diagnostics{};
     var options = cql.QueryOptions{
@@ -83,7 +83,7 @@ fn doPrepare(allocator: *mem.Allocator, client: *cql.TCPClient) ![]const u8 {
     return query_id;
 }
 
-fn doExecute(allocator: *mem.Allocator, client: *cql.TCPClient, query_id: []const u8) !void {
+fn doExecute(allocator: *mem.Allocator, client: *cql.Client, query_id: []const u8) !void {
     var result_arena = std.heap.ArenaAllocator.init(allocator);
     defer result_arena.deinit();
     const result_allocator = &result_arena.allocator;
@@ -107,7 +107,7 @@ fn doExecute(allocator: *mem.Allocator, client: *cql.TCPClient, query_id: []cons
     _ = try iterate(allocator, &iter);
 }
 
-fn doPrepareThenExec(allocator: *mem.Allocator, client: *cql.TCPClient, n: usize) !void {
+fn doPrepareThenExec(allocator: *mem.Allocator, client: *cql.Client, n: usize) !void {
     var i: usize = 0;
     while (i < n) : (i += 1) {
         const query_id = try doPrepare(allocator, client);
@@ -115,7 +115,7 @@ fn doPrepareThenExec(allocator: *mem.Allocator, client: *cql.TCPClient, n: usize
     }
 }
 
-fn doPrepareOnceThenExec(allocator: *mem.Allocator, client: *cql.TCPClient, n: usize) !void {
+fn doPrepareOnceThenExec(allocator: *mem.Allocator, client: *cql.Client, n: usize) !void {
     const query_id = try doPrepare(allocator, client);
 
     var i: usize = 0;
@@ -124,7 +124,7 @@ fn doPrepareOnceThenExec(allocator: *mem.Allocator, client: *cql.TCPClient, n: u
     }
 }
 
-fn doInsert(allocator: *mem.Allocator, client: *cql.TCPClient, n: usize) !void {
+fn doInsert(allocator: *mem.Allocator, client: *cql.Client, n: usize) !void {
     // We want query diagonistics in case of failure.
     var diags = cql.QueryOptions.Diagnostics{};
     var options = cql.QueryOptions{
@@ -284,13 +284,9 @@ pub fn main() anyerror!void {
     var init_diags = cql.InitOptions.Diagnostics{};
     init_options.diags = &init_diags;
 
-    var client: cql.TCPClient = undefined;
+    var client: cql.Client = undefined;
 
-    client.init(
-        allocator,
-        address,
-        init_options,
-    ) catch |err| switch (err) {
+    client.initIp4(allocator, address, init_options) catch |err| switch (err) {
         error.NoUsername, error.NoPassword => {
             std.debug.panic("the server requires authentication, please set the username and password", .{});
         },
