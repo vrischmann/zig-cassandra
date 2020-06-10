@@ -5,7 +5,26 @@ const net = std.net;
 
 const cql = @import("lib.zig");
 
-fn doQuery(allocator: *mem.Allocator, client: *cql.TCPClient) !void {
+const schema_create_keyspace =
+    \\ CREATE KEYSPACE IF NOT EXISTS foobar WITH replication = {'class': 'SimpleStrategy', 'replication_factor': 1};
+;
+
+const schema_create_table =
+    \\ CREATE TABLE IF NOT EXISTS foobar.age_to_ids(
+    \\ 	age int,
+    \\ 	name text,
+    \\ 	ids set<tinyint>,
+    \\ 	PRIMARY KEY ((age))
+    \\ );
+;
+
+/// Runs a single SELECT reading all data from the age_to_ids table.
+///
+/// This function demonstrates multiple things:
+///  * executing a query without preparation
+///  * iterating over the result iterator
+///  * using the paging state and page size
+fn doQuery(allocator: *mem.Allocator, client: *cql.Client) !void {
     // We want query diagonistics in case of failure.
     var diags = cql.QueryOptions.Diagnostics{};
     errdefer {
@@ -15,6 +34,7 @@ fn doQuery(allocator: *mem.Allocator, client: *cql.TCPClient) !void {
     var paging_state_buffer: [1024]u8 = undefined;
     var paging_state_allocator = std.heap.FixedBufferAllocator.init(&paging_state_buffer);
 
+    // Read max 48 rows per query.
     var options = cql.QueryOptions{
         .page_size = 48,
         .paging_state = null,
@@ -22,16 +42,21 @@ fn doQuery(allocator: *mem.Allocator, client: *cql.TCPClient) !void {
     };
 
     var total: usize = 0;
-    var has_more = true;
 
     {
+        // Demonstrate how to USE a keyspace.
+        // All following queries which don't provide the keyspace directly
+        // will assume the keyspace is "foobar".
         var arena = std.heap.ArenaAllocator.init(allocator);
         defer arena.deinit();
 
         _ = try client.query(&arena.allocator, options, "USE foobar", .{});
     }
 
-    while (has_more) {
+    // Execute queries as long as there's more data available.
+
+    while (true) {
+        // Use an arena per query.
         var arena = std.heap.ArenaAllocator.init(allocator);
         defer arena.deinit();
 
@@ -45,6 +70,8 @@ fn doQuery(allocator: *mem.Allocator, client: *cql.TCPClient) !void {
         const count = try iterate(&arena.allocator, &iter);
         total += count;
 
+        // If there's more data Caassandra will respond with a valid paging state.
+        // If there's no paging state we know we're done.
         if (iter.metadata.paging_state) |paging_state| {
             paging_state_allocator.reset();
             options.paging_state = try mem.dupe(&paging_state_allocator.allocator, u8, paging_state);
@@ -56,7 +83,7 @@ fn doQuery(allocator: *mem.Allocator, client: *cql.TCPClient) !void {
     std.debug.warn("read {} rows\n", .{total});
 }
 
-fn doPrepare(allocator: *mem.Allocator, client: *cql.TCPClient) ![]const u8 {
+fn doPrepare(allocator: *mem.Allocator, client: *cql.Client) ![]const u8 {
     // We want query diagonistics in case of failure.
     var diags = cql.QueryOptions.Diagnostics{};
     var options = cql.QueryOptions{
@@ -83,7 +110,7 @@ fn doPrepare(allocator: *mem.Allocator, client: *cql.TCPClient) ![]const u8 {
     return query_id;
 }
 
-fn doExecute(allocator: *mem.Allocator, client: *cql.TCPClient, query_id: []const u8) !void {
+fn doExecute(allocator: *mem.Allocator, client: *cql.Client, query_id: []const u8) !void {
     var result_arena = std.heap.ArenaAllocator.init(allocator);
     defer result_arena.deinit();
     const result_allocator = &result_arena.allocator;
@@ -107,7 +134,7 @@ fn doExecute(allocator: *mem.Allocator, client: *cql.TCPClient, query_id: []cons
     _ = try iterate(allocator, &iter);
 }
 
-fn doPrepareThenExec(allocator: *mem.Allocator, client: *cql.TCPClient, n: usize) !void {
+fn doPrepareThenExec(allocator: *mem.Allocator, client: *cql.Client, n: usize) !void {
     var i: usize = 0;
     while (i < n) : (i += 1) {
         const query_id = try doPrepare(allocator, client);
@@ -115,7 +142,7 @@ fn doPrepareThenExec(allocator: *mem.Allocator, client: *cql.TCPClient, n: usize
     }
 }
 
-fn doPrepareOnceThenExec(allocator: *mem.Allocator, client: *cql.TCPClient, n: usize) !void {
+fn doPrepareOnceThenExec(allocator: *mem.Allocator, client: *cql.Client, n: usize) !void {
     const query_id = try doPrepare(allocator, client);
 
     var i: usize = 0;
@@ -124,7 +151,7 @@ fn doPrepareOnceThenExec(allocator: *mem.Allocator, client: *cql.TCPClient, n: u
     }
 }
 
-fn doInsert(allocator: *mem.Allocator, client: *cql.TCPClient, n: usize) !void {
+fn doInsert(allocator: *mem.Allocator, client: *cql.Client, n: usize) !void {
     // We want query diagonistics in case of failure.
     var diags = cql.QueryOptions.Diagnostics{};
     var options = cql.QueryOptions{
@@ -272,25 +299,25 @@ pub fn main() anyerror!void {
         std.process.exit(1);
     }
 
+    // Define the seed node we will connect to. We use localhost:9042.
     var address = net.Address.initIp4([_]u8{ 127, 0, 0, 1 }, 9042);
 
     // Connect to the seed node
+    //
+    // The struct InitOptions can be used to control some aspects of the CQL client,
+    // such as the protocol version, if compression is enabled, etc.
 
     var init_options = cql.InitOptions{};
-    // init_options.compression = cql.CompressionAlgorithm.LZ4;
+    init_options.compression = cql.CompressionAlgorithm.LZ4;
     init_options.username = "cassandra";
     init_options.password = "cassandra";
 
+    // Additionally a Diagnostics struct can be provided.
+    // If initialization fails for some reason, this struct will be populated.
     var init_diags = cql.InitOptions.Diagnostics{};
     init_options.diags = &init_diags;
-
-    var client: cql.TCPClient = undefined;
-
-    client.init(
-        allocator,
-        address,
-        init_options,
-    ) catch |err| switch (err) {
+    var client: cql.Client = undefined;
+    client.initIp4(allocator, address, init_options) catch |err| switch (err) {
         error.NoUsername, error.NoPassword => {
             std.debug.panic("the server requires authentication, please set the username and password", .{});
         },
@@ -302,6 +329,22 @@ pub fn main() anyerror!void {
         },
         else => return err,
     };
+    defer client.close();
+
+    // Try to create the keyspace and table.
+    {
+        var arena = std.heap.ArenaAllocator.init(allocator);
+        defer arena.deinit();
+
+        var options = cql.QueryOptions{};
+        var diags = cql.QueryOptions.Diagnostics{};
+        options.diags = &diags;
+
+        _ = try client.query(&arena.allocator, options, schema_create_keyspace, .{});
+        _ = try client.query(&arena.allocator, options, schema_create_table, .{});
+    }
+
+    // Parse the command and run it.
 
     const cmd = args[1];
     if (mem.eql(u8, cmd, "query")) {

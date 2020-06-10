@@ -100,571 +100,542 @@ pub const QueryOptions = struct {
     };
 };
 
-pub const TCPClient = struct {
-    const Self = @This();
+pub const Client = struct {
+    const BufferedReaderType = io.BufferedReader(4096, std.fs.File.Reader);
+    const BufferedWriterType = io.BufferedWriter(4096, std.fs.File.Writer);
 
-    const ClientType = Client(std.fs.File.Reader, std.fs.File.Writer);
+    const RawFrameReaderType = RawFrameReader(BufferedReaderType.Reader);
+    const RawFrameWriterType = RawFrameWriter(BufferedWriterType.Writer);
+
+    /// Contains the state that is negotiated with a node as part of the handshake.
+    const NegotiatedState = struct {
+        cql_version: CQLVersion,
+    };
+
+    const PreparedStatementMetadataValue = struct {
+        metadata: PreparedMetadata,
+        rows_metadata: RowsMetadata,
+    };
+
+    /// Maps a prepared statement id to the types of the arguments needed when executing it.
+    const PreparedStatementsMetadata = std.HashMap([]const u8, PreparedStatementMetadataValue, std.hash_map.hashString, std.hash_map.eqlString);
+
+    allocator: *mem.Allocator,
+    options: InitOptions,
 
     socket: std.fs.File,
 
-    u: ClientType,
+    buffered_reader: BufferedReaderType,
+    buffered_writer: BufferedWriterType,
 
-    pub fn init(self: *Self, allocator: *mem.Allocator, seed_address: net.Address, options: InitOptions) !void {
+    /// Helpers types needed to decode the CQL protocol.
+    raw_frame_reader: RawFrameReaderType,
+    raw_frame_writer: RawFrameWriterType,
+    primitive_reader: PrimitiveReader,
+    primitive_writer: PrimitiveWriter,
+
+    /// TODO(vincent): need to implement some sort of TLL or size limit for this.
+    prepared_statements_metadata: PreparedStatementsMetadata,
+
+    // Negotiated with the server
+    negotiated_state: NegotiatedState,
+
+    pub fn initIp4(self: *Client, allocator: *mem.Allocator, seed_address: net.Address, options: InitOptions) !void {
+        self.allocator = allocator;
+        self.options = options;
+
         self.socket = try net.tcpConnectToAddress(seed_address);
+        errdefer self.socket.close();
 
-        _ = try self.u.init(
+        self.buffered_reader = BufferedReaderType{ .unbuffered_reader = self.socket.reader() };
+        self.buffered_writer = BufferedWriterType{ .unbuffered_writer = self.socket.writer() };
+
+        self.raw_frame_reader = RawFrameReaderType.init(self.buffered_reader.reader());
+        self.raw_frame_writer = RawFrameWriterType.init(self.buffered_writer.writer());
+        self.primitive_reader = PrimitiveReader.init();
+
+        self.prepared_statements_metadata = PreparedStatementsMetadata.init(allocator);
+
+        var dummy_diags = InitOptions.Diagnostics{};
+        var diags = options.diags orelse &dummy_diags;
+
+        _ = try self.handshake(diags);
+    }
+
+    pub fn close(self: *Client) void {
+        self.socket.close();
+    }
+
+    pub fn prepare(self: *Client, allocator: *mem.Allocator, options: QueryOptions, comptime query_string: []const u8, args: var) ![]const u8 {
+        var dummy_diags = QueryOptions.Diagnostics{};
+        var diags = options.diags orelse &dummy_diags;
+
+        // Check that the query makes sense for the arguments provided.
+
+        comptime {
+            const bind_markers = countBindMarkers(query_string);
+            const fields = @typeInfo(@TypeOf(args)).Struct.fields.len;
+
+            if (bind_markers != fields) {
+                @compileLog("number of arguments = ", fields);
+                @compileLog("number of bind markers = ", bind_markers);
+                @compileError("Query string has different number of bind markers than the number of arguments provided");
+            }
+        }
+
+        var option_ids = OptionIDArrayList{};
+        try computeValues(allocator, null, &option_ids, args);
+
+        var result = try self.writePrepare(self.allocator, allocator, diags, query_string);
+        switch (result) {
+            .Prepared => |prepared| {
+                const id = prepared.query_id;
+
+                // Store the metadata for later use with `execute`.
+
+                const gop = try self.prepared_statements_metadata.getOrPut(id);
+                if (gop.found_existing) {
+                    gop.kv.value.metadata.deinit(self.allocator);
+                    gop.kv.value.rows_metadata.deinit(self.allocator);
+                }
+
+                gop.kv.value = undefined;
+                gop.kv.value.metadata = prepared.metadata;
+                gop.kv.value.rows_metadata = prepared.rows_metadata;
+
+                return id;
+            },
+            else => return error.InvalidServerResponse,
+        }
+    }
+
+    // TODO(vincent): maybe add not comptime equivalent ?
+
+    pub fn query(self: *Client, allocator: *mem.Allocator, options: QueryOptions, comptime query_string: []const u8, args: var) !?Iterator {
+        var dummy_diags = QueryOptions.Diagnostics{};
+        var diags = options.diags orelse &dummy_diags;
+
+        // Check that the query makes sense for the arguments provided.
+
+        comptime {
+            const bind_markers = countBindMarkers(query_string);
+            const fields = @typeInfo(@TypeOf(args)).Struct.fields.len;
+
+            if (bind_markers != fields) {
+                @compileLog("number of arguments = ", fields);
+                @compileLog("number of bind markers = ", bind_markers);
+                @compileError("Query string has different number of bind markers than the number of arguments provided");
+            }
+        }
+
+        var values = std.ArrayList(Value).init(allocator);
+        try computeValues(allocator, &values, null, args);
+
+        // TODO(vincent): handle named values
+        // TODO(vincent): handle skip_metadata (see §4.1.4 in the spec)
+        var parameters = QueryParameters{
+            .consistency_level = self.options.consistency,
+            .values = undefined,
+            .skip_metadata = false,
+            .page_size = options.page_size,
+            .paging_state = options.paging_state,
+            .serial_consistency_level = null,
+            .timestamp = null,
+            .keyspace = null,
+            .now_in_seconds = null,
+        };
+        parameters.values = Values{ .Normal = values.toOwnedSlice() };
+
+        var result = try self.writeQuery(allocator, diags, query_string, parameters);
+        return switch (result) {
+            .Rows => |rows| blk: {
+                break :blk Iterator.init(rows.metadata, rows.data);
+            },
+            else => null,
+        };
+    }
+
+    pub fn execute(self: *Client, allocator: *mem.Allocator, options: QueryOptions, query_id: []const u8, args: var) !?Iterator {
+        var dummy_diags = QueryOptions.Diagnostics{};
+        var diags = options.diags orelse &dummy_diags;
+
+        // If the metadata doesn't exist we can't proceed.
+        const prepared_statement_metadata_kv = self.prepared_statements_metadata.get(query_id);
+        if (prepared_statement_metadata_kv == null) {
+            return error.InvalidPreparedQueryID;
+        }
+
+        const ps_metadata = prepared_statement_metadata_kv.?.value.metadata;
+        const ps_rows_metadata = prepared_statement_metadata_kv.?.value.rows_metadata;
+
+        var values = try std.ArrayList(Value).initCapacity(allocator, 16);
+        var option_ids = OptionIDArrayList{};
+        try computeValues(allocator, &values, &option_ids, args);
+
+        // Now that we have both prepared and compute option IDs, check that they're compatible
+        if (!areOptionIDsEqual(ps_metadata.column_specs, option_ids.span())) {
+            // TODO(vincent): do we want diags here ?
+            return error.InvalidPreparedStatementExecuteArgs;
+        }
+
+        // Check that the values provided are compatible with the prepared statement
+
+        // TODO(vincent): handle named values
+        var parameters = QueryParameters{
+            .consistency_level = self.options.consistency,
+            .values = undefined,
+            .skip_metadata = true,
+            .page_size = options.page_size,
+            .paging_state = options.paging_state,
+            .serial_consistency_level = null,
+            .timestamp = null,
+            .keyspace = null,
+            .now_in_seconds = null,
+        };
+        parameters.values = Values{ .Normal = values.toOwnedSlice() };
+
+        var result = try self.writeExecute(allocator, diags, query_id, parameters);
+        return switch (result) {
+            .Rows => |rows| blk: {
+                const metadata = if (rows.metadata.column_specs.len > 0)
+                    rows.metadata
+                else
+                    ps_rows_metadata;
+
+                break :blk Iterator.init(metadata, rows.data);
+            },
+            else => null,
+        };
+    }
+
+    fn handshake(self: *Client, diags: *InitOptions.Diagnostics) !void {
+        // Sequence diagram to establish the connection:
+        //
+        // +---------+                 +---------+
+        // | Client  |                 | Server  |
+        // +---------+                 +---------+
+        //      |                           |
+        //      | OPTIONS                   |
+        //      |-------------------------->|
+        //      |                           |
+        //      |                 SUPPORTED |
+        //      |<--------------------------|
+        //      |                           |
+        //      | STARTUP                   |
+        //      |-------------------------->|
+        //      |                           |
+        //      |      (READY|AUTHENTICATE) |
+        //      |<--------------------------|
+        //      |                           |
+        //      | AUTH_RESPONSE             |
+        //      |-------------------------->|
+        //      |                           |
+        var buffer: [4096]u8 = undefined;
+        var fba = std.heap.FixedBufferAllocator.init(&buffer);
+
+        try self.writeOptions(&fba.allocator);
+
+        var startup_response = try self.writeStartup(&fba.allocator);
+
+        switch (startup_response) {
+            .Ready => return,
+            .Authenticate => |frame| {
+                try self.authenticate(&fba.allocator, diags, frame.authenticator);
+            },
+            .Error => |err| {
+                diags.message = err.message;
+                return error.HandshakeFailed;
+            },
+        }
+    }
+
+    fn authenticate(self: *Client, allocator: *mem.Allocator, diags: *InitOptions.Diagnostics, authenticator: []const u8) !void {
+        // TODO(vincent): handle authenticator classes
+        // TODO(vincent): handle auth challenges
+        if (self.options.username == null) {
+            return error.NoUsername;
+        }
+        if (self.options.password == null) {
+            return error.NoPassword;
+        }
+
+        return try self.writeAuthResponse(
             allocator,
-            options,
-            self.socket.reader(),
-            self.socket.writer(),
+            diags,
+            self.options.username.?,
+            self.options.password.?,
         );
     }
 
-    pub inline fn prepare(self: *Self, allocator: *mem.Allocator, options: QueryOptions, comptime query_string: []const u8, args: var) ![]const u8 {
-        return self.u.prepare(allocator, options, query_string, args);
+    // Below are methods to write different frames.
+
+    fn writeOptions(self: *Client, allocator: *mem.Allocator) !void {
+        // Write OPTIONS
+        {
+            const raw_frame = RawFrame{
+                .header = FrameHeader{
+                    .version = self.options.protocol_version,
+                    .flags = 0,
+                    .stream = 0,
+                    .opcode = .Options,
+                    .body_len = 0,
+                },
+                .body = &[_]u8{},
+            };
+            try self.raw_frame_writer.write(raw_frame);
+            try self.buffered_writer.flush();
+        }
+
+        // Read SUPPORTED
+        const raw_frame = try self.readRawFrame(allocator);
+        defer raw_frame.deinit(allocator);
+
+        if (raw_frame.header.opcode != .Supported) {
+            return error.InvalidServerResponse;
+        }
+
+        self.primitive_reader.reset(raw_frame.body);
+
+        var supported_frame = try SupportedFrame.read(allocator, &self.primitive_reader);
+
+        self.negotiated_state.cql_version = supported_frame.cql_versions[0];
     }
 
-    pub inline fn execute(self: *Self, allocator: *mem.Allocator, options: QueryOptions, query_id: []const u8, args: var) !?Iterator {
-        return self.u.execute(allocator, options, query_id, args);
+    fn writeStartup(self: *Client, allocator: *mem.Allocator) !StartupResponse {
+        // Write STARTUP
+        {
+            var frame = StartupFrame{
+                .cql_version = self.negotiated_state.cql_version,
+                .compression = self.options.compression,
+            };
+
+            // Encode body
+            try self.primitive_writer.reset(allocator);
+            defer self.primitive_writer.deinit(allocator);
+            _ = try frame.write(&self.primitive_writer);
+
+            // Write raw frame
+            const raw_frame = try self.makeRawFrame(allocator, .Startup, true);
+            try self.raw_frame_writer.write(raw_frame);
+            try self.buffered_writer.flush();
+        }
+
+        // Read either READY or AUTHENTICATE
+        const raw_frame = try self.readRawFrame(allocator);
+        defer raw_frame.deinit(allocator);
+
+        self.primitive_reader.reset(raw_frame.body);
+
+        return switch (raw_frame.header.opcode) {
+            .Ready => StartupResponse{ .Ready = .{} },
+            .Authenticate => StartupResponse{
+                .Authenticate = try AuthenticateFrame.read(allocator, &self.primitive_reader),
+            },
+            .Error => StartupResponse{
+                .Error = try ErrorFrame.read(allocator, &self.primitive_reader),
+            },
+            else => error.InvalidServerResponse,
+        };
     }
 
-    pub inline fn query(self: *Self, allocator: *mem.Allocator, options: QueryOptions, comptime query_string: []const u8, args: var) !?Iterator {
-        return self.u.query(allocator, options, query_string, args);
+    fn writeAuthResponse(self: *Client, allocator: *mem.Allocator, diags: *InitOptions.Diagnostics, username: []const u8, password: []const u8) !void {
+        // Write AUTH_RESPONSE
+        {
+            var buf: [512]u8 = undefined;
+            const token = try std.fmt.bufPrint(&buf, "\x00{}\x00{}", .{ username, password });
+
+            var frame = AuthResponseFrame{ .token = token };
+
+            // Encode body
+            try self.primitive_writer.reset(allocator);
+            defer self.primitive_writer.deinit(allocator);
+            _ = try frame.write(&self.primitive_writer);
+
+            // Write raw frame
+            const raw_frame = try self.makeRawFrame(allocator, .AuthResponse, false);
+            try self.raw_frame_writer.write(raw_frame);
+            try self.buffered_writer.flush();
+        }
+
+        // Read either AUTH_CHALLENGE, AUTH_SUCCESS or ERROR
+        const raw_frame = try self.readRawFrame(allocator);
+        self.primitive_reader.reset(raw_frame.body);
+
+        switch (raw_frame.header.opcode) {
+            .AuthChallenge => unreachable,
+            .AuthSuccess => return,
+            .Error => {
+                var error_frame = try ErrorFrame.read(allocator, &self.primitive_reader);
+                diags.message = error_frame.message;
+                return error.AuthenticationFailed;
+            },
+            else => return error.InvalidServerResponse,
+        }
+    }
+
+    fn writeQuery(self: *Client, allocator: *mem.Allocator, diags: *QueryOptions.Diagnostics, query_string: []const u8, query_parameters: QueryParameters) !Result {
+        // Write QUERY
+        {
+            var frame = QueryFrame{
+                .query = query_string,
+                .query_parameters = query_parameters,
+            };
+
+            // Encode body
+            try self.primitive_writer.reset(allocator);
+            defer self.primitive_writer.deinit(allocator);
+            _ = try frame.write(self.options.protocol_version, &self.primitive_writer);
+
+            // Write raw frame
+            const raw_frame = try self.makeRawFrame(allocator, .Query, false);
+            try self.raw_frame_writer.write(raw_frame);
+            try self.buffered_writer.flush();
+        }
+
+        // Read RESULT
+        const raw_frame = try self.readRawFrame(allocator);
+        self.primitive_reader.reset(raw_frame.body);
+
+        return switch (raw_frame.header.opcode) {
+            .Result => blk: {
+                var frame = try ResultFrame.read(allocator, self.options.protocol_version, &self.primitive_reader);
+                break :blk frame.result;
+            },
+            .Error => {
+                var error_frame = try ErrorFrame.read(allocator, &self.primitive_reader);
+                diags.message = error_frame.message;
+                return error.QueryExecutionFailed;
+            },
+            else => return error.InvalidServerResponse,
+        };
+    }
+
+    fn writePrepare(self: *Client, allocator: *mem.Allocator, metadata_allocator: *mem.Allocator, diags: *QueryOptions.Diagnostics, query_string: []const u8) !Result {
+        // Write PREPARE
+        {
+            var frame = PrepareFrame{
+                .query = query_string,
+                .keyspace = null,
+            };
+
+            // Encode body
+            try self.primitive_writer.reset(allocator);
+            defer self.primitive_writer.deinit(allocator);
+            _ = try frame.write(self.options.protocol_version, &self.primitive_writer);
+
+            // Write raw frame
+            const raw_frame = try self.makeRawFrame(allocator, .Prepare, false);
+            try self.raw_frame_writer.write(raw_frame);
+            try self.buffered_writer.flush();
+        }
+
+        // Read RESULT
+        const raw_frame = try self.readRawFrame(allocator);
+        self.primitive_reader.reset(raw_frame.body);
+
+        return switch (raw_frame.header.opcode) {
+            .Result => blk: {
+                // Since we want to retain the metadata from the result frame for later use we can't use the default allocator which will only be valid per-call.
+                // Instead take a dedicated metadata_allocator for this.
+                var frame = try ResultFrame.read(metadata_allocator, self.options.protocol_version, &self.primitive_reader);
+                break :blk frame.result;
+            },
+            .Error => {
+                var error_frame = try ErrorFrame.read(allocator, &self.primitive_reader);
+                diags.message = error_frame.message;
+                return error.QueryPreparationFailed;
+            },
+            else => return error.InvalidServerResponse,
+        };
+    }
+
+    fn writeExecute(self: *Client, allocator: *mem.Allocator, diags: *QueryOptions.Diagnostics, query_id: []const u8, query_parameters: QueryParameters) !Result {
+        // Write EXECUTE
+        {
+            var frame = ExecuteFrame{
+                .query_id = query_id,
+                .result_metadata_id = null,
+                .query_parameters = query_parameters,
+            };
+
+            // Encode body
+            try self.primitive_writer.reset(allocator);
+            defer self.primitive_writer.deinit(allocator);
+            _ = try frame.write(self.options.protocol_version, &self.primitive_writer);
+
+            // Write raw frame
+            const raw_frame = try self.makeRawFrame(allocator, .Execute, false);
+            try self.raw_frame_writer.write(raw_frame);
+            try self.buffered_writer.flush();
+        }
+
+        // Read RESULT
+        // TODO(vincent): this is the same as in writeQuery, can we DRY it up ?
+        const raw_frame = try self.readRawFrame(allocator);
+        self.primitive_reader.reset(raw_frame.body);
+
+        return switch (raw_frame.header.opcode) {
+            .Result => blk: {
+                var frame = try ResultFrame.read(allocator, self.options.protocol_version, &self.primitive_reader);
+                break :blk frame.result;
+            },
+            .Error => {
+                var error_frame = try ErrorFrame.read(allocator, &self.primitive_reader);
+                diags.message = error_frame.message;
+                return error.QueryExecutionFailed;
+            },
+            else => return error.InvalidServerResponse,
+        };
+    }
+
+    fn readRawFrame(self: *Client, allocator: *mem.Allocator) !RawFrame {
+        var raw_frame = try self.raw_frame_reader.read(allocator);
+
+        if (raw_frame.header.flags & FrameFlags.Compression == FrameFlags.Compression) blk: {
+            const decompressed_data = try lz4.decompress(allocator, raw_frame.body);
+            raw_frame.body = decompressed_data;
+        }
+
+        return raw_frame;
+    }
+
+    fn makeRawFrame(self: *Client, allocator: *mem.Allocator, opcode: Opcode, force_no_compression: bool) !RawFrame {
+        var raw_frame: RawFrame = undefined;
+
+        const written = self.primitive_writer.getWritten();
+
+        raw_frame.header = FrameHeader{
+            .version = self.options.protocol_version,
+            .flags = 0,
+            .stream = 0,
+            .opcode = opcode,
+            .body_len = @intCast(u32, written.len),
+        };
+
+        if (force_no_compression) {
+            raw_frame.body = written;
+        } else {
+            raw_frame.body = if (self.options.compression) |compression| blk: {
+                switch (compression) {
+                    .LZ4 => {
+                        const compressed_data = try lz4.compress(allocator, written);
+
+                        raw_frame.header.flags |= FrameFlags.Compression;
+                        raw_frame.header.body_len = @intCast(u32, compressed_data.len);
+
+                        break :blk compressed_data;
+                    },
+                    else => std.debug.panic("compression algorithm {} not handled yet", .{compression}),
+                }
+            } else written;
+        }
+
+        // TODO(vincent): implement streams
+        // TODO(vincent): only compress if it's useful ?
+
+        return raw_frame;
     }
 };
-
-pub fn Client(comptime ReaderType: type, comptime WriterType: type) type {
-    return struct {
-        const Self = @This();
-
-        const BufferedReaderType = io.BufferedReader(4096, std.fs.File.Reader);
-        const BufferedWriterType = io.BufferedWriter(4096, std.fs.File.Writer);
-
-        const RawFrameReaderType = RawFrameReader(BufferedReaderType.Reader);
-        const RawFrameWriterType = RawFrameWriter(BufferedWriterType.Writer);
-
-        /// Contains the state that is negotiated with a node as part of the handshake.
-        const NegotiatedState = struct {
-            cql_version: CQLVersion,
-        };
-
-        const PreparedStatementMetadataValue = struct {
-            metadata: PreparedMetadata,
-            rows_metadata: RowsMetadata,
-        };
-
-        /// Maps a prepared statement id to the types of the arguments needed when executing it.
-        const PreparedStatementsMetadata = std.HashMap([]const u8, PreparedStatementMetadataValue, std.hash_map.hashString, std.hash_map.eqlString);
-
-        allocator: *mem.Allocator,
-
-        options: InitOptions,
-
-        buffered_reader: BufferedReaderType,
-        buffered_writer: BufferedWriterType,
-
-        /// Helpers types needed to decode the CQL protocol.
-        raw_frame_reader: RawFrameReaderType,
-        raw_frame_writer: RawFrameWriterType,
-        primitive_reader: PrimitiveReader,
-        primitive_writer: PrimitiveWriter,
-
-        /// TODO(vincent): need to implement some sort of TLL or size limit for this.
-        prepared_statements_metadata: PreparedStatementsMetadata,
-
-        // Negotiated with the server
-        negotiated_state: NegotiatedState,
-
-        pub fn init(self: *Self, allocator: *mem.Allocator, options: InitOptions, reader: ReaderType, writer: WriterType) !void {
-            self.allocator = allocator;
-            self.options = options;
-
-            self.buffered_reader = BufferedReaderType{ .unbuffered_reader = reader };
-            self.buffered_writer = BufferedWriterType{ .unbuffered_writer = writer };
-
-            self.raw_frame_reader = RawFrameReaderType.init(self.buffered_reader.reader());
-            self.raw_frame_writer = RawFrameWriterType.init(self.buffered_writer.writer());
-            self.primitive_reader = PrimitiveReader.init();
-
-            self.prepared_statements_metadata = PreparedStatementsMetadata.init(allocator);
-
-            var dummy_diags = InitOptions.Diagnostics{};
-            var diags = options.diags orelse &dummy_diags;
-
-            _ = try self.handshake(diags);
-        }
-
-        pub fn prepare(self: *Self, allocator: *mem.Allocator, options: QueryOptions, comptime query_string: []const u8, args: var) ![]const u8 {
-            var dummy_diags = QueryOptions.Diagnostics{};
-            var diags = options.diags orelse &dummy_diags;
-
-            // Check that the query makes sense for the arguments provided.
-
-            comptime {
-                const bind_markers = countBindMarkers(query_string);
-                const fields = @typeInfo(@TypeOf(args)).Struct.fields.len;
-
-                if (bind_markers != fields) {
-                    @compileLog("number of arguments = ", fields);
-                    @compileLog("number of bind markers = ", bind_markers);
-                    @compileError("Query string has different number of bind markers than the number of arguments provided");
-                }
-            }
-
-            var option_ids = OptionIDArrayList{};
-            try computeValues(allocator, null, &option_ids, args);
-
-            var result = try self.writePrepare(self.allocator, allocator, diags, query_string);
-            switch (result) {
-                .Prepared => |prepared| {
-                    const id = prepared.query_id;
-
-                    // Store the metadata for later use with `execute`.
-
-                    const gop = try self.prepared_statements_metadata.getOrPut(id);
-                    if (gop.found_existing) {
-                        gop.kv.value.metadata.deinit(self.allocator);
-                        gop.kv.value.rows_metadata.deinit(self.allocator);
-                    }
-
-                    gop.kv.value = undefined;
-                    gop.kv.value.metadata = prepared.metadata;
-                    gop.kv.value.rows_metadata = prepared.rows_metadata;
-
-                    return id;
-                },
-                else => return error.InvalidServerResponse,
-            }
-        }
-
-        // TODO(vincent): maybe add not comptime equivalent ?
-
-        pub fn query(self: *Self, allocator: *mem.Allocator, options: QueryOptions, comptime query_string: []const u8, args: var) !?Iterator {
-            var dummy_diags = QueryOptions.Diagnostics{};
-            var diags = options.diags orelse &dummy_diags;
-
-            // Check that the query makes sense for the arguments provided.
-
-            comptime {
-                const bind_markers = countBindMarkers(query_string);
-                const fields = @typeInfo(@TypeOf(args)).Struct.fields.len;
-
-                if (bind_markers != fields) {
-                    @compileLog("number of arguments = ", fields);
-                    @compileLog("number of bind markers = ", bind_markers);
-                    @compileError("Query string has different number of bind markers than the number of arguments provided");
-                }
-            }
-
-            var values = std.ArrayList(Value).init(allocator);
-            try computeValues(allocator, &values, null, args);
-
-            // TODO(vincent): handle named values
-            // TODO(vincent): handle skip_metadata (see §4.1.4 in the spec)
-            var parameters = QueryParameters{
-                .consistency_level = self.options.consistency,
-                .values = undefined,
-                .skip_metadata = false,
-                .page_size = options.page_size,
-                .paging_state = options.paging_state,
-                .serial_consistency_level = null,
-                .timestamp = null,
-                .keyspace = null,
-                .now_in_seconds = null,
-            };
-            parameters.values = Values{ .Normal = values.toOwnedSlice() };
-
-            var result = try self.writeQuery(allocator, diags, query_string, parameters);
-            return switch (result) {
-                .Rows => |rows| blk: {
-                    break :blk Iterator.init(rows.metadata, rows.data);
-                },
-                else => null,
-            };
-        }
-
-        pub fn execute(self: *Self, allocator: *mem.Allocator, options: QueryOptions, query_id: []const u8, args: var) !?Iterator {
-            var dummy_diags = QueryOptions.Diagnostics{};
-            var diags = options.diags orelse &dummy_diags;
-
-            // If the metadata doesn't exist we can't proceed.
-            const prepared_statement_metadata_kv = self.prepared_statements_metadata.get(query_id);
-            if (prepared_statement_metadata_kv == null) {
-                return error.InvalidPreparedQueryID;
-            }
-
-            const ps_metadata = prepared_statement_metadata_kv.?.value.metadata;
-            const ps_rows_metadata = prepared_statement_metadata_kv.?.value.rows_metadata;
-
-            var values = try std.ArrayList(Value).initCapacity(allocator, 16);
-            var option_ids = OptionIDArrayList{};
-            try computeValues(allocator, &values, &option_ids, args);
-
-            // Now that we have both prepared and compute option IDs, check that they're compatible
-            if (!areOptionIDsEqual(ps_metadata.column_specs, option_ids.span())) {
-                // TODO(vincent): do we want diags here ?
-                return error.InvalidPreparedStatementExecuteArgs;
-            }
-
-            // Check that the values provided are compatible with the prepared statement
-
-            // TODO(vincent): handle named values
-            var parameters = QueryParameters{
-                .consistency_level = self.options.consistency,
-                .values = undefined,
-                .skip_metadata = true,
-                .page_size = options.page_size,
-                .paging_state = options.paging_state,
-                .serial_consistency_level = null,
-                .timestamp = null,
-                .keyspace = null,
-                .now_in_seconds = null,
-            };
-            parameters.values = Values{ .Normal = values.toOwnedSlice() };
-
-            var result = try self.writeExecute(allocator, diags, query_id, parameters);
-            return switch (result) {
-                .Rows => |rows| blk: {
-                    const metadata = if (rows.metadata.column_specs.len > 0)
-                        rows.metadata
-                    else
-                        ps_rows_metadata;
-
-                    break :blk Iterator.init(metadata, rows.data);
-                },
-                else => null,
-            };
-        }
-
-        fn handshake(self: *Self, diags: *InitOptions.Diagnostics) !void {
-            // Sequence diagram to establish the connection:
-            //
-            // +---------+                 +---------+
-            // | Client  |                 | Server  |
-            // +---------+                 +---------+
-            //      |                           |
-            //      | OPTIONS                   |
-            //      |-------------------------->|
-            //      |                           |
-            //      |                 SUPPORTED |
-            //      |<--------------------------|
-            //      |                           |
-            //      | STARTUP                   |
-            //      |-------------------------->|
-            //      |                           |
-            //      |      (READY|AUTHENTICATE) |
-            //      |<--------------------------|
-            //      |                           |
-            //      | AUTH_RESPONSE             |
-            //      |-------------------------->|
-            //      |                           |
-            var buffer: [4096]u8 = undefined;
-            var fba = std.heap.FixedBufferAllocator.init(&buffer);
-
-            try self.writeOptions(&fba.allocator);
-
-            var startup_response = try self.writeStartup(&fba.allocator);
-
-            switch (startup_response) {
-                .Ready => return,
-                .Authenticate => |frame| {
-                    try self.authenticate(&fba.allocator, diags, frame.authenticator);
-                },
-                .Error => |err| {
-                    diags.message = err.message;
-                    return error.HandshakeFailed;
-                },
-            }
-        }
-
-        fn authenticate(self: *Self, allocator: *mem.Allocator, diags: *InitOptions.Diagnostics, authenticator: []const u8) !void {
-            // TODO(vincent): handle authenticator classes
-            // TODO(vincent): handle auth challenges
-            if (self.options.username == null) {
-                return error.NoUsername;
-            }
-            if (self.options.password == null) {
-                return error.NoPassword;
-            }
-
-            return try self.writeAuthResponse(
-                allocator,
-                diags,
-                self.options.username.?,
-                self.options.password.?,
-            );
-        }
-
-        // Below are methods to write different frames.
-
-        fn writeOptions(self: *Self, allocator: *mem.Allocator) !void {
-            // Write OPTIONS
-            {
-                const raw_frame = RawFrame{
-                    .header = FrameHeader{
-                        .version = self.options.protocol_version,
-                        .flags = 0,
-                        .stream = 0,
-                        .opcode = .Options,
-                        .body_len = 0,
-                    },
-                    .body = &[_]u8{},
-                };
-                try self.raw_frame_writer.write(raw_frame);
-                try self.buffered_writer.flush();
-            }
-
-            // Read SUPPORTED
-            const raw_frame = try self.readRawFrame(allocator);
-            defer raw_frame.deinit(allocator);
-
-            if (raw_frame.header.opcode != .Supported) {
-                return error.InvalidServerResponse;
-            }
-
-            self.primitive_reader.reset(raw_frame.body);
-
-            var supported_frame = try SupportedFrame.read(allocator, &self.primitive_reader);
-
-            self.negotiated_state.cql_version = supported_frame.cql_versions[0];
-        }
-
-        fn writeStartup(self: *Self, allocator: *mem.Allocator) !StartupResponse {
-            // Write STARTUP
-            {
-                var frame = StartupFrame{
-                    .cql_version = self.negotiated_state.cql_version,
-                    .compression = self.options.compression,
-                };
-
-                // Encode body
-                try self.primitive_writer.reset(allocator);
-                defer self.primitive_writer.deinit(allocator);
-                _ = try frame.write(&self.primitive_writer);
-
-                // Write raw frame
-                const raw_frame = try self.makeRawFrame(allocator, .Startup, true);
-                try self.raw_frame_writer.write(raw_frame);
-                try self.buffered_writer.flush();
-            }
-
-            // Read either READY or AUTHENTICATE
-            const raw_frame = try self.readRawFrame(allocator);
-            defer raw_frame.deinit(allocator);
-
-            self.primitive_reader.reset(raw_frame.body);
-
-            return switch (raw_frame.header.opcode) {
-                .Ready => StartupResponse{ .Ready = .{} },
-                .Authenticate => StartupResponse{
-                    .Authenticate = try AuthenticateFrame.read(allocator, &self.primitive_reader),
-                },
-                .Error => StartupResponse{
-                    .Error = try ErrorFrame.read(allocator, &self.primitive_reader),
-                },
-                else => error.InvalidServerResponse,
-            };
-        }
-
-        fn writeAuthResponse(self: *Self, allocator: *mem.Allocator, diags: *InitOptions.Diagnostics, username: []const u8, password: []const u8) !void {
-            // Write AUTH_RESPONSE
-            {
-                var buf: [512]u8 = undefined;
-                const token = try std.fmt.bufPrint(&buf, "\x00{}\x00{}", .{ username, password });
-
-                var frame = AuthResponseFrame{ .token = token };
-
-                // Encode body
-                try self.primitive_writer.reset(allocator);
-                defer self.primitive_writer.deinit(allocator);
-                _ = try frame.write(&self.primitive_writer);
-
-                // Write raw frame
-                const raw_frame = try self.makeRawFrame(allocator, .AuthResponse, false);
-                try self.raw_frame_writer.write(raw_frame);
-                try self.buffered_writer.flush();
-            }
-
-            // Read either AUTH_CHALLENGE, AUTH_SUCCESS or ERROR
-            const raw_frame = try self.readRawFrame(allocator);
-            self.primitive_reader.reset(raw_frame.body);
-
-            switch (raw_frame.header.opcode) {
-                .AuthChallenge => unreachable,
-                .AuthSuccess => return,
-                .Error => {
-                    var error_frame = try ErrorFrame.read(allocator, &self.primitive_reader);
-                    diags.message = error_frame.message;
-                    return error.AuthenticationFailed;
-                },
-                else => return error.InvalidServerResponse,
-            }
-        }
-
-        fn writeQuery(self: *Self, allocator: *mem.Allocator, diags: *QueryOptions.Diagnostics, query_string: []const u8, query_parameters: QueryParameters) !Result {
-            // Write QUERY
-            {
-                var frame = QueryFrame{
-                    .query = query_string,
-                    .query_parameters = query_parameters,
-                };
-
-                // Encode body
-                try self.primitive_writer.reset(allocator);
-                defer self.primitive_writer.deinit(allocator);
-                _ = try frame.write(self.options.protocol_version, &self.primitive_writer);
-
-                // Write raw frame
-                const raw_frame = try self.makeRawFrame(allocator, .Query, false);
-                try self.raw_frame_writer.write(raw_frame);
-                try self.buffered_writer.flush();
-            }
-
-            // Read RESULT
-            const raw_frame = try self.readRawFrame(allocator);
-            self.primitive_reader.reset(raw_frame.body);
-
-            return switch (raw_frame.header.opcode) {
-                .Result => blk: {
-                    var frame = try ResultFrame.read(allocator, self.options.protocol_version, &self.primitive_reader);
-                    break :blk frame.result;
-                },
-                .Error => {
-                    var error_frame = try ErrorFrame.read(allocator, &self.primitive_reader);
-                    diags.message = error_frame.message;
-                    return error.QueryExecutionFailed;
-                },
-                else => return error.InvalidServerResponse,
-            };
-        }
-
-        fn writePrepare(self: *Self, allocator: *mem.Allocator, metadata_allocator: *mem.Allocator, diags: *QueryOptions.Diagnostics, query_string: []const u8) !Result {
-            // Write PREPARE
-            {
-                var frame = PrepareFrame{
-                    .query = query_string,
-                    .keyspace = null,
-                };
-
-                // Encode body
-                try self.primitive_writer.reset(allocator);
-                defer self.primitive_writer.deinit(allocator);
-                _ = try frame.write(self.options.protocol_version, &self.primitive_writer);
-
-                // Write raw frame
-                const raw_frame = try self.makeRawFrame(allocator, .Prepare, false);
-                try self.raw_frame_writer.write(raw_frame);
-                try self.buffered_writer.flush();
-            }
-
-            // Read RESULT
-            const raw_frame = try self.readRawFrame(allocator);
-            self.primitive_reader.reset(raw_frame.body);
-
-            return switch (raw_frame.header.opcode) {
-                .Result => blk: {
-                    // Since we want to retain the metadata from the result frame for later use we can't use the default allocator which will only be valid per-call.
-                    // Instead take a dedicated metadata_allocator for this.
-                    var frame = try ResultFrame.read(metadata_allocator, self.options.protocol_version, &self.primitive_reader);
-                    break :blk frame.result;
-                },
-                .Error => {
-                    var error_frame = try ErrorFrame.read(allocator, &self.primitive_reader);
-                    diags.message = error_frame.message;
-                    return error.QueryPreparationFailed;
-                },
-                else => return error.InvalidServerResponse,
-            };
-        }
-
-        fn writeExecute(self: *Self, allocator: *mem.Allocator, diags: *QueryOptions.Diagnostics, query_id: []const u8, query_parameters: QueryParameters) !Result {
-            // Write EXECUTE
-            {
-                var frame = ExecuteFrame{
-                    .query_id = query_id,
-                    .result_metadata_id = null,
-                    .query_parameters = query_parameters,
-                };
-
-                // Encode body
-                try self.primitive_writer.reset(allocator);
-                defer self.primitive_writer.deinit(allocator);
-                _ = try frame.write(self.options.protocol_version, &self.primitive_writer);
-
-                // Write raw frame
-                const raw_frame = try self.makeRawFrame(allocator, .Execute, false);
-                try self.raw_frame_writer.write(raw_frame);
-                try self.buffered_writer.flush();
-            }
-
-            // Read RESULT
-            // TODO(vincent): this is the same as in writeQuery, can we DRY it up ?
-            const raw_frame = try self.readRawFrame(allocator);
-            self.primitive_reader.reset(raw_frame.body);
-
-            return switch (raw_frame.header.opcode) {
-                .Result => blk: {
-                    var frame = try ResultFrame.read(allocator, self.options.protocol_version, &self.primitive_reader);
-                    break :blk frame.result;
-                },
-                .Error => {
-                    var error_frame = try ErrorFrame.read(allocator, &self.primitive_reader);
-                    diags.message = error_frame.message;
-                    return error.QueryExecutionFailed;
-                },
-                else => return error.InvalidServerResponse,
-            };
-        }
-
-        fn readRawFrame(self: *Self, allocator: *mem.Allocator) !RawFrame {
-            var raw_frame = try self.raw_frame_reader.read(allocator);
-
-            if (raw_frame.header.flags & FrameFlags.Compression == FrameFlags.Compression) blk: {
-                const decompressed_data = try lz4.decompress(allocator, raw_frame.body);
-                raw_frame.body = decompressed_data;
-            }
-
-            return raw_frame;
-        }
-
-        fn makeRawFrame(self: *Self, allocator: *mem.Allocator, opcode: Opcode, force_no_compression: bool) !RawFrame {
-            var raw_frame: RawFrame = undefined;
-
-            const written = self.primitive_writer.getWritten();
-
-            raw_frame.header = FrameHeader{
-                .version = self.options.protocol_version,
-                .flags = 0,
-                .stream = 0,
-                .opcode = opcode,
-                .body_len = @intCast(u32, written.len),
-            };
-
-            if (force_no_compression) {
-                raw_frame.body = written;
-            } else {
-                raw_frame.body = if (self.options.compression) |compression| blk: {
-                    switch (compression) {
-                        .LZ4 => {
-                            const compressed_data = try lz4.compress(allocator, written);
-
-                            raw_frame.header.flags |= FrameFlags.Compression;
-                            raw_frame.header.body_len = @intCast(u32, compressed_data.len);
-
-                            break :blk compressed_data;
-                        },
-                        else => std.debug.panic("compression algorithm {} not handled yet", .{compression}),
-                    }
-                } else written;
-            }
-
-            // TODO(vincent): implement streams
-            // TODO(vincent): only compress if it's useful ?
-
-            return raw_frame;
-        }
-    };
-}
 
 const OptionIDArrayList = struct {
     const Self = @This();
