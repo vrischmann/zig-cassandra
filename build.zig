@@ -37,15 +37,15 @@ pub fn build(b: *Builder) !void {
     const test_step = b.step("test", "Run library tests");
     test_step.dependOn(&main_tests.step);
 
-    // Build CLI
-    const cli = b.addExecutable("cqlsh", "src/cli.zig");
-    cli.linkLibrary(lz4);
-    cli.setTarget(target);
-    cli.setBuildMode(mode);
-    cli.install();
-    cli.addIncludeDir("src");
+    // Build example
+    const example = b.addExecutable("example", "src/example.zig");
+    example.linkLibrary(lz4);
+    example.setTarget(target);
+    example.setBuildMode(mode);
+    example.install();
+    example.addIncludeDir("src");
 
-    const run_cmd = cli.run();
+    const run_cmd = example.run();
     run_cmd.step.dependOn(b.getInstallStep());
 
     const run_step = b.step("run", "Run the app");
