@@ -192,13 +192,13 @@ fn iterate(allocator: *mem.Allocator, iter: *cql.Iterator) !usize {
     const IDs = struct {
         slice: []u8,
 
-        pub fn format(self: @This(), comptime fmt: []const u8, options: std.fmt.FormatOptions, out_stream: var) !void {
-            try out_stream.writeByte('[');
+        pub fn format(self: @This(), comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: var) !void {
+            try writer.writeByte('[');
             for (self.slice) |item, i| {
-                if (i > 0) try out_stream.writeAll(", ");
-                try std.fmt.format(out_stream, "{d}", .{item});
+                if (i > 0) try writer.writeAll(", ");
+                try std.fmt.format(writer, "{d}", .{item});
             }
-            try out_stream.writeByte(']');
+            try writer.writeByte(']');
         }
     };
 
@@ -261,7 +261,7 @@ const usage =
 pub fn main() anyerror!void {
     const allocator = std.heap.page_allocator;
 
-    const stderr = std.io.getStdErr().outStream();
+    const stderr = std.io.getStdErr().writer();
 
     const args = try std.process.argsAlloc(allocator);
     defer std.process.argsFree(allocator, args);

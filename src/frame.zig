@@ -80,15 +80,15 @@ pub fn RawFrameReader(comptime ReaderType: type) type {
     };
 }
 
-pub fn RawFrameWriter(comptime OutStreamType: type) type {
+pub fn RawFrameWriter(comptime WriterType: type) type {
     return struct {
         const Self = @This();
 
-        out_stream: OutStreamType,
+        writer: WriterType,
 
-        pub fn init(out: OutStreamType) Self {
+        pub fn init(out: WriterType) Self {
             return Self{
-                .out_stream = out,
+                .writer = out,
             };
         }
 
@@ -101,8 +101,8 @@ pub fn RawFrameWriter(comptime OutStreamType: type) type {
             buf[4] = @enumToInt(raw_frame.header.opcode);
             mem.writeIntBig(u32, @ptrCast(*[4]u8, buf[5..9]), raw_frame.header.body_len);
 
-            try self.out_stream.writeAll(&buf);
-            try self.out_stream.writeAll(raw_frame.body);
+            try self.writer.writeAll(&buf);
+            try self.writer.writeAll(raw_frame.body);
         }
     };
 }
@@ -149,7 +149,7 @@ test "frame header: read and write" {
     var new_buf: [32]u8 = undefined;
     var new_fbs = io.fixedBufferStream(&new_buf);
 
-    var serializer = io.serializer(.Big, io.Packing.Bit, new_fbs.outStream());
+    var serializer = io.serializer(.Big, io.Packing.Bit, new_fbs.writer());
     _ = try serializer.serialize(header);
 
     testing.expectEqualSlices(u8, exp, new_fbs.getWritten());

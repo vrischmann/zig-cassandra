@@ -96,8 +96,8 @@ pub fn expectSameRawFrame(frame: var, header: FrameHeader, exp: []const u8) void
 
     var buf2: [1024]u8 = undefined;
     var source = io.StreamSource{ .buffer = io.fixedBufferStream(&buf2) };
-    var out_stream = source.outStream();
-    var fw = RawFrameWriter(@TypeOf(out_stream)).init(out_stream);
+    var writer = source.writer();
+    var fw = RawFrameWriter(@TypeOf(writer)).init(writer);
 
     fw.write(raw_frame) catch |err| {
         std.debug.panic("unable to write raw frame. err: {}\n", .{err});

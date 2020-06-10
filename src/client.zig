@@ -103,7 +103,7 @@ pub const QueryOptions = struct {
 pub const TCPClient = struct {
     const Self = @This();
 
-    const ClientType = Client(std.fs.File.Reader, std.fs.File.OutStream);
+    const ClientType = Client(std.fs.File.Reader, std.fs.File.Writer);
 
     socket: std.fs.File,
 
@@ -116,7 +116,7 @@ pub const TCPClient = struct {
             allocator,
             options,
             self.socket.reader(),
-            self.socket.outStream(),
+            self.socket.writer(),
         );
     }
 
@@ -133,15 +133,15 @@ pub const TCPClient = struct {
     }
 };
 
-pub fn Client(comptime ReaderType: type, comptime OutStreamType: type) type {
+pub fn Client(comptime ReaderType: type, comptime WriterType: type) type {
     return struct {
         const Self = @This();
 
         const BufferedReaderType = io.BufferedReader(4096, std.fs.File.Reader);
-        const BufferedOutStreamType = io.BufferedOutStream(4096, std.fs.File.OutStream);
+        const BufferedWriterType = io.BufferedWriter(4096, std.fs.File.Writer);
 
         const RawFrameReaderType = RawFrameReader(BufferedReaderType.Reader);
-        const RawFrameWriterType = RawFrameWriter(BufferedOutStreamType.OutStream);
+        const RawFrameWriterType = RawFrameWriter(BufferedWriterType.Writer);
 
         /// Contains the state that is negotiated with a node as part of the handshake.
         const NegotiatedState = struct {
@@ -161,7 +161,7 @@ pub fn Client(comptime ReaderType: type, comptime OutStreamType: type) type {
         options: InitOptions,
 
         buffered_reader: BufferedReaderType,
-        buffered_out_stream: BufferedOutStreamType,
+        buffered_writer: BufferedWriterType,
 
         /// Helpers types needed to decode the CQL protocol.
         raw_frame_reader: RawFrameReaderType,
@@ -175,15 +175,15 @@ pub fn Client(comptime ReaderType: type, comptime OutStreamType: type) type {
         // Negotiated with the server
         negotiated_state: NegotiatedState,
 
-        pub fn init(self: *Self, allocator: *mem.Allocator, options: InitOptions, reader: ReaderType, out_stream: OutStreamType) !void {
+        pub fn init(self: *Self, allocator: *mem.Allocator, options: InitOptions, reader: ReaderType, writer: WriterType) !void {
             self.allocator = allocator;
             self.options = options;
 
             self.buffered_reader = BufferedReaderType{ .unbuffered_reader = reader };
-            self.buffered_out_stream = BufferedOutStreamType{ .unbuffered_out_stream = out_stream };
+            self.buffered_writer = BufferedWriterType{ .unbuffered_writer = writer };
 
             self.raw_frame_reader = RawFrameReaderType.init(self.buffered_reader.reader());
-            self.raw_frame_writer = RawFrameWriterType.init(self.buffered_out_stream.outStream());
+            self.raw_frame_writer = RawFrameWriterType.init(self.buffered_writer.writer());
             self.primitive_reader = PrimitiveReader.init();
 
             self.prepared_statements_metadata = PreparedStatementsMetadata.init(allocator);
@@ -411,7 +411,7 @@ pub fn Client(comptime ReaderType: type, comptime OutStreamType: type) type {
                     .body = &[_]u8{},
                 };
                 try self.raw_frame_writer.write(raw_frame);
-                try self.buffered_out_stream.flush();
+                try self.buffered_writer.flush();
             }
 
             // Read SUPPORTED
@@ -445,7 +445,7 @@ pub fn Client(comptime ReaderType: type, comptime OutStreamType: type) type {
                 // Write raw frame
                 const raw_frame = try self.makeRawFrame(allocator, .Startup, true);
                 try self.raw_frame_writer.write(raw_frame);
-                try self.buffered_out_stream.flush();
+                try self.buffered_writer.flush();
             }
 
             // Read either READY or AUTHENTICATE
@@ -482,7 +482,7 @@ pub fn Client(comptime ReaderType: type, comptime OutStreamType: type) type {
                 // Write raw frame
                 const raw_frame = try self.makeRawFrame(allocator, .AuthResponse, false);
                 try self.raw_frame_writer.write(raw_frame);
-                try self.buffered_out_stream.flush();
+                try self.buffered_writer.flush();
             }
 
             // Read either AUTH_CHALLENGE, AUTH_SUCCESS or ERROR
@@ -517,7 +517,7 @@ pub fn Client(comptime ReaderType: type, comptime OutStreamType: type) type {
                 // Write raw frame
                 const raw_frame = try self.makeRawFrame(allocator, .Query, false);
                 try self.raw_frame_writer.write(raw_frame);
-                try self.buffered_out_stream.flush();
+                try self.buffered_writer.flush();
             }
 
             // Read RESULT
@@ -554,7 +554,7 @@ pub fn Client(comptime ReaderType: type, comptime OutStreamType: type) type {
                 // Write raw frame
                 const raw_frame = try self.makeRawFrame(allocator, .Prepare, false);
                 try self.raw_frame_writer.write(raw_frame);
-                try self.buffered_out_stream.flush();
+                try self.buffered_writer.flush();
             }
 
             // Read RESULT
@@ -594,7 +594,7 @@ pub fn Client(comptime ReaderType: type, comptime OutStreamType: type) type {
                 // Write raw frame
                 const raw_frame = try self.makeRawFrame(allocator, .Execute, false);
                 try self.raw_frame_writer.write(raw_frame);
-                try self.buffered_out_stream.flush();
+                try self.buffered_writer.flush();
             }
 
             // Read RESULT
