@@ -5,6 +5,19 @@ const net = std.net;
 
 const cql = @import("lib.zig");
 
+const schema_create_keyspace =
+    \\ CREATE KEYSPACE IF NOT EXISTS foobar WITH replication = {'class': 'SimpleStrategy', 'replication_factor': 1};
+;
+
+const schema_create_table =
+    \\ CREATE TABLE IF NOT EXISTS foobar.age_to_ids(
+    \\ 	age int,
+    \\ 	name text,
+    \\ 	ids set<tinyint>,
+    \\ 	PRIMARY KEY ((age))
+    \\ );
+;
+
 fn doQuery(allocator: *mem.Allocator, client: *cql.Client) !void {
     // We want query diagonistics in case of failure.
     var diags = cql.QueryOptions.Diagnostics{};
@@ -298,6 +311,15 @@ pub fn main() anyerror!void {
         },
         else => return err,
     };
+
+    {
+        var options = cql.QueryOptions{};
+        var diags = cql.QueryOptions.Diagnostics{};
+        options.diags = &diags;
+
+        _ = try client.query(allocator, options, schema_create_keyspace, .{});
+        _ = try client.query(allocator, options, schema_create_table, .{});
+    }
 
     const cmd = args[1];
     if (mem.eql(u8, cmd, "query")) {
