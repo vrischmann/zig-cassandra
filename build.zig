@@ -44,10 +44,4 @@ pub fn build(b: *Builder) !void {
     example.setBuildMode(mode);
     example.install();
     example.addIncludeDir("src");
-
-    const run_cmd = example.run();
-    run_cmd.step.dependOn(b.getInstallStep());
-
-    const run_step = b.step("run", "Run the app");
-    run_step.dependOn(&run_cmd.step);
 }
