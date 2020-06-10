@@ -59,9 +59,9 @@ pub fn arenaAllocator() std.heap.ArenaAllocator {
 /// Only intended to be used for tests.
 pub fn readRawFrame(_allocator: *std.mem.Allocator, data: []const u8) !RawFrame {
     var source = io.StreamSource{ .const_buffer = io.fixedBufferStream(data) };
-    var in_stream = source.inStream();
+    var reader = source.reader();
 
-    var fr = RawFrameReader(@TypeOf(in_stream)).init(in_stream);
+    var fr = RawFrameReader(@TypeOf(reader)).init(reader);
 
     return fr.read(_allocator);
 }

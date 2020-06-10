@@ -283,7 +283,7 @@ test "protocol version: serialize and deserialize" {
 
         var in = std.io.fixedBufferStream(&tc.b);
 
-        var d = std.io.deserializer(std.builtin.Endian.Big, std.io.Packing.Byte, in.inStream());
+        var d = std.io.deserializer(std.builtin.Endian.Big, std.io.Packing.Byte, in.reader());
         if (tc.err) |err| {
             testing.expectError(err, d.deserialize(ProtocolVersion));
         } else {

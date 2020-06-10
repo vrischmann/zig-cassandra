@@ -103,7 +103,7 @@ pub const QueryOptions = struct {
 pub const TCPClient = struct {
     const Self = @This();
 
-    const ClientType = Client(std.fs.File.InStream, std.fs.File.OutStream);
+    const ClientType = Client(std.fs.File.Reader, std.fs.File.OutStream);
 
     socket: std.fs.File,
 
@@ -115,7 +115,7 @@ pub const TCPClient = struct {
         _ = try self.u.init(
             allocator,
             options,
-            self.socket.inStream(),
+            self.socket.reader(),
             self.socket.outStream(),
         );
     }
@@ -133,14 +133,14 @@ pub const TCPClient = struct {
     }
 };
 
-pub fn Client(comptime InStreamType: type, comptime OutStreamType: type) type {
+pub fn Client(comptime ReaderType: type, comptime OutStreamType: type) type {
     return struct {
         const Self = @This();
 
-        const BufferedInStreamType = io.BufferedInStream(4096, std.fs.File.InStream);
+        const BufferedReaderType = io.BufferedReader(4096, std.fs.File.Reader);
         const BufferedOutStreamType = io.BufferedOutStream(4096, std.fs.File.OutStream);
 
-        const RawFrameReaderType = RawFrameReader(BufferedInStreamType.InStream);
+        const RawFrameReaderType = RawFrameReader(BufferedReaderType.Reader);
         const RawFrameWriterType = RawFrameWriter(BufferedOutStreamType.OutStream);
 
         /// Contains the state that is negotiated with a node as part of the handshake.
@@ -160,7 +160,7 @@ pub fn Client(comptime InStreamType: type, comptime OutStreamType: type) type {
 
         options: InitOptions,
 
-        buffered_in_stream: BufferedInStreamType,
+        buffered_reader: BufferedReaderType,
         buffered_out_stream: BufferedOutStreamType,
 
         /// Helpers types needed to decode the CQL protocol.
@@ -175,14 +175,14 @@ pub fn Client(comptime InStreamType: type, comptime OutStreamType: type) type {
         // Negotiated with the server
         negotiated_state: NegotiatedState,
 
-        pub fn init(self: *Self, allocator: *mem.Allocator, options: InitOptions, in_stream: InStreamType, out_stream: OutStreamType) !void {
+        pub fn init(self: *Self, allocator: *mem.Allocator, options: InitOptions, reader: ReaderType, out_stream: OutStreamType) !void {
             self.allocator = allocator;
             self.options = options;
 
-            self.buffered_in_stream = BufferedInStreamType{ .unbuffered_in_stream = in_stream };
+            self.buffered_reader = BufferedReaderType{ .unbuffered_reader = reader };
             self.buffered_out_stream = BufferedOutStreamType{ .unbuffered_out_stream = out_stream };
 
-            self.raw_frame_reader = RawFrameReaderType.init(self.buffered_in_stream.inStream());
+            self.raw_frame_reader = RawFrameReaderType.init(self.buffered_reader.reader());
             self.raw_frame_writer = RawFrameWriterType.init(self.buffered_out_stream.outStream());
             self.primitive_reader = PrimitiveReader.init();
 

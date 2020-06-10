@@ -13,28 +13,28 @@ pub const PrimitiveReader = struct {
     const Self = @This();
 
     buffer: io.FixedBufferStream([]const u8),
-    in_stream: io.FixedBufferStream([]const u8).InStream,
+    reader: io.FixedBufferStream([]const u8).Reader,
 
     pub fn init() Self {
         return Self{
             .buffer = undefined,
-            .in_stream = undefined,
+            .reader = undefined,
         };
     }
 
     pub fn reset(self: *Self, rbuf: []const u8) void {
         self.buffer = io.fixedBufferStream(rbuf);
-        self.in_stream = self.buffer.inStream();
+        self.reader = self.buffer.reader();
     }
 
     /// Read either a short, a int or a long from the buffer.
     pub fn readInt(self: *Self, comptime T: type) !T {
-        return self.in_stream.readIntBig(T);
+        return self.reader.readIntBig(T);
     }
 
     /// Read a single byte from the buffer.
     pub fn readByte(self: *Self) !u8 {
-        return self.in_stream.readByte();
+        return self.reader.readByte();
     }
 
     /// Read a length-prefixed byte slice from the stream. The length is 2 bytes.
@@ -61,7 +61,7 @@ pub const PrimitiveReader = struct {
 
         const buf = try allocator.alloc(u8, @intCast(usize, len));
 
-        const n_read = try self.in_stream.readAll(buf);
+        const n_read = try self.reader.readAll(buf);
         if (n_read != len) {
             return error.UnexpectedEOF;
         }
@@ -92,7 +92,7 @@ pub const PrimitiveReader = struct {
     /// Read a UUID from the stream.
     pub fn readUUID(self: *Self) ![16]u8 {
         var buf: [16]u8 = undefined;
-        _ = try self.in_stream.readAll(&buf);
+        _ = try self.reader.readAll(&buf);
         return buf;
     }
 
@@ -119,7 +119,7 @@ pub const PrimitiveReader = struct {
 
         if (len >= 0) {
             const result = try allocator.alloc(u8, @intCast(usize, len));
-            _ = try self.in_stream.readAll(result);
+            _ = try self.reader.readAll(result);
 
             return Value{ .Set = result };
         } else if (len == -1) {
@@ -150,7 +150,7 @@ pub const PrimitiveReader = struct {
         return switch (n) {
             4 => {
                 var buf: [4]u8 = undefined;
-                _ = try self.in_stream.readAll(&buf);
+                _ = try self.reader.readAll(&buf);
 
                 const port = if (with_port) try self.readInt(i32) else 0;
 
@@ -158,7 +158,7 @@ pub const PrimitiveReader = struct {
             },
             16 => {
                 var buf: [16]u8 = undefined;
-                _ = try self.in_stream.readAll(&buf);
+                _ = try self.reader.readAll(&buf);
 
                 const port = if (with_port) try self.readInt(i32) else 0;
 

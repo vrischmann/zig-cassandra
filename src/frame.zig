@@ -36,22 +36,22 @@ pub const RawFrame = struct {
     }
 };
 
-pub fn RawFrameReader(comptime InStreamType: type) type {
+pub fn RawFrameReader(comptime ReaderType: type) type {
     return struct {
         const Self = @This();
 
-        in_stream: InStreamType,
+        reader: ReaderType,
 
-        pub fn init(in: InStreamType) Self {
+        pub fn init(in: ReaderType) Self {
             return Self{
-                .in_stream = in,
+                .reader = in,
             };
         }
 
         pub fn read(self: *Self, allocator: *mem.Allocator) !RawFrame {
             var buf: [@sizeOf(FrameHeader)]u8 = undefined;
 
-            const n_header_read = try self.in_stream.readAll(&buf);
+            const n_header_read = try self.reader.readAll(&buf);
             if (n_header_read != @sizeOf(FrameHeader)) {
                 return error.UnexpectedEOF;
             }
@@ -67,7 +67,7 @@ pub fn RawFrameReader(comptime InStreamType: type) type {
             const len = @as(usize, header.body_len);
 
             const body = try allocator.alloc(u8, len);
-            const n_read = try self.in_stream.readAll(body);
+            const n_read = try self.reader.readAll(body);
             if (n_read != len) {
                 return error.UnexpectedEOF;
             }
@@ -134,7 +134,7 @@ test "frame header: read and write" {
 
     // deserialize the header
 
-    var deserializer = io.deserializer(.Big, io.Packing.Bit, fbs.inStream());
+    var deserializer = io.deserializer(.Big, io.Packing.Bit, fbs.reader());
     const header = try deserializer.deserialize(FrameHeader);
     testing.expect(header.version.is(4));
     testing.expect(header.version.is_request());

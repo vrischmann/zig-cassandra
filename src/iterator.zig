@@ -988,7 +988,7 @@ test "iterator scan: into user provided scanner" {
 
         pub fn scan(self: *@This(), allocator: *mem.Allocator, column_spec: ColumnSpec, data: []const u8) !void {
             var fbs = io.fixedBufferStream(data);
-            var in = fbs.inStream();
+            var in = fbs.reader();
 
             const n = @as(usize, try in.readIntBig(u32));
 
