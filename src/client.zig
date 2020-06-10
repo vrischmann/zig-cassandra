@@ -162,6 +162,10 @@ pub const Client = struct {
         _ = try self.handshake(diags);
     }
 
+    pub fn close(self: *Client) void {
+        self.socket.close();
+    }
+
     pub fn prepare(self: *Client, allocator: *mem.Allocator, options: QueryOptions, comptime query_string: []const u8, args: var) ![]const u8 {
         var dummy_diags = QueryOptions.Diagnostics{};
         var diags = options.diags orelse &dummy_diags;
