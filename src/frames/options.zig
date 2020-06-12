@@ -11,7 +11,7 @@ const testing = @import("../testing.zig");
 /// OPTIONS is sent to a node to ask which STARTUP options are supported.
 ///
 /// Described in the protocol spec at §4.1.3.
-const OptionsFrame = struct {};
+pub const OptionsFrame = struct {};
 
 test "options frame" {
     var arena = testing.arenaAllocator();

@@ -14,7 +14,7 @@ const testing = @import("../testing.zig");
 /// EVENT is an event pushed by the server.
 ///
 /// Described in the protocol spec at §4.2.6.
-const EventFrame = struct {
+pub const EventFrame = struct {
     const Self = @This();
 
     event: Event,

@@ -79,7 +79,7 @@ const BatchQuery = struct {
 /// BATCH is sent to execute a list of queries (prepared or not) as a batch.
 ///
 /// Described in the protocol spec at §4.1.7
-const BatchFrame = struct {
+pub const BatchFrame = struct {
     const Self = @This();
 
     batch_type: BatchType,

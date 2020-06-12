@@ -54,7 +54,7 @@ pub const AuthChallengeFrame = struct {
 /// AUTH_SUCCESS indicates the success of the authentication phase.
 ///
 /// Described in the protocol spec at §4.2.8.
-const AuthSuccessFrame = struct {
+pub const AuthSuccessFrame = struct {
     token: ?[]const u8,
 
     pub fn read(allocator: *mem.Allocator, pr: *PrimitiveReader) !AuthSuccessFrame {

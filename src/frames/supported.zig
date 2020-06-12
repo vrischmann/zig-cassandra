@@ -14,6 +14,8 @@ const testing = @import("../testing.zig");
 pub const SupportedFrame = struct {
     const Self = @This();
 
+    pub const opcode: Opcode = .Supported;
+
     protocol_versions: []ProtocolVersion,
     cql_versions: []CQLVersion,
     compression_algorithms: []CompressionAlgorithm,
