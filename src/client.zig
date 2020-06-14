@@ -334,8 +334,10 @@ pub const Client = struct {
         var fba = std.heap.FixedBufferAllocator.init(&buffer);
 
         try self.writeOptions(&fba.allocator);
+        fba.reset();
 
         var startup_response = try self.writeStartup(&fba.allocator);
+        fba.reset();
 
         switch (startup_response) {
             .Ready => return,
