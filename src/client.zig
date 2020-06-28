@@ -292,7 +292,7 @@ pub const Client = struct {
             },
             .Error => |err| {
                 diags.message = err.message;
-                return error.AuthenticationFailed;
+                return error.QueryExecutionFailed;
             },
             else => return error.InvalidServerResponse,
         };
@@ -324,7 +324,7 @@ pub const Client = struct {
         // Check that the values provided are compatible with the prepared statement
 
         // TODO(vincent): handle named values
-        var parameters = QueryParameters{
+        var query_parameters = QueryParameters{
             .consistency_level = self.options.consistency,
             .values = undefined,
             .skip_metadata = true,
@@ -335,19 +335,37 @@ pub const Client = struct {
             .keyspace = null,
             .now_in_seconds = null,
         };
-        parameters.values = Values{ .Normal = values.toOwnedSlice() };
+        query_parameters.values = Values{ .Normal = values.toOwnedSlice() };
 
-        var result = try self.writeExecute(allocator, diags, query_id, parameters);
-        return switch (result) {
-            .Rows => |rows| blk: {
-                const metadata = if (rows.metadata.column_specs.len > 0)
-                    rows.metadata
-                else
-                    ps_rows_metadata;
+        // Write EXECUTE
+        {
+            var execute_frame = ExecuteFrame{
+                .query_id = query_id,
+                .result_metadata_id = null,
+                .query_parameters = query_parameters,
+            };
+            try self.writeFrame(allocator, .{
+                .opcode = .Execute,
+                .body = execute_frame,
+            });
+        }
 
-                break :blk Iterator.init(metadata, rows.data);
+        // Read either RESULT or ERROR
+        // TODO(vincent): this is the same as in writeQuery, can we DRY it up ?
+        return switch (try self.readFrame(allocator, null)) {
+            .Result => |frame| blk: {
+                return switch (frame.result) {
+                    .Rows => |rows| blk: {
+                        break :blk Iterator.init(rows.metadata, rows.data);
+                    },
+                    else => null,
+                };
             },
-            else => null,
+            .Error => |err| {
+                diags.message = err.message;
+                return error.QueryExecutionFailed;
+            },
+            else => return error.InvalidServerResponse,
         };
     }
 
@@ -472,7 +490,6 @@ pub const Client = struct {
         }
 
         // Read RESULT
-        // TODO(vincent): this is the same as in writeQuery, can we DRY it up ?
         const raw_frame = try self.readRawFrame(allocator);
         self.primitive_reader.reset(raw_frame.body);
 
