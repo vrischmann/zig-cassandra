@@ -471,46 +471,22 @@ pub const Client = struct {
         }
     }
 
-    // Below are methods to write different frames.
-
-    fn writeExecute(self: *Client, allocator: *mem.Allocator, diags: *QueryOptions.Diagnostics, query_id: []const u8, query_parameters: QueryParameters) !Result {
-        // Write EXECUTE
-        {
-            var frame = ExecuteFrame{
-                .query_id = query_id,
-                .result_metadata_id = null,
-                .query_parameters = query_parameters,
-            };
-
-            // Encode body
-            try self.primitive_writer.reset(allocator);
-            defer self.primitive_writer.deinit(allocator);
-            _ = try frame.write(self.options.protocol_version, &self.primitive_writer);
-
-            // Write raw frame
-            const raw_frame = try self.makeRawFrame(allocator, .Execute, false);
-            try self.raw_frame_writer.write(raw_frame);
-            try self.buffered_writer.flush();
-        }
-
-        // Read RESULT
-        const raw_frame = try self.readRawFrame(allocator);
-        self.primitive_reader.reset(raw_frame.body);
-
-        return switch (raw_frame.header.opcode) {
-            .Result => blk: {
-                var frame = try ResultFrame.read(allocator, self.options.protocol_version, &self.primitive_reader);
-                break :blk frame.result;
-            },
-            .Error => {
-                var error_frame = try ErrorFrame.read(allocator, &self.primitive_reader);
-                diags.message = error_frame.message;
-                return error.QueryExecutionFailed;
-            },
-            else => return error.InvalidServerResponse,
-        };
-    }
-
+    /// writeFrame writes a single frame to the TCP connection.
+    ///
+    /// A frame can be:
+    /// * an anonymous struct with just a .opcode field (therefore no frame body).
+    /// * an anonymous struct with a .opcode field and a .body field.
+    ///
+    /// If the .body field is present, it must me a type implementing either of the following write function:
+    ///
+    ///   fn write(protocol_version: ProtocolVersion, primitive_writer: *PrimitiveWriter) !void
+    ///   fn write(primitive_writer: *PrimitiveWriter) !void
+    ///
+    /// Some frames don't care about the protocol version so this is why the second signature is supported.
+    ///
+    /// Additionally this method takes care of compression if enabled.
+    ///
+    /// This method is not thread safe.
     fn writeFrame(self: *Client, allocator: *mem.Allocator, frame: var) !void {
         // Reset primitive writer
         try self.primitive_writer.reset(allocator);
@@ -536,9 +512,9 @@ pub const Client = struct {
             const TypeOfWriteFn = @TypeOf(frame.body.write);
             const typeInfo = @typeInfo(TypeOfWriteFn);
             if (typeInfo.BoundFn.args.len == 3) {
-                _ = try frame.body.write(self.options.protocol_version, &self.primitive_writer);
+                try frame.body.write(self.options.protocol_version, &self.primitive_writer);
             } else {
-                _ = try frame.body.write(&self.primitive_writer);
+                try frame.body.write(&self.primitive_writer);
             }
 
             // This is the actual bytes of the encoded body.
