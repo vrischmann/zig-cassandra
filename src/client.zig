@@ -351,12 +351,16 @@ pub const Client = struct {
         }
 
         // Read either RESULT or ERROR
-        // TODO(vincent): this is the same as in writeQuery, can we DRY it up ?
         return switch (try self.readFrame(allocator, null)) {
             .Result => |frame| blk: {
                 return switch (frame.result) {
                     .Rows => |rows| blk: {
-                        break :blk Iterator.init(rows.metadata, rows.data);
+                        const metadata = if (rows.metadata.column_specs.len > 0)
+                            rows.metadata
+                        else
+                            ps_rows_metadata;
+
+                        break :blk Iterator.init(metadata, rows.data);
                     },
                     else => null,
                 };
