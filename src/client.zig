@@ -643,10 +643,6 @@ pub const Frame = union(Opcode) {
     AuthSuccess: AuthSuccessFrame,
 };
 
-pub fn OrError(comptime Frame: type) type {
-    return union(enum) {};
-}
-
 const OptionIDArrayList = struct {
     const Self = @This();
 
