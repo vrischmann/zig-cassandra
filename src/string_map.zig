@@ -6,7 +6,7 @@ pub const Map = struct {
     const Self = @This();
 
     const MapType = std.StringHashMap([]const u8);
-    const KV = MapType.KV;
+    const MapEntry = MapType.Entry;
     const Iterator = MapType.Iterator;
 
     allocator: *std.mem.Allocator,
@@ -19,13 +19,13 @@ pub const Map = struct {
         };
     }
 
-    pub fn put(self: *Self, key: []const u8, value: []const u8) !?KV {
-        if (self.map.get(key)) |kv| {
+    pub fn put(self: *Self, key: []const u8, value: []const u8) !?MapEntry {
+        if (self.map.getEntry(key)) |kv| {
             self.allocator.free(kv.value);
             kv.value = value;
             return kv.*;
         } else {
-            return try self.map.put(key, value);
+            return try self.map.fetchPut(key, value);
         }
     }
 
@@ -37,8 +37,8 @@ pub const Map = struct {
         return self.map.iterator();
     }
 
-    pub fn get(self: Self, key: []const u8) ?*KV {
-        return self.map.get(key);
+    pub fn getEntry(self: Self, key: []const u8) ?*MapEntry {
+        return self.map.getEntry(key);
     }
 };
 
@@ -87,7 +87,7 @@ pub const Multimap = struct {
     }
 
     pub fn get(self: Self, key: []const u8) ?[]const []const u8 {
-        if (self.map.get(key)) |entry| {
+        if (self.map.getEntry(key)) |entry| {
             return entry.value;
         } else {
             return null;
@@ -129,8 +129,8 @@ test "map" {
 
     testing.expectEqual(@as(usize, 2), m.count());
 
-    testing.expectEqualStrings("heo", m.get("foo").?.value);
-    testing.expectEqualStrings("baz", m.get("bar").?.value);
+    testing.expectEqualStrings("heo", m.getEntry("foo").?.value);
+    testing.expectEqualStrings("baz", m.getEntry("bar").?.value);
 }
 
 test "multimap" {

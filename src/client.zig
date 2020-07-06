@@ -118,7 +118,7 @@ pub const Client = struct {
     };
 
     /// Maps a prepared statement id to the types of the arguments needed when executing it.
-    const PreparedStatementsMetadata = std.HashMap([]const u8, PreparedStatementMetadataValue, std.hash_map.hashString, std.hash_map.eqlString);
+    const PreparedStatementsMetadata = std.HashMap([]const u8, PreparedStatementMetadataValue, std.hash_map.hashString, std.hash_map.eqlString, false);
 
     allocator: *mem.Allocator,
     options: InitOptions,
@@ -211,13 +211,13 @@ pub const Client = struct {
 
                     const gop = try self.prepared_statements_metadata.getOrPut(id);
                     if (gop.found_existing) {
-                        gop.kv.value.metadata.deinit(self.allocator);
-                        gop.kv.value.rows_metadata.deinit(self.allocator);
+                        gop.entry.value.metadata.deinit(self.allocator);
+                        gop.entry.value.rows_metadata.deinit(self.allocator);
                     }
 
-                    gop.kv.value = undefined;
-                    gop.kv.value.metadata = prepared.metadata;
-                    gop.kv.value.rows_metadata = prepared.rows_metadata;
+                    gop.entry.value = undefined;
+                    gop.entry.value.metadata = prepared.metadata;
+                    gop.entry.value.rows_metadata = prepared.rows_metadata;
 
                     return id;
                 },
@@ -308,8 +308,8 @@ pub const Client = struct {
             return error.InvalidPreparedQueryID;
         }
 
-        const ps_metadata = prepared_statement_metadata_kv.?.value.metadata;
-        const ps_rows_metadata = prepared_statement_metadata_kv.?.value.rows_metadata;
+        const ps_metadata = prepared_statement_metadata_kv.?.metadata;
+        const ps_rows_metadata = prepared_statement_metadata_kv.?.rows_metadata;
 
         var values = try std.ArrayList(Value).initCapacity(allocator, 16);
         var option_ids = OptionIDArrayList{};

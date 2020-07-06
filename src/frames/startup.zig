@@ -48,19 +48,19 @@ pub const StartupFrame = struct {
         const map = try pr.readStringMap(allocator);
 
         // CQL_VERSION is mandatory and the only version supported is 3.0.0 right now.
-        if (map.get("CQL_VERSION")) |version| {
-            if (!mem.eql(u8, "3.0.0", version.value)) {
+        if (map.getEntry("CQL_VERSION")) |entry| {
+            if (!mem.eql(u8, "3.0.0", entry.value)) {
                 return error.InvalidCQLVersion;
             }
-            frame.cql_version = try CQLVersion.fromString(version.value);
+            frame.cql_version = try CQLVersion.fromString(entry.value);
         } else {
             return error.InvalidCQLVersion;
         }
 
-        if (map.get("COMPRESSION")) |compression| {
-            if (mem.eql(u8, compression.value, "lz4")) {
+        if (map.getEntry("COMPRESSION")) |entry| {
+            if (mem.eql(u8, entry.value, "lz4")) {
                 frame.compression = CompressionAlgorithm.LZ4;
-            } else if (mem.eql(u8, compression.value, "snappy")) {
+            } else if (mem.eql(u8, entry.value, "snappy")) {
                 frame.compression = CompressionAlgorithm.Snappy;
             } else {
                 return error.InvalidCompression;
