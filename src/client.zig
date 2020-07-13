@@ -166,7 +166,7 @@ pub const Client = struct {
         self.socket.close();
     }
 
-    pub fn prepare(self: *Client, allocator: *mem.Allocator, options: QueryOptions, comptime query_string: []const u8, args: var) ![]const u8 {
+    pub fn prepare(self: *Client, allocator: *mem.Allocator, options: QueryOptions, comptime query_string: []const u8, args: anytype) ![]const u8 {
         var dummy_diags = QueryOptions.Diagnostics{};
         var diags = options.diags orelse &dummy_diags;
 
@@ -233,7 +233,7 @@ pub const Client = struct {
 
     // TODO(vincent): maybe add not comptime equivalent ?
 
-    pub fn query(self: *Client, allocator: *mem.Allocator, options: QueryOptions, comptime query_string: []const u8, args: var) !?Iterator {
+    pub fn query(self: *Client, allocator: *mem.Allocator, options: QueryOptions, comptime query_string: []const u8, args: anytype) !?Iterator {
         var dummy_diags = QueryOptions.Diagnostics{};
         var diags = options.diags orelse &dummy_diags;
 
@@ -298,7 +298,7 @@ pub const Client = struct {
         };
     }
 
-    pub fn execute(self: *Client, allocator: *mem.Allocator, options: QueryOptions, query_id: []const u8, args: var) !?Iterator {
+    pub fn execute(self: *Client, allocator: *mem.Allocator, options: QueryOptions, query_id: []const u8, args: anytype) !?Iterator {
         var dummy_diags = QueryOptions.Diagnostics{};
         var diags = options.diags orelse &dummy_diags;
 
@@ -487,7 +487,7 @@ pub const Client = struct {
     /// Additionally this method takes care of compression if enabled.
     ///
     /// This method is not thread safe.
-    fn writeFrame(self: *Client, allocator: *mem.Allocator, frame: var) !void {
+    fn writeFrame(self: *Client, allocator: *mem.Allocator, frame: anytype) !void {
         // Reset primitive writer
         try self.primitive_writer.reset(allocator);
         defer self.primitive_writer.deinit(allocator);
@@ -677,7 +677,7 @@ test "option id array list" {
 /// TODO(vincent): it's not clear to the caller that data in `args` must outlive `values` because we don't duplicating memory
 /// unless absolutely necessary in the case of arrays.
 /// Think of a way to communicate that.
-fn computeValues(allocator: *mem.Allocator, values: ?*std.ArrayList(Value), options: ?*OptionIDArrayList, args: var) !void {
+fn computeValues(allocator: *mem.Allocator, values: ?*std.ArrayList(Value), options: ?*OptionIDArrayList, args: anytype) !void {
     if (@typeInfo(@TypeOf(args)) != .Struct) {
         @compileError("Expected tuple or struct argument, found " ++ @typeName(args) ++ " of type " ++ @tagName(@typeInfo(args)));
     }

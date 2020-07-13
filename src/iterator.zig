@@ -65,7 +65,7 @@ pub const Iterator = struct {
 
     const Diags = ScanOptions.Diagnostics;
 
-    pub fn scan(self: *Self, allocator: *mem.Allocator, options: ScanOptions, args: var) !bool {
+    pub fn scan(self: *Self, allocator: *mem.Allocator, options: ScanOptions, args: anytype) !bool {
         var dummy_diags = Diags{};
         var diags = options.diags orelse &dummy_diags;
 
@@ -437,7 +437,7 @@ fn columnSpec(id: OptionID) ColumnSpec {
     };
 }
 
-fn testIteratorScan(allocator: *mem.Allocator, column_specs: []ColumnSpec, data: []const []const u8, diags: ?*Iterator.ScanOptions.Diagnostics, row: var) !void {
+fn testIteratorScan(allocator: *mem.Allocator, column_specs: []ColumnSpec, data: []const []const u8, diags: ?*Iterator.ScanOptions.Diagnostics, row: anytype) !void {
     const metadata = RowsMetadata{
         .paging_state = null,
         .new_metadata_id = null,

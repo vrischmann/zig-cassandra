@@ -219,7 +219,7 @@ fn iterate(allocator: *mem.Allocator, iter: *cql.Iterator) !usize {
     const IDs = struct {
         slice: []u8,
 
-        pub fn format(self: @This(), comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: var) !void {
+        pub fn format(self: @This(), comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
             try writer.writeByte('[');
             for (self.slice) |item, i| {
                 if (i > 0) try writer.writeAll(", ");

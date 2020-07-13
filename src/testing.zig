@@ -14,14 +14,14 @@ const RawFrame = @import("frame.zig").RawFrame;
 const RawFrameReader = @import("frame.zig").RawFrameReader;
 const RawFrameWriter = @import("frame.zig").RawFrameWriter;
 
-pub fn expectInDelta(a: var, b: var, delta: @TypeOf(a)) void {
+pub fn expectInDelta(a: anytype, b: anytype, delta: @TypeOf(a)) void {
     const dt = a - b;
     if (dt < -delta or dt > delta) {
         std.debug.panic("expected a {e} to be within {e} of b {}, but got {e}", .{ a, delta, b, dt });
     }
 }
 
-pub fn printHRBytes(comptime fmt: []const u8, exp: []const u8, args: var) void {
+pub fn printHRBytes(comptime fmt: []const u8, exp: []const u8, args: anytype) void {
     const hextable = "0123456789abcdef";
 
     var buffer = std.ArrayList(u8).init(std.testing.allocator);
@@ -66,7 +66,7 @@ pub fn readRawFrame(_allocator: *std.mem.Allocator, data: []const u8) !RawFrame 
     return fr.read(_allocator);
 }
 
-pub fn expectSameRawFrame(frame: var, header: FrameHeader, exp: []const u8) void {
+pub fn expectSameRawFrame(frame: anytype, header: FrameHeader, exp: []const u8) void {
     var arena = arenaAllocator();
     defer arena.deinit();
 

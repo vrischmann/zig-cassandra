@@ -131,11 +131,11 @@ pub const ProtocolVersion = packed struct {
         }
     }
 
-    pub fn serialize(self: @This(), serializer: var) !void {
+    pub fn serialize(self: @This(), serializer: anytype) !void {
         return serializer.serialize(self.version);
     }
 
-    pub fn deserialize(self: *@This(), deserializer: var) !void {
+    pub fn deserialize(self: *@This(), deserializer: anytype) !void {
         self.version = try deserializer.deserialize(u8);
         if ((self.version & 0x7) < 3 or (self.version & 0x7) > 5) {
             return error.InvalidProtocolVersion;
