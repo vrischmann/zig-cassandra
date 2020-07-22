@@ -1,4 +1,5 @@
 const builtin = @import("builtin");
+const build_options = @import("build_options");
 const std = @import("std");
 const heap = std.heap;
 const io = std.io;
@@ -41,6 +42,7 @@ usingnamespace @import("frames/event.zig");
 usingnamespace @import("frames/batch.zig");
 
 const testing = @import("testing.zig");
+const casstest = @import("casstest.zig");
 
 pub const InitOptions = struct {
     /// the protocl version to use.
@@ -623,6 +625,39 @@ pub const Client = struct {
         return raw_frame;
     }
 };
+
+test "client: insert then query" {
+    if (!build_options.with_cassandra) return error.SkipZigTest;
+
+    var arena = testing.arenaAllocator();
+    defer arena.deinit();
+
+    var client = try casstest.initTestClient(&arena.allocator);
+    defer client.close();
+
+    // Insert some data
+    try casstest.insertTestData(&arena.allocator, client, .User, 2);
+
+    // Read and validate the data
+    var iter = (try client.query(
+        &arena.allocator,
+        QueryOptions{},
+        "SELECT id, secondary_id FROM foobar.user",
+        .{},
+    )).?;
+
+    var row: casstest.Row.User = undefined;
+
+    var scanned = try iter.scan(&arena.allocator, Iterator.ScanOptions{}, &row);
+    testing.expect(scanned);
+    testing.expectEqual(@as(usize, 2000), row.id);
+    testing.expectEqual(@as(usize, 25), row.secondary_id);
+
+    scanned = try iter.scan(&arena.allocator, Iterator.ScanOptions{}, &row);
+    testing.expect(scanned);
+    testing.expectEqual(@as(usize, 2000), row.id);
+    testing.expectEqual(@as(usize, 26), row.secondary_id);
+}
 
 pub const Frame = union(Opcode) {
     Error: ErrorFrame,

@@ -33,6 +33,11 @@ pub fn build(b: *Builder) !void {
     main_tests.setTarget(target);
     main_tests.setBuildMode(mode);
     main_tests.addIncludeDir("src");
+    main_tests.addBuildOption(
+        bool,
+        "with_cassandra",
+        b.option(bool, "with_cassandra", "Run tests which need a Cassandra node running to work.") orelse false,
+    );
 
     const test_step = b.step("test", "Run library tests");
     test_step.dependOn(&main_tests.step);

@@ -4,19 +4,7 @@ const mem = std.mem;
 const net = std.net;
 
 const cql = @import("lib.zig");
-
-const schema_create_keyspace =
-    \\ CREATE KEYSPACE IF NOT EXISTS foobar WITH replication = {'class': 'SimpleStrategy', 'replication_factor': 1};
-;
-
-const schema_create_table =
-    \\ CREATE TABLE IF NOT EXISTS foobar.age_to_ids(
-    \\ 	age int,
-    \\ 	name text,
-    \\ 	ids set<tinyint>,
-    \\ 	PRIMARY KEY ((age))
-    \\ );
-;
+const casstest = @import("casstest.zig");
 
 /// Runs a single SELECT reading all data from the age_to_ids table.
 ///
@@ -158,18 +146,11 @@ fn doInsert(allocator: *mem.Allocator, client: *cql.Client, n: usize) !void {
         .diags = &diags,
     };
 
-    const Args = struct {
-        age: u32 = 0,
-        ids: [4]u8 = undefined,
-        name: ?[]const u8 = null,
-    };
-    var empty_args = Args{};
-
     const query_id = client.prepare(
         allocator,
         options,
         "INSERT INTO foobar.age_to_ids(age, ids, name) VALUES(?, ?, ?)",
-        empty_args,
+        casstest.Args.AgeToIDs{},
     ) catch |err| switch (err) {
         error.QueryPreparationFailed => {
             std.debug.panic("query preparation failed, received cassandra error: {}\n", .{diags.message});
@@ -185,10 +166,13 @@ fn doInsert(allocator: *mem.Allocator, client: *cql.Client, n: usize) !void {
     while (i < n) : (i += 1) {
         fba.reset();
 
-        const args = Args{
+        const args = casstest.Args.AgeToIDs{
             .age = @intCast(u32, i) * @as(u32, 10),
             .ids = [_]u8{ 0, 2, 4, 8 },
-            .name = if (i % 2 == 0) @as([]const u8, try std.fmt.allocPrint(&fba.allocator, "Vincent {}", .{i})) else null,
+            .name = if (i % 2 == 0)
+                @as([]const u8, try std.fmt.allocPrint(&fba.allocator, "Vincent {}", .{i}))
+            else
+                null,
         };
 
         _ = client.execute(
@@ -207,13 +191,7 @@ fn doInsert(allocator: *mem.Allocator, client: *cql.Client, n: usize) !void {
 
 /// Iterate over every row in the iterator provided.
 fn iterate(allocator: *mem.Allocator, iter: *cql.Iterator) !usize {
-    // Define a Row struct with a 1:1 mapping with the fields selected.
-    const Row = struct {
-        ids: []u8,
-        age: u32,
-        name: []const u8,
-    };
-    var row: Row = undefined;
+    var row: casstest.Row.AgeToIDs = undefined;
 
     // Just for formatting here
     const IDs = struct {
@@ -340,8 +318,9 @@ pub fn main() anyerror!void {
         var diags = cql.QueryOptions.Diagnostics{};
         options.diags = &diags;
 
-        _ = try client.query(&arena.allocator, options, schema_create_keyspace, .{});
-        _ = try client.query(&arena.allocator, options, schema_create_table, .{});
+        inline for (casstest.DDL) |query| {
+            _ = try client.query(&arena.allocator, options, query, .{});
+        }
     }
 
     // Parse the command and run it.
