@@ -116,13 +116,13 @@ pub const PrimitiveWriter = struct {
                 if (with_port) {
                     var buf: [9]u8 = undefined;
                     buf[0] = 4;
-                    mem.writeIntNative(u32, buf[1..5], inet.in.addr);
+                    mem.writeIntNative(u32, buf[1..5], inet.in.sa.addr);
                     mem.writeIntBig(u32, buf[5..9], inet.getPort());
                     return self.wbuf.appendSlice(&buf);
                 } else {
                     var buf: [5]u8 = undefined;
                     buf[0] = 4;
-                    mem.writeIntNative(u32, buf[1..5], inet.in.addr);
+                    mem.writeIntNative(u32, buf[1..5], inet.in.sa.addr);
                     return self.wbuf.appendSlice(&buf);
                 }
             },
@@ -130,13 +130,13 @@ pub const PrimitiveWriter = struct {
                 if (with_port) {
                     var buf: [21]u8 = undefined;
                     buf[0] = 16;
-                    mem.copy(u8, buf[1..17], &inet.in6.addr);
+                    mem.copy(u8, buf[1..17], &inet.in6.sa.addr);
                     mem.writeIntBig(u32, buf[17..21], inet.getPort());
                     return self.wbuf.appendSlice(&buf);
                 } else {
                     var buf: [17]u8 = undefined;
                     buf[0] = 16;
-                    mem.copy(u8, buf[1..17], &inet.in6.addr);
+                    mem.copy(u8, buf[1..17], &inet.in6.sa.addr);
                     return self.wbuf.appendSlice(&buf);
                 }
             },

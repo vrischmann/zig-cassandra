@@ -332,7 +332,7 @@ test "primitive reader: read inet and inetaddr" {
 
     var result = try pr.readInet();
     testing.expectEqual(@as(u16, os.AF_INET), result.any.family);
-    testing.expectEqual(@as(u32, 0x78563412), result.in.addr);
+    testing.expectEqual(@as(u32, 0x78563412), result.in.sa.addr);
     testing.expectEqual(@as(u16, 34), result.getPort());
 
     // IPv6
@@ -340,7 +340,7 @@ test "primitive reader: read inet and inetaddr" {
 
     result = try pr.readInet();
     testing.expectEqual(@as(u16, os.AF_INET6), result.any.family);
-    testing.expectEqualSlices(u8, &[_]u8{0xff} ** 16, &result.in6.addr);
+    testing.expectEqualSlices(u8, &[_]u8{0xff} ** 16, &result.in6.sa.addr);
     testing.expectEqual(@as(u16, 34), result.getPort());
 
     // IPv4 without port
@@ -348,7 +348,7 @@ test "primitive reader: read inet and inetaddr" {
 
     result = try pr.readInetaddr();
     testing.expectEqual(@as(u16, os.AF_INET), result.any.family);
-    testing.expectEqual(@as(u32, 0x78563412), result.in.addr);
+    testing.expectEqual(@as(u32, 0x78563412), result.in.sa.addr);
     testing.expectEqual(@as(u16, 0), result.getPort());
 
     // IPv6 without port
@@ -356,7 +356,7 @@ test "primitive reader: read inet and inetaddr" {
 
     result = try pr.readInetaddr();
     testing.expectEqual(@as(u16, os.AF_INET6), result.any.family);
-    testing.expectEqualSlices(u8, &[_]u8{0xff} ** 16, &result.in6.addr);
+    testing.expectEqualSlices(u8, &[_]u8{0xff} ** 16, &result.in6.sa.addr);
     testing.expectEqual(@as(u16, 0), result.getPort());
 }
 
