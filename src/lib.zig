@@ -4,6 +4,7 @@ const meta = std.meta;
 const net = std.net;
 const ArrayList = std.ArrayList;
 
+pub const ProtocolVersion = @import("client.zig").ProtocolVersion;
 pub const CompressionAlgorithm = @import("client.zig").CompressionAlgorithm;
 
 pub const InitOptions = @import("client.zig").InitOptions;
