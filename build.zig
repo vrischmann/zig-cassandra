@@ -38,6 +38,11 @@ pub fn build(b: *Builder) !void {
         "with_cassandra",
         b.option(bool, "with_cassandra", "Run tests which need a Cassandra node running to work.") orelse false,
     );
+    main_tests.addBuildOption(
+        u8,
+        "protocol_version",
+        b.option(u8, "protocol_version", "Talk to cassandra using this protocol version in the tests.") orelse 4,
+    );
 
     const test_step = b.step("test", "Run library tests");
     test_step.dependOn(&main_tests.step);
