@@ -93,6 +93,8 @@ pub fn insertTestData(allocator: *mem.Allocator, client: *Client, comptime table
     var fba = std.heap.FixedBufferAllocator.init(&buffer);
 
     var options = QueryOptions{};
+    var diags = QueryOptions.Diagnostics{};
+    options.diags = &diags;
 
     switch (table) {
         .AgeToIDs => {
@@ -107,7 +109,7 @@ pub fn insertTestData(allocator: *mem.Allocator, client: *Client, comptime table
             while (i < n) : (i += 1) {
                 fba.reset();
 
-                _ = try client.execute(
+                _ = client.execute(
                     &fba.allocator,
                     options,
                     query_id,
@@ -119,7 +121,12 @@ pub fn insertTestData(allocator: *mem.Allocator, client: *Client, comptime table
                         else
                             null,
                     },
-                );
+                ) catch |err| switch (err) {
+                    error.QueryExecutionFailed => {
+                        std.debug.panic("query preparation failed, received cassandra error: {}\n", .{diags.message});
+                    },
+                    else => return err,
+                };
             }
         },
 
@@ -135,7 +142,7 @@ pub fn insertTestData(allocator: *mem.Allocator, client: *Client, comptime table
             while (i < n) : (i += 1) {
                 fba.reset();
 
-                _ = try client.execute(
+                _ = client.execute(
                     &fba.allocator,
                     options,
                     query_id,
@@ -143,7 +150,12 @@ pub fn insertTestData(allocator: *mem.Allocator, client: *Client, comptime table
                         .id = 2000,
                         .secondary_id = @intCast(u32, i + 25),
                     },
-                );
+                ) catch |err| switch (err) {
+                    error.QueryExecutionFailed => {
+                        std.debug.panic("query preparation failed, received cassandra error: {}\n", .{diags.message});
+                    },
+                    else => return err,
+                };
             }
         },
     }
