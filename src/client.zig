@@ -636,7 +636,7 @@ test "client: insert then query" {
     var arena = testing.arenaAllocator();
     defer arena.deinit();
 
-    var client = try casstest.initTestClient(&arena.allocator);
+    var client = try casstest.initTestClient(&arena.allocator, ProtocolVersion{ .version = build_options.protocol_version });
     defer client.close();
 
     // Insert some data
