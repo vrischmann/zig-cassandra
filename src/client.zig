@@ -284,7 +284,7 @@ pub const Client = struct {
 
         // Read either RESULT or ERROR
         return switch (try self.readFrame(allocator, null)) {
-            .Result => |frame| blk: {
+            .Result => |frame| {
                 return switch (frame.result) {
                     .Rows => |rows| blk: {
                         break :blk Iterator.init(rows.metadata, rows.data);
@@ -354,7 +354,7 @@ pub const Client = struct {
 
         // Read either RESULT or ERROR
         return switch (try self.readFrame(allocator, null)) {
-            .Result => |frame| blk: {
+            .Result => |frame| {
                 return switch (frame.result) {
                     .Rows => |rows| blk: {
                         const metadata = if (rows.metadata.column_specs.len > 0)
@@ -528,7 +528,7 @@ pub const Client = struct {
 
             // Compress the body if we can use it.
             if (!@hasField(FrameType, "no_compression")) {
-                if (self.options.compression) |compression| blk: {
+                if (self.options.compression) |compression| {
                     switch (compression) {
                         .LZ4 => {
                             const compressed_data = try lz4.compress(allocator, written);
@@ -580,7 +580,7 @@ pub const Client = struct {
     fn readRawFrame(self: *Client, allocator: *mem.Allocator) !RawFrame {
         var raw_frame = try self.raw_frame_reader.read(allocator);
 
-        if (raw_frame.header.flags & FrameFlags.Compression == FrameFlags.Compression) blk: {
+        if (raw_frame.header.flags & FrameFlags.Compression == FrameFlags.Compression) {
             const decompressed_data = try lz4.decompress(allocator, raw_frame.body);
             raw_frame.body = decompressed_data;
         }
