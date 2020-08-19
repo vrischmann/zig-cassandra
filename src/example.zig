@@ -286,6 +286,7 @@ pub fn main() anyerror!void {
     // such as the protocol version, if compression is enabled, etc.
 
     var init_options = cql.InitOptions{};
+    init_options.protocol_version = cql.ProtocolVersion{ .version = @as(u8, 5) };
     init_options.compression = cql.CompressionAlgorithm.LZ4;
     init_options.username = "cassandra";
     init_options.password = "cassandra";
