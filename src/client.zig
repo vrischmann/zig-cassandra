@@ -507,6 +507,10 @@ pub const Client = struct {
             .body = &[_]u8{},
         };
 
+        if (self.options.protocol_version.is(5)) {
+            raw_frame.header.flags |= FrameFlags.UseBeta;
+        }
+
         const FrameType = @TypeOf(frame);
 
         if (@hasField(FrameType, "body")) {
