@@ -56,10 +56,11 @@ pub const Row = struct {
     };
 };
 
-pub fn initTestClient(allocator: *mem.Allocator) !*Client {
+pub fn initTestClient(allocator: *mem.Allocator, protocol_version: ProtocolVersion) !*Client {
     var address = std.net.Address.initIp4([_]u8{ 127, 0, 0, 1 }, 9042);
 
     var init_options = InitOptions{};
+    init_options.protocol_version = protocol_version;
     init_options.compression = CompressionAlgorithm.LZ4;
     init_options.username = "cassandra";
     init_options.password = "cassandra";
@@ -92,6 +93,8 @@ pub fn insertTestData(allocator: *mem.Allocator, client: *Client, comptime table
     var fba = std.heap.FixedBufferAllocator.init(&buffer);
 
     var options = QueryOptions{};
+    var diags = QueryOptions.Diagnostics{};
+    options.diags = &diags;
 
     switch (table) {
         .AgeToIDs => {
@@ -106,7 +109,7 @@ pub fn insertTestData(allocator: *mem.Allocator, client: *Client, comptime table
             while (i < n) : (i += 1) {
                 fba.reset();
 
-                _ = try client.execute(
+                _ = client.execute(
                     &fba.allocator,
                     options,
                     query_id,
@@ -118,7 +121,12 @@ pub fn insertTestData(allocator: *mem.Allocator, client: *Client, comptime table
                         else
                             null,
                     },
-                );
+                ) catch |err| switch (err) {
+                    error.QueryExecutionFailed => {
+                        std.debug.panic("query preparation failed, received cassandra error: {}\n", .{diags.message});
+                    },
+                    else => return err,
+                };
             }
         },
 
@@ -134,7 +142,7 @@ pub fn insertTestData(allocator: *mem.Allocator, client: *Client, comptime table
             while (i < n) : (i += 1) {
                 fba.reset();
 
-                _ = try client.execute(
+                _ = client.execute(
                     &fba.allocator,
                     options,
                     query_id,
@@ -142,7 +150,12 @@ pub fn insertTestData(allocator: *mem.Allocator, client: *Client, comptime table
                         .id = 2000,
                         .secondary_id = @intCast(u32, i + 25),
                     },
-                );
+                ) catch |err| switch (err) {
+                    error.QueryExecutionFailed => {
+                        std.debug.panic("query preparation failed, received cassandra error: {}\n", .{diags.message});
+                    },
+                    else => return err,
+                };
             }
         },
     }

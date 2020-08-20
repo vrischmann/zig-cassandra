@@ -27,6 +27,8 @@ pub const PrepareFrame = struct {
         if (self.keyspace) |ks| {
             _ = try pw.writeInt(u32, FlagWithKeyspace);
             _ = try pw.writeString(ks);
+        } else {
+            _ = try pw.writeInt(u32, 0);
         }
     }
 
