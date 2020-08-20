@@ -3,6 +3,7 @@ const build_options = @import("build_options");
 const std = @import("std");
 const heap = std.heap;
 const io = std.io;
+const log = std.log;
 const mem = std.mem;
 const net = std.net;
 
@@ -115,6 +116,7 @@ pub const Client = struct {
     };
 
     const PreparedStatementMetadataValue = struct {
+        result_metadata_id: ?[]const u8,
         metadata: PreparedMetadata,
         rows_metadata: RowsMetadata,
     };
@@ -213,11 +215,15 @@ pub const Client = struct {
 
                     const gop = try self.prepared_statements_metadata.getOrPut(id);
                     if (gop.found_existing) {
+                        if (gop.entry.value.result_metadata_id) |result_metadata_id| {
+                            self.allocator.free(result_metadata_id);
+                        }
                         gop.entry.value.metadata.deinit(self.allocator);
                         gop.entry.value.rows_metadata.deinit(self.allocator);
                     }
 
                     gop.entry.value = undefined;
+                    gop.entry.value.result_metadata_id = prepared.result_metadata_id;
                     gop.entry.value.metadata = prepared.metadata;
                     gop.entry.value.rows_metadata = prepared.rows_metadata;
 
@@ -310,6 +316,7 @@ pub const Client = struct {
             return error.InvalidPreparedQueryID;
         }
 
+        const ps_result_metadata_id = prepared_statement_metadata_kv.?.result_metadata_id;
         const ps_metadata = prepared_statement_metadata_kv.?.metadata;
         const ps_rows_metadata = prepared_statement_metadata_kv.?.rows_metadata;
 
@@ -343,7 +350,7 @@ pub const Client = struct {
         {
             var execute_frame = ExecuteFrame{
                 .query_id = query_id,
-                .result_metadata_id = null,
+                .result_metadata_id = ps_result_metadata_id,
                 .query_parameters = query_parameters,
             };
             try self.writeFrame(allocator, .{
