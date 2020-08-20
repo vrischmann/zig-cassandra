@@ -264,7 +264,8 @@ const usage =
 ;
 
 pub fn main() anyerror!void {
-    const allocator = std.heap.page_allocator;
+    var gpa = heap.GeneralPurposeAllocator(.{}){};
+    const allocator = &gpa.allocator;
 
     const stderr = std.io.getStdErr().writer();
 
