@@ -56,12 +56,14 @@ pub const Row = struct {
     };
 };
 
-pub fn initTestClient(allocator: *mem.Allocator, protocol_version: ProtocolVersion) !*Client {
+pub fn initTestClient(allocator: *mem.Allocator, compression_algorithm: ?[]const u8, protocol_version: u8) !*Client {
     var address = std.net.Address.initIp4([_]u8{ 127, 0, 0, 1 }, 9042);
 
     var init_options = InitOptions{};
-    init_options.protocol_version = protocol_version;
-    init_options.compression = CompressionAlgorithm.LZ4;
+    init_options.protocol_version = ProtocolVersion{ .version = protocol_version };
+    if (compression_algorithm) |s| {
+        init_options.compression = try CompressionAlgorithm.fromString(s);
+    }
     init_options.username = "cassandra";
     init_options.password = "cassandra";
 

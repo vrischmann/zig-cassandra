@@ -39,6 +39,11 @@ pub fn build(b: *Builder) !void {
         b.option(bool, "with_cassandra", "Run tests which need a Cassandra node running to work.") orelse false,
     );
     main_tests.addBuildOption(
+        ?[]const u8,
+        "compression_algorithm",
+        b.option([]const u8, "compression_algorithm", "Compress the CQL frames using this algorithm in the tests."),
+    );
+    main_tests.addBuildOption(
         u8,
         "protocol_version",
         b.option(u8, "protocol_version", "Talk to cassandra using this protocol version in the tests.") orelse 4,
