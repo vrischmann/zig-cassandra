@@ -1,4 +1,5 @@
 image: debian/stable
+arch: arm64
 packages:
   - curl
   - jq
@@ -8,7 +9,7 @@ secrets: []
 
 tasks:
   - install_zig: |
-      curl -L -s "https://ziglang.org/download/index.json" | jq '.master["x86_64-linux"].tarball' -r >> ~/zig_master_url
+      curl -L -s "https://ziglang.org/download/index.json" | jq '.master["aarch64-linux"].tarball' -r >> ~/zig_master_url
       curl -J -o ~/zig.tar.xz $(cat ~/zig_master_url)
       tar xJf ~/zig.tar.xz
       mv ~/zig-linux-* ~/zig-master
