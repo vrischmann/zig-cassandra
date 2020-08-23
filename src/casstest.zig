@@ -69,7 +69,12 @@ pub fn initTestClient(allocator: *mem.Allocator, protocol_version: ProtocolVersi
     init_options.diags = &init_diags;
 
     var client = try allocator.create(Client);
-    try client.initIp4(allocator, address, init_options);
+    client.initIp4(allocator, address, init_options) catch |err| switch (err) {
+        error.HandshakeFailed => {
+            std.debug.panic("handshake failed, received cassandra error: {}\n", .{init_diags.message});
+        },
+        else => return err,
+    };
 
     // Create the keyspace and tables if necessary.
 
