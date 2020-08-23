@@ -15,7 +15,7 @@ tasks:
       echo "export PATH=$PATH:~/zig-master" >> ~/.buildenv
   - test: |
       cd zig-cassandra
-      zig build test
+      TERM=dumb zig build test
 
 triggers:
   - action: email
