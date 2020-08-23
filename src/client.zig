@@ -135,6 +135,9 @@ pub const Client = struct {
     buffered_reader: BufferedReaderType,
     buffered_writer: BufferedWriterType,
 
+    read_lock: if (std.io.is_async) std.event.Lock else void,
+    write_lock: if (std.io.is_async) std.event.Lock else void,
+
     /// Helpers types needed to decode the CQL protocol.
     raw_frame_reader: RawFrameReaderType,
     raw_frame_writer: RawFrameWriterType,
@@ -156,6 +159,11 @@ pub const Client = struct {
 
         self.buffered_reader = BufferedReaderType{ .unbuffered_reader = self.socket.reader() };
         self.buffered_writer = BufferedWriterType{ .unbuffered_writer = self.socket.writer() };
+
+        if (std.io.is_async) {
+            self.read_lock = std.event.Lock.init();
+            self.write_lock = std.event.Lock.init();
+        }
 
         self.raw_frame_reader = RawFrameReaderType.init(self.buffered_reader.reader());
         self.raw_frame_writer = RawFrameWriterType.init(self.buffered_writer.writer());
@@ -501,12 +509,21 @@ pub const Client = struct {
     ///
     /// This method is not thread safe.
     fn writeFrame(self: *Client, allocator: *mem.Allocator, frame: anytype) !void {
+        // Lock the writer if necessary
+        var heldWriteLock: std.event.Lock.Held = undefined;
+        if (std.io.is_async) {
+            heldWriteLock = self.write_lock.acquire();
+        }
+        defer if (std.io.is_async) {
+            heldWriteLock.release();
+        };
+
         // Reset primitive writer
+        // TODO(vincent): for async we probably should do something else for the primitive writer.
         try self.primitive_writer.reset(allocator);
         defer self.primitive_writer.deinit(allocator);
 
         // Prepare the raw frame
-
         var raw_frame = RawFrame{
             .header = FrameHeader{
                 .version = self.options.protocol_version,
@@ -560,8 +577,6 @@ pub const Client = struct {
 
         try self.raw_frame_writer.write(raw_frame);
         try self.buffered_writer.flush();
-
-        // return raw_frame.header.stream;
     }
 
     const ReadFrameOptions = struct {
