@@ -3,7 +3,9 @@ const builtin = @import("builtin");
 const Builder = std.build.Builder;
 
 pub fn build(b: *Builder) !void {
-    const target = b.standardTargetOptions(.{});
+    var target = b.standardTargetOptions(.{});
+    target.abi = .musl;
+
     const mode = b.standardReleaseOptions();
 
     // Build lz4
