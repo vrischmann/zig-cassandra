@@ -3,8 +3,11 @@ const builtin = @import("builtin");
 const Builder = std.build.Builder;
 
 pub fn build(b: *Builder) !void {
-    var target = b.standardTargetOptions(.{});
-    target.abi = .musl;
+    var target = b.standardTargetOptions(.{
+        .default_target = .{
+            .abi = .musl,
+        },
+    });
 
     const mode = b.standardReleaseOptions();
 
