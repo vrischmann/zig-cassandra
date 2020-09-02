@@ -122,7 +122,7 @@ pub const Client = struct {
     };
 
     /// Maps a prepared statement id to the types of the arguments needed when executing it.
-    const PreparedStatementsMetadata = std.HashMap([]const u8, PreparedStatementMetadataValue, std.hash_map.hashString, std.hash_map.eqlString, false);
+    const PreparedStatementsMetadata = std.HashMap([]const u8, PreparedStatementMetadataValue, std.hash_map.hashString, std.hash_map.eqlString, std.hash_map.DefaultMaxLoadPercentage);
 
     allocator: *mem.Allocator,
     options: InitOptions,
