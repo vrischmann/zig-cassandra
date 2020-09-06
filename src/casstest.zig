@@ -1,4 +1,5 @@
 const std = @import("std");
+const big = std.math.big;
 const mem = std.mem;
 
 usingnamespace @import("primitive_types.zig");
@@ -8,14 +9,15 @@ usingnamespace @import("client.zig");
 
 pub const DDL = [_][]const u8{
     \\ CREATE KEYSPACE IF NOT EXISTS foobar WITH replication = {'class': 'SimpleStrategy', 'replication_factor': 1};
-,
+    ,
     \\ CREATE TABLE IF NOT EXISTS foobar.age_to_ids(
     \\ 	age int,
     \\ 	name text,
     \\ 	ids set<tinyint>,
+    \\ 	balance varint,
     \\ 	PRIMARY KEY ((age))
     \\ );
-,
+    ,
     \\ CREATE TABLE IF NOT EXISTS foobar.user(
     \\ 	id bigint,
     \\ 	secondary_id int,
@@ -25,15 +27,16 @@ pub const DDL = [_][]const u8{
 
 pub const Truncate = [_][]const u8{
     \\ TRUNCATE TABLE foobar.age_to_ids;
-,
+    ,
     \\ TRUNCATE TABLE foobar.user;
 };
 
 pub const Args = struct {
     pub const AgeToIDs = struct {
         age: u32 = 0,
-        ids: [4]u8 = undefined,
         name: ?[]const u8 = null,
+        ids: [4]u8 = undefined,
+        balance: ?big.int.Const = null,
     };
 
     pub const User = struct {
@@ -45,9 +48,10 @@ pub const Args = struct {
 // Define a Row struct with a 1:1 mapping with the fields selected.
 pub const Row = struct {
     pub const AgeToIDs = struct {
-        ids: []u8,
         age: u32,
         name: []const u8,
+        ids: []u8,
+        balance: big.int.Const,
     };
 
     pub const User = struct {
@@ -90,6 +94,9 @@ pub const Table = enum {
     User,
 };
 
+pub const VarintString = "3405245950896869895938539859386968968953285938539111111111111111111111111111111111111111122222222222222222222222222222222";
+pub const VarintNegativeString = "-3405245950896869895938539859386968968953285938539111111111111111111111111111111111111111122222222222222222222222222222222";
+
 pub fn insertTestData(allocator: *mem.Allocator, client: *Client, comptime table: Table, n: usize) !void {
     var buffer: [16384]u8 = undefined;
     var fba = std.heap.FixedBufferAllocator.init(&buffer);
@@ -103,13 +110,26 @@ pub fn insertTestData(allocator: *mem.Allocator, client: *Client, comptime table
             const query_id = try client.prepare(
                 allocator,
                 options,
-                "INSERT INTO foobar.age_to_ids(age, ids, name) VALUES(?, ?, ?)",
+                "INSERT INTO foobar.age_to_ids(age, name, ids, balance) VALUES(?, ?, ?, ?)",
                 Args.AgeToIDs{},
             );
 
             var i: usize = 0;
             while (i < n) : (i += 1) {
                 fba.reset();
+
+                const name = try std.fmt.allocPrint(&fba.allocator, "Vincent {}", .{i});
+
+                var balance = if (i % 2 == 0) blk: {
+                    var tmp = try big.int.Managed.init(&fba.allocator);
+                    try tmp.setString(10, VarintString);
+                    break :blk tmp;
+                } else blk: {
+                    var tmp = try big.int.Managed.init(&fba.allocator);
+                    try tmp.setString(10, VarintNegativeString);
+                    break :blk tmp;
+                };
+                defer balance.deinit();
 
                 _ = client.execute(
                     &fba.allocator,
@@ -118,10 +138,8 @@ pub fn insertTestData(allocator: *mem.Allocator, client: *Client, comptime table
                     Args.AgeToIDs{
                         .age = @intCast(u32, i),
                         .ids = [_]u8{ 0, 2, 4, 8 },
-                        .name = if (i % 2 == 0)
-                            @as([]const u8, try std.fmt.allocPrint(&fba.allocator, "Vincent {}", .{i}))
-                        else
-                            null,
+                        .name = if (i % 2 == 0) @as([]const u8, name) else null,
+                        .balance = balance.toConst(),
                     },
                 ) catch |err| switch (err) {
                     error.QueryExecutionFailed => {

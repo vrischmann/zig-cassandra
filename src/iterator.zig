@@ -1,9 +1,12 @@
 const std = @import("std");
+const big = std.math.big;
 const heap = std.heap;
 const io = std.io;
 const mem = std.mem;
 
 usingnamespace @import("primitive_types.zig");
+
+const bigint = @import("bigint.zig");
 
 const PrimitiveReader = @import("primitive/reader.zig").PrimitiveReader;
 
@@ -385,6 +388,10 @@ pub const Iterator = struct {
     }
 
     fn readStruct(self: *Self, allocator: *mem.Allocator, diags: *Diags, column_spec: ColumnSpec, column_data: []const u8, comptime Type: type) !Type {
+        if (Type == big.int.Const) {
+            return bigint.fromBytes(allocator, column_data);
+        }
+
         if (Type == RawBytes) {
             return RawBytes{
                 .data = column_data,

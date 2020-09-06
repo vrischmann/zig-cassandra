@@ -1,6 +1,7 @@
 const builtin = @import("builtin");
 const build_options = @import("build_options");
 const std = @import("std");
+const big = std.math.big;
 const heap = std.heap;
 const io = std.io;
 const log = std.log;
@@ -21,6 +22,8 @@ const PrimitiveWriter = @import("primitive/writer.zig").PrimitiveWriter;
 const PreparedMetadata = @import("metadata.zig").PreparedMetadata;
 const RowsMetadata = @import("metadata.zig").RowsMetadata;
 const ColumnSpec = @import("metadata.zig").ColumnSpec;
+
+const bigint = @import("bigint.zig");
 
 usingnamespace @import("primitive_types.zig");
 usingnamespace @import("iterator.zig");
@@ -326,6 +329,7 @@ pub const Client = struct {
 
         // Now that we have both prepared and compute option IDs, check that they're compatible
         if (!areOptionIDsEqual(ps_metadata.column_specs, option_ids.span())) {
+
             // TODO(vincent): do we want diags here ?
             return error.InvalidPreparedStatementExecuteArgs;
         }
@@ -651,27 +655,68 @@ test "client: insert then query" {
     defer client.close();
 
     // Insert some data
+    try casstest.insertTestData(&arena.allocator, client, .AgeToIDs, 2);
     try casstest.insertTestData(&arena.allocator, client, .User, 2);
 
-    // Read and validate the data
-    var iter = (try client.query(
-        &arena.allocator,
-        QueryOptions{},
-        "SELECT id, secondary_id FROM foobar.user",
-        .{},
-    )).?;
+    // Read and validate the data for the age_to_ids table
+    {
+        var iter = (try client.query(
+            &arena.allocator,
+            QueryOptions{},
+            "SELECT age, name, ids, balance FROM foobar.age_to_ids",
+            .{},
+        )).?;
 
-    var row: casstest.Row.User = undefined;
+        var row: casstest.Row.AgeToIDs = undefined;
 
-    var scanned = try iter.scan(&arena.allocator, Iterator.ScanOptions{}, &row);
-    testing.expect(scanned);
-    testing.expectEqual(@as(usize, 2000), row.id);
-    testing.expectEqual(@as(usize, 25), row.secondary_id);
+        var bigIntBalance = try big.int.Managed.init(&arena.allocator);
+        defer bigIntBalance.deinit();
+        try bigIntBalance.setString(10, casstest.VarintString);
 
-    scanned = try iter.scan(&arena.allocator, Iterator.ScanOptions{}, &row);
-    testing.expect(scanned);
-    testing.expectEqual(@as(usize, 2000), row.id);
-    testing.expectEqual(@as(usize, 26), row.secondary_id);
+        var scanned = try iter.scan(&arena.allocator, Iterator.ScanOptions{}, &row);
+        testing.expect(scanned);
+        testing.expectEqual(@as(usize, 1), row.age);
+        testing.expectEqualSlices(u8, &[_]u8{ 0, 2, 4, 8 }, row.ids);
+        testing.expectEqualStrings("", row.name);
+
+        bigIntBalance.dump();
+        row.balance.dump();
+        testing.expect(bigIntBalance.toConst().eq(row.balance));
+
+        try bigIntBalance.setString(10, casstest.VarintNegativeString);
+
+        scanned = try iter.scan(&arena.allocator, Iterator.ScanOptions{}, &row);
+        testing.expect(scanned);
+        testing.expectEqual(@as(usize, 0), row.age);
+        testing.expectEqualSlices(u8, &[_]u8{ 0, 2, 4, 8 }, row.ids);
+        testing.expectEqualStrings("Vincent 0", row.name);
+
+        bigIntBalance.dump();
+        row.balance.dump();
+        testing.expect(bigIntBalance.toConst().eq(row.balance));
+    }
+
+    // Read and validate the data for the user table
+    {
+        var iter = (try client.query(
+            &arena.allocator,
+            QueryOptions{},
+            "SELECT id, secondary_id FROM foobar.user",
+            .{},
+        )).?;
+
+        var row: casstest.Row.User = undefined;
+
+        var scanned = try iter.scan(&arena.allocator, Iterator.ScanOptions{}, &row);
+        testing.expect(scanned);
+        testing.expectEqual(@as(usize, 2000), row.id);
+        testing.expectEqual(@as(usize, 25), row.secondary_id);
+
+        scanned = try iter.scan(&arena.allocator, Iterator.ScanOptions{}, &row);
+        testing.expect(scanned);
+        testing.expectEqual(@as(usize, 2000), row.id);
+        testing.expectEqual(@as(usize, 26), row.secondary_id);
+    }
 }
 
 pub const Frame = union(Opcode) {
@@ -755,6 +800,9 @@ fn resolveOption(comptime Type: type) OptionID {
     // Special case []const u8 because it's used for strings.
     if (Type == []const u8) return .Varchar;
 
+    // Special case big.int types because it's used for varint.
+    if (Type == big.int.Mutable or Type == big.int.Const) return .Varint;
+
     const type_info = @typeInfo(Type);
     switch (type_info) {
         .Bool => return .Boolean,
@@ -802,6 +850,15 @@ fn computeSingleValue(allocator: *mem.Allocator, values: *std.ArrayList(Value), 
         try options.append(.Varchar);
         // TODO(vincent): should we make a copy ?
         value = Value{ .Set = arg };
+        try values.append(value);
+
+        return;
+    }
+
+    // Special case big.int types because it's used for varint.
+    if (Type == big.int.Const) {
+        try options.append(.Varint);
+        value = Value{ .Set = try bigint.toBytes(allocator, arg) };
         try values.append(value);
 
         return;
