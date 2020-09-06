@@ -135,7 +135,7 @@ pub const Iterator = struct {
         var r: Type = 0.0;
 
         // Compute the number of bytes needed for the float type we're trying to read.
-        comptime const len = @divExact(Type.bit_count, 8);
+        comptime const len = @divExact(@typeInfo(Type).Float.bits, 8);
 
         std.debug.assert(slice.len <= len);
 
@@ -155,7 +155,7 @@ pub const Iterator = struct {
         var r: Type = 0;
 
         // Compute the number of bytes needed for the integer type we're trying to read.
-        comptime const len = @divExact(Type.bit_count, 8);
+        comptime const len = @divExact(@typeInfo(Type).Int.bits, 8);
 
         std.debug.assert(slice.len <= len);
 

@@ -32,7 +32,7 @@ pub const PrimitiveWriter = struct {
 
     /// Write either a short, a int or a long to the buffer.
     pub fn writeInt(self: *Self, comptime T: type, value: T) !void {
-        var buf: [(T.bit_count + 7) / 8]u8 = undefined;
+        var buf: [(@typeInfo(T).Int.bits + 7) / 8]u8 = undefined;
         mem.writeIntBig(T, &buf, value);
 
         return self.wbuf.appendSlice(&buf);
