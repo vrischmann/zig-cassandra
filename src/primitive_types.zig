@@ -244,7 +244,7 @@ test "protocol version: fromString" {
     testing.expect((try ProtocolVersion.fromString("3/v3")).is(3));
     testing.expect((try ProtocolVersion.fromString("4/v4")).is(4));
     testing.expect((try ProtocolVersion.fromString("5/v5")).is(5));
-    testing.expect((try ProtocolVersion.fromString("5/v5-betz")).is(5));
+    testing.expect((try ProtocolVersion.fromString("5/v5-beta")).is(5));
     testing.expectError(error.InvalidProtocolVersion, ProtocolVersion.fromString("lalal"));
 }
 
