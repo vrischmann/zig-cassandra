@@ -655,8 +655,11 @@ test "client: insert then query" {
     defer client.close();
 
     // Insert some data
-    try casstest.insertTestData(&arena.allocator, client, .AgeToIDs, 2);
-    try casstest.insertTestData(&arena.allocator, client, .User, 2);
+
+    const nb_rows = 2;
+
+    try casstest.insertTestData(&arena.allocator, client, .AgeToIDs, nb_rows);
+    try casstest.insertTestData(&arena.allocator, client, .User, nb_rows);
 
     // Read and validate the data for the age_to_ids table
     {
@@ -669,31 +672,35 @@ test "client: insert then query" {
 
         var row: casstest.Row.AgeToIDs = undefined;
 
-        var bigIntBalance = try big.int.Managed.init(&arena.allocator);
-        defer bigIntBalance.deinit();
-        try bigIntBalance.setString(10, casstest.VarintString);
+        var count: usize = 0;
+        while (true) : (count += 1) {
+            const scanned = try iter.scan(&arena.allocator, Iterator.ScanOptions{}, &row);
+            if (!scanned) {
+                break;
+            }
 
-        var scanned = try iter.scan(&arena.allocator, Iterator.ScanOptions{}, &row);
-        testing.expect(scanned);
-        testing.expectEqual(@as(usize, 1), row.age);
-        testing.expectEqualSlices(u8, &[_]u8{ 0, 2, 4, 8 }, row.ids);
-        testing.expectEqualStrings("", row.name);
+            testing.expect(row.age >= 0 and row.age < nb_rows);
+            testing.expectEqualSlices(u8, &[_]u8{ 0, 2, 4, 8 }, row.ids);
 
-        bigIntBalance.dump();
-        row.balance.dump();
-        testing.expect(bigIntBalance.toConst().eq(row.balance));
+            var bigIntBalance = try big.int.Managed.init(&arena.allocator);
+            defer bigIntBalance.deinit();
 
-        try bigIntBalance.setString(10, casstest.VarintNegativeString);
+            if (row.age % 2 == 0) {
+                try bigIntBalance.setString(10, casstest.VarintString);
 
-        scanned = try iter.scan(&arena.allocator, Iterator.ScanOptions{}, &row);
-        testing.expect(scanned);
-        testing.expectEqual(@as(usize, 0), row.age);
-        testing.expectEqualSlices(u8, &[_]u8{ 0, 2, 4, 8 }, row.ids);
-        testing.expectEqualStrings("Vincent 0", row.name);
+                var buf: [128]u8 = undefined;
+                const name = try std.fmt.bufPrint(&buf, "Vincent {}", .{row.age});
 
-        bigIntBalance.dump();
-        row.balance.dump();
-        testing.expect(bigIntBalance.toConst().eq(row.balance));
+                testing.expectEqualStrings(name, row.name);
+            } else {
+                try bigIntBalance.setString(10, casstest.VarintNegativeString);
+                testing.expectEqualStrings("", row.name);
+            }
+
+            testing.expect(bigIntBalance.toConst().eq(row.balance));
+        }
+
+        testing.expectEqual(@as(usize, 2), count);
     }
 
     // Read and validate the data for the user table
