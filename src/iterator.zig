@@ -389,7 +389,8 @@ pub const Iterator = struct {
 
     fn readStruct(self: *Self, allocator: *mem.Allocator, diags: *Diags, column_spec: ColumnSpec, column_data: []const u8, comptime Type: type) !Type {
         if (Type == big.int.Const) {
-            return bigint.fromBytes(allocator, column_data);
+            var m = try bigint.fromBytes(allocator, column_data);
+            return m.toConst();
         }
 
         if (Type == RawBytes) {
