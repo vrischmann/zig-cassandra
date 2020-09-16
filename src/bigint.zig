@@ -69,25 +69,28 @@ pub fn fromBytes(allocator: *mem.Allocator, data: []const u8) !big.int.Managed {
     var n = try fromRawBytes(allocator, data);
 
     // Per the spec, a MSB of 1 in the data means it's negative.
-    if (data.len > 0 and data[0] & 0x80 > 0) {
-        const shift = data.len * 8;
-        // Capacity is:
-        // * one for the 1 big.int
-        // * how many full limbs are in the data slice
-        // * one more to store the remaining bytes
-        const capacity = big_one.limbs.len + (data.len / limb_bytes) + 1;
 
-        // Allocate a temporary big.int to hold the shifted value.
-        var tmp = try big.int.Managed.initCapacity(allocator, capacity);
-        defer tmp.deinit();
-        var tmp_mutable = tmp.toMutable();
-
-        // 1 << shift
-        tmp_mutable.shiftLeft(big_one, shift);
-
-        // n = n - (1 << shift)
-        try n.sub(n.toConst(), tmp_mutable.toConst());
+    if (data.len <= 0 or (data[0] & 0x80 == 0)) {
+        return n;
     }
+
+    const shift = data.len * 8;
+    // Capacity is:
+    // * one for the 1 big.int
+    // * how many full limbs are in the data slice
+    // * one more to store the remaining bytes
+    const capacity = big_one.limbs.len + (data.len / limb_bytes) + 1;
+
+    // Allocate a temporary big.int to hold the shifted value.
+    var tmp = try big.int.Managed.initCapacity(allocator, capacity);
+    defer tmp.deinit();
+    var tmp_mutable = tmp.toMutable();
+
+    // 1 << shift
+    tmp_mutable.shiftLeft(big_one, shift);
+
+    // n = n - (1 << shift)
+    try n.sub(n.toConst(), tmp_mutable.toConst());
 
     return n;
 }
