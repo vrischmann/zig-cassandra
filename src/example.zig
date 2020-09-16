@@ -51,7 +51,7 @@ fn doQuery(allocator: *mem.Allocator, client: *cql.Client) !void {
         var iter = (try client.query(
             &arena.allocator,
             options,
-            "SELECT ids, age, name FROM age_to_ids",
+            "SELECT age, name, ids, balance FROM age_to_ids",
             .{},
         )).?;
 
@@ -149,7 +149,7 @@ fn doInsert(allocator: *mem.Allocator, client: *cql.Client, n: usize) !void {
     const query_id = client.prepare(
         allocator,
         options,
-        "INSERT INTO foobar.age_to_ids(age, ids, name) VALUES(?, ?, ?)",
+        "INSERT INTO foobar.age_to_ids(age, ids, name, balance) VALUES(?, ?, ?, ?)",
         casstest.Args.AgeToIDs{},
     ) catch |err| switch (err) {
         error.QueryPreparationFailed => {
@@ -244,7 +244,7 @@ fn iterate(allocator: *mem.Allocator, iter: *cql.Iterator) !usize {
 
         const ids = IDs{ .slice = row.ids };
 
-        std.debug.warn("age: {} id: {} name: {} {x}\n", .{ row.age, ids, row.name, row.name });
+        std.debug.print("age: {} id: {} name: {} balance: {}\n", .{ row.age, ids, row.name, row.balance });
     }
 
     return count;

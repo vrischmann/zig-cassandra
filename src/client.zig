@@ -1,6 +1,7 @@
 const builtin = @import("builtin");
 const build_options = @import("build_options");
 const std = @import("std");
+const big = std.math.big;
 const heap = std.heap;
 const io = std.io;
 const log = std.log;
@@ -21,6 +22,8 @@ const PrimitiveWriter = @import("primitive/writer.zig").PrimitiveWriter;
 const PreparedMetadata = @import("metadata.zig").PreparedMetadata;
 const RowsMetadata = @import("metadata.zig").RowsMetadata;
 const ColumnSpec = @import("metadata.zig").ColumnSpec;
+
+const bigint = @import("bigint.zig");
 
 usingnamespace @import("primitive_types.zig");
 usingnamespace @import("iterator.zig");
@@ -326,6 +329,7 @@ pub const Client = struct {
 
         // Now that we have both prepared and compute option IDs, check that they're compatible
         if (!areOptionIDsEqual(ps_metadata.column_specs, option_ids.span())) {
+
             // TODO(vincent): do we want diags here ?
             return error.InvalidPreparedStatementExecuteArgs;
         }
@@ -643,35 +647,85 @@ test "client: insert then query" {
     var arena = testing.arenaAllocator();
     defer arena.deinit();
 
-    var client = try casstest.initTestClient(
+    var harness = try casstest.Harness.init(
         &arena.allocator,
         build_options.compression_algorithm,
         build_options.protocol_version,
     );
-    defer client.close();
+    defer harness.deinit();
 
     // Insert some data
-    try casstest.insertTestData(&arena.allocator, client, .User, 2);
 
-    // Read and validate the data
-    var iter = (try client.query(
-        &arena.allocator,
-        QueryOptions{},
-        "SELECT id, secondary_id FROM foobar.user",
-        .{},
-    )).?;
+    const nb_rows = 2;
 
-    var row: casstest.Row.User = undefined;
+    try harness.insertTestData(.AgeToIDs, nb_rows);
+    try harness.insertTestData(.User, nb_rows);
 
-    var scanned = try iter.scan(&arena.allocator, Iterator.ScanOptions{}, &row);
-    testing.expect(scanned);
-    testing.expectEqual(@as(usize, 2000), row.id);
-    testing.expectEqual(@as(usize, 25), row.secondary_id);
+    // Read and validate the data for the age_to_ids table
 
-    scanned = try iter.scan(&arena.allocator, Iterator.ScanOptions{}, &row);
-    testing.expect(scanned);
-    testing.expectEqual(@as(usize, 2000), row.id);
-    testing.expectEqual(@as(usize, 26), row.secondary_id);
+    {
+        const Callback = struct {
+            pub fn do(h: *casstest.Harness, i: usize, row: *casstest.Row.AgeToIDs) !bool {
+                testing.expectEqual(row.age, 0);
+                testing.expectEqualSlices(u8, &[_]u8{ 0, 2, 4, 8 }, row.ids);
+                testing.expectEqualStrings("Vincent 0", row.name);
+                testing.expect(h.positive_varint.toConst().eq(row.balance));
+                return true;
+            }
+        };
+
+        const res = try harness.selectAndScan(
+            casstest.Row.AgeToIDs,
+            "SELECT age, name, ids, balance FROM foobar.age_to_ids WHERE age = ?",
+            .{
+                @intCast(u32, 0),
+            },
+            Callback.do,
+        );
+        testing.expect(res);
+    }
+
+    {
+        const Callback = struct {
+            pub fn do(h: *casstest.Harness, i: usize, row: *casstest.Row.AgeToIDs) !bool {
+                testing.expectEqual(@as(u32, 1), row.age);
+                testing.expectEqualSlices(u8, &[_]u8{ 0, 2, 4, 8 }, row.ids);
+                testing.expectEqualStrings("", row.name);
+                testing.expect(h.negative_varint.toConst().eq(row.balance));
+                return true;
+            }
+        };
+
+        const res = try harness.selectAndScan(
+            casstest.Row.AgeToIDs,
+            "SELECT age, name, ids, balance FROM foobar.age_to_ids WHERE age = ?",
+            .{
+                @intCast(u32, 1),
+            },
+            Callback.do,
+        );
+        testing.expect(res);
+    }
+
+    // Read and validate the data for the user table
+
+    {
+        const Callback = struct {
+            pub fn do(h: *casstest.Harness, i: usize, row: *casstest.Row.User) !bool {
+                testing.expectEqual(@as(u64, 2000), row.id);
+                testing.expectEqual(i + 25, row.secondary_id);
+                return true;
+            }
+        };
+
+        const res = try harness.selectAndScan(
+            casstest.Row.User,
+            "SELECT id, secondary_id FROM foobar.user WHERE id = 2000",
+            .{},
+            Callback.do,
+        );
+        testing.expect(res);
+    }
 }
 
 pub const Frame = union(Opcode) {
@@ -755,6 +809,9 @@ fn resolveOption(comptime Type: type) OptionID {
     // Special case []const u8 because it's used for strings.
     if (Type == []const u8) return .Varchar;
 
+    // Special case big.int types because it's used for varint.
+    if (Type == big.int.Mutable or Type == big.int.Const) return .Varint;
+
     const type_info = @typeInfo(Type);
     switch (type_info) {
         .Bool => return .Boolean,
@@ -802,6 +859,15 @@ fn computeSingleValue(allocator: *mem.Allocator, values: *std.ArrayList(Value), 
         try options.append(.Varchar);
         // TODO(vincent): should we make a copy ?
         value = Value{ .Set = arg };
+        try values.append(value);
+
+        return;
+    }
+
+    // Special case big.int types because it's used for varint.
+    if (Type == big.int.Const) {
+        try options.append(.Varint);
+        value = Value{ .Set = try bigint.toBytes(allocator, arg) };
         try values.append(value);
 
         return;
@@ -1168,5 +1234,6 @@ test "count bind markers" {
 }
 
 test "" {
+    _ = @import("bigint.zig");
     _ = @import("lz4.zig");
 }
