@@ -647,82 +647,84 @@ test "client: insert then query" {
     var arena = testing.arenaAllocator();
     defer arena.deinit();
 
-    var client = try casstest.initTestClient(
+    var harness = try casstest.Harness.init(
         &arena.allocator,
         build_options.compression_algorithm,
         build_options.protocol_version,
     );
-    defer client.close();
+    defer harness.deinit();
 
     // Insert some data
 
     const nb_rows = 2;
 
-    try casstest.insertTestData(&arena.allocator, client, .AgeToIDs, nb_rows);
-    try casstest.insertTestData(&arena.allocator, client, .User, nb_rows);
+    try harness.insertTestData(.AgeToIDs, nb_rows);
+    try harness.insertTestData(.User, nb_rows);
 
     // Read and validate the data for the age_to_ids table
+
     {
-        var iter = (try client.query(
-            &arena.allocator,
-            QueryOptions{},
-            "SELECT age, name, ids, balance FROM foobar.age_to_ids",
-            .{},
-        )).?;
-
-        var row: casstest.Row.AgeToIDs = undefined;
-
-        var count: usize = 0;
-        while (true) : (count += 1) {
-            const scanned = try iter.scan(&arena.allocator, Iterator.ScanOptions{}, &row);
-            if (!scanned) {
-                break;
+        const Callback = struct {
+            pub fn do(h: *casstest.Harness, i: usize, row: *casstest.Row.AgeToIDs) !bool {
+                testing.expectEqual(row.age, 0);
+                testing.expectEqualSlices(u8, &[_]u8{ 0, 2, 4, 8 }, row.ids);
+                testing.expectEqualStrings("Vincent 0", row.name);
+                testing.expect(h.positive_varint.toConst().eq(row.balance));
+                return true;
             }
+        };
 
-            testing.expect(row.age >= 0 and row.age < nb_rows);
-            testing.expectEqualSlices(u8, &[_]u8{ 0, 2, 4, 8 }, row.ids);
+        const res = try harness.selectAndScan(
+            casstest.Row.AgeToIDs,
+            "SELECT age, name, ids, balance FROM foobar.age_to_ids WHERE age = ?",
+            .{
+                @intCast(u32, 0),
+            },
+            Callback.do,
+        );
+        testing.expect(res);
+    }
 
-            var bigIntBalance = try big.int.Managed.init(&arena.allocator);
-            defer bigIntBalance.deinit();
-
-            if (row.age % 2 == 0) {
-                try bigIntBalance.setString(10, casstest.VarintString);
-
-                var buf: [128]u8 = undefined;
-                const name = try std.fmt.bufPrint(&buf, "Vincent {}", .{row.age});
-
-                testing.expectEqualStrings(name, row.name);
-            } else {
-                try bigIntBalance.setString(10, casstest.VarintNegativeString);
+    {
+        const Callback = struct {
+            pub fn do(h: *casstest.Harness, i: usize, row: *casstest.Row.AgeToIDs) !bool {
+                testing.expectEqual(@as(u32, 1), row.age);
+                testing.expectEqualSlices(u8, &[_]u8{ 0, 2, 4, 8 }, row.ids);
                 testing.expectEqualStrings("", row.name);
+                testing.expect(h.negative_varint.toConst().eq(row.balance));
+                return true;
             }
+        };
 
-            testing.expect(bigIntBalance.toConst().eq(row.balance));
-        }
-
-        testing.expectEqual(@as(usize, 2), count);
+        const res = try harness.selectAndScan(
+            casstest.Row.AgeToIDs,
+            "SELECT age, name, ids, balance FROM foobar.age_to_ids WHERE age = ?",
+            .{
+                @intCast(u32, 1),
+            },
+            Callback.do,
+        );
+        testing.expect(res);
     }
 
     // Read and validate the data for the user table
+
     {
-        var iter = (try client.query(
-            &arena.allocator,
-            QueryOptions{},
-            "SELECT id, secondary_id FROM foobar.user",
+        const Callback = struct {
+            pub fn do(h: *casstest.Harness, i: usize, row: *casstest.Row.User) !bool {
+                testing.expectEqual(@as(u64, 2000), row.id);
+                testing.expectEqual(i + 25, row.secondary_id);
+                return true;
+            }
+        };
+
+        const res = try harness.selectAndScan(
+            casstest.Row.User,
+            "SELECT id, secondary_id FROM foobar.user WHERE id = 2000",
             .{},
-        )).?;
-
-        var row: casstest.Row.User = undefined;
-
-        var scanned = try iter.scan(&arena.allocator, Iterator.ScanOptions{}, &row);
-        testing.expect(scanned);
-        testing.expectEqual(@as(usize, 2000), row.id);
-        testing.expectEqual(@as(usize, 25), row.secondary_id);
-
-        scanned = try iter.scan(&arena.allocator, Iterator.ScanOptions{}, &row);
-        testing.expect(scanned);
-        testing.expectEqual(@as(usize, 2000), row.id);
-        testing.expectEqual(@as(usize, 26), row.secondary_id);
+            Callback.do,
+        );
+        testing.expect(res);
     }
 }
 
