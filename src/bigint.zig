@@ -174,6 +174,8 @@ pub fn toBytes(allocator: *mem.Allocator, n: big.int.Const) ![]const u8 {
     try n_tmp.add(n_tmp.toConst(), tmp_mutable.toConst());
 
     var buf = try allocator.alloc(u8, (n_tmp.len() + 1) * limb_bytes);
+    errdefer allocator.free(buf);
+
     var pos = try rawBytes(buf, n_tmp.toConst());
 
     return buf[pos..];
