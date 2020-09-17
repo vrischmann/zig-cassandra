@@ -7,12 +7,7 @@ const os = std.os;
 
 const testing = @import("testing.zig");
 
-pub const ValueTag = enum {
-    Set,
-    NotSet,
-    Null,
-};
-pub const Value = union(ValueTag) {
+pub const Value = union(enum) {
     Set: []const u8,
     NotSet: void,
     Null: void,
@@ -39,12 +34,7 @@ pub const NamedValue = struct {
     value: Value,
 };
 
-pub const ValuesType = enum {
-    Normal,
-    Named,
-};
-
-pub const Values = union(ValuesType) {
+pub const Values = union(enum) {
     Normal: []Value,
     Named: []NamedValue,
 };
