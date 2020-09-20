@@ -99,7 +99,12 @@ pub const Harness = struct {
 
         self.client = try allocator.create(Client);
         errdefer allocator.destroy(self.client);
-        try self.client.initIp4(allocator, address, init_options);
+        self.client.initIp4(allocator, address, init_options) catch |err| switch (err) {
+            error.HandshakeFailed => {
+                std.debug.panic("unable to handhsake, error: {}", .{init_diags.message});
+            },
+            else => return err,
+        };
 
         // Create the keyspace and tables if necessary.
 
