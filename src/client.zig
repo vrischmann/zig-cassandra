@@ -623,7 +623,7 @@ pub const Client = struct {
                         },
                         .Snappy => {
                             if (!build_options.with_snappy) {
-                                std.debug.panic("snappy compression is not available, make sure you built the client correctly");
+                                std.debug.panic("snappy compression is not available, make sure you built the client correctly", .{});
                             }
 
                             const snappy = @import("snappy.zig");
@@ -805,7 +805,6 @@ test "client: insert then query" {
                 CompressionAlgorithm.Snappy,
             };
         }
-
         break :blk [_]?CompressionAlgorithm{
             null,
             CompressionAlgorithm.LZ4,
@@ -813,9 +812,9 @@ test "client: insert then query" {
     };
 
     const protocol_versions = [_]ProtocolVersion{
-        ProtocolVersion{ .version = @as(u8, 3) },
+        // ProtocolVersion{ .version = @as(u8, 3) },
         ProtocolVersion{ .version = @as(u8, 4) },
-        ProtocolVersion{ .version = @as(u8, 5) },
+        // ProtocolVersion{ .version = @as(u8, 5) },
     };
 
     for (compression_algorithms) |compression_algorithm| {
