@@ -772,22 +772,11 @@ test "client: insert then query" {
     const testParameters = struct {
         const Self = @This();
 
-        pairs: []pair,
-
-        const pair = struct {
-            compression: ?CompressionAlgorithm,
-            protocol_version: ?ProtocolVersion,
-        };
-
-        pub fn deinit(self: *Self) void {
-            std.testing.allocator.free(self.pairs);
-        }
+        compression: ?CompressionAlgorithm,
+        protocol_version: ?ProtocolVersion,
 
         pub fn init(s: []const u8) !Self {
             var self: Self = undefined;
-
-            var pairs = std.ArrayList(pair).init(std.testing.allocator);
-            errdefer pairs.deinit();
 
             var it = mem.tokenize(s, ",");
             while (true) {
@@ -797,38 +786,30 @@ test "client: insert then query" {
                 const key = it2.next() orelse continue;
                 const value = it2.next() orelse std.debug.panic("invalid token {}\n", .{token});
 
-                var p: pair = undefined;
                 if (mem.eql(u8, "compression", key)) {
-                    p.compression = try CompressionAlgorithm.fromString(value);
+                    self.compression = try CompressionAlgorithm.fromString(value);
                 } else if (mem.eql(u8, "protocol", key)) {
-                    p.protocol_version = try ProtocolVersion.fromString(value);
+                    self.protocol_version = try ProtocolVersion.fromString(value);
                 }
-
-                try pairs.append(p);
             }
-
-            self.pairs = pairs.span();
 
             return self;
         }
     };
 
     var params = try testParameters.init(build_options.with_cassandra.?);
-    defer params.deinit();
 
-    for (params.pairs) |pair| {
-        var arena = testing.arenaAllocator();
-        defer arena.deinit();
+    var arena = testing.arenaAllocator();
+    defer arena.deinit();
 
-        var harness = try casstest.Harness.init(
-            &arena.allocator,
-            pair.compression,
-            pair.protocol_version,
-        );
-        defer harness.deinit();
+    var harness = try casstest.Harness.init(
+        &arena.allocator,
+        params.compression,
+        params.protocol_version,
+    );
+    defer harness.deinit();
 
-        try testWithCassandra(&harness);
-    }
+    try testWithCassandra(&harness);
 }
 
 pub const Frame = union(Opcode) {
