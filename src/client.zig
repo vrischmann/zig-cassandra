@@ -621,7 +621,19 @@ pub const Client = struct {
                             raw_frame.header.body_len = @intCast(u32, compressed_data.len);
                             raw_frame.body = compressed_data;
                         },
-                        else => std.debug.panic("compression algorithm {} not handled yet", .{compression}),
+                        .Snappy => {
+                            if (!build_options.with_snappy) {
+                                std.debug.panic("snappy compression is not available, make sure you built the client correctly");
+                            }
+
+                            const snappy = @import("snappy.zig");
+
+                            const compressed_data = try snappy.compress(allocator, written);
+
+                            raw_frame.header.flags |= FrameFlags.Compression;
+                            raw_frame.header.body_len = @intCast(u32, compressed_data.len);
+                            raw_frame.body = compressed_data;
+                        },
                     }
                 }
             }
