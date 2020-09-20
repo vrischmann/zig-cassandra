@@ -103,6 +103,40 @@ pub const QueryOptions = struct {
         cas_write_unknown: ?WriteError.CASUnknown = null,
         already_exists: ?AlreadyExistsError = null,
         unprepared: ?UnpreparedError = null,
+
+        execute: Execute = .{},
+
+        const Execute = struct {
+            not_enough_args: ?bool = null,
+            first_incompatible_arg: ?ExecuteIncompatibleArg = null,
+            const ExecuteIncompatibleArg = struct {
+                position: usize = 0,
+                prepared: ColumnSpec = .{},
+                argument: ?OptionID = null,
+            };
+
+            pub fn format(value: Execute, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
+                var buf: [1024]u8 = undefined;
+                var fbs = io.fixedBufferStream(&buf);
+                var fbw = fbs.writer();
+
+                if (value.not_enough_args) |v| {
+                    if (v) {
+                        try std.fmt.format(fbw, "not enough args, ", .{});
+                    }
+                }
+                if (value.first_incompatible_arg) |v| {
+                    try std.fmt.format(fbw, "first incompatible arg: {{position: {}, prepared: (name: {}, type: {}), argument: {}}}", .{
+                        v.position,
+                        v.prepared.name,
+                        v.prepared.option,
+                        v.argument,
+                    });
+                }
+
+                try writer.writeAll(fbs.getWritten());
+            }
+        };
     };
 };
 
@@ -336,10 +370,28 @@ pub const Client = struct {
         try computeValues(allocator, &values, &option_ids, args);
 
         // Now that we have both prepared and compute option IDs, check that they're compatible
-        if (!areOptionIDsEqual(ps_metadata.column_specs, option_ids.span())) {
+        // If not compatible we produce a diagnostic.
+        {
+            const prepared = ps_metadata.column_specs;
+            const computed = option_ids.span();
 
-            // TODO(vincent): do we want diags here ?
-            return error.InvalidPreparedStatementExecuteArgs;
+            if (prepared.len != computed.len) {
+                diags.execute.not_enough_args = true;
+                return error.InvalidPreparedStatementExecuteArgs;
+            }
+
+            for (prepared) |column_spec, i| {
+                if (computed[i]) |option| {
+                    if (column_spec.option != option) {
+                        diags.execute.first_incompatible_arg = .{
+                            .position = i,
+                            .prepared = prepared[i],
+                            .argument = computed[i],
+                        };
+                        return error.InvalidPreparedStatementExecuteArgs;
+                    }
+                }
+            }
         }
 
         // Check that the values provided are compatible with the prepared statement
@@ -1218,17 +1270,7 @@ test "compute values: not set and null" {
     testing.expectEqual(OptionID.Bigint, o[1].?);
 }
 
-fn areOptionIDsEqual(prepared: []const ColumnSpec, computed: []const ?OptionID) bool {
-    if (prepared.len != computed.len) return false;
-
-    for (prepared) |column_spec, i| {
-        if (computed[i]) |option| {
-            if (column_spec.option != option) return false;
-        }
-    }
-
-    return true;
-}
+fn areOptionIDsEqual(prepared: []const ColumnSpec, computed: []const ?OptionID) bool {}
 
 fn countBindMarkers(query_string: []const u8) usize {
     var pos: usize = 0;
