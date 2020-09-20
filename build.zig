@@ -31,6 +31,15 @@ pub fn build(b: *Builder) !void {
     lib.setTarget(target);
     lib.setBuildMode(mode);
     lib.addIncludeDir("src");
+
+    // Optionally link snappy.
+    // We don't embed the code for snappy so we must link the system library.
+    // However we must keep this optional.
+    const with_snappy = b.option(bool, "with_snappy", "Enable Snappy compression") orelse false;
+    if (with_snappy) {
+        lib.addBuildOption(bool, "with_snappy", with_snappy);
+    }
+
     lib.install();
 
     var main_tests = b.addTest("src/lib.zig");
