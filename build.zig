@@ -11,7 +11,7 @@ pub fn build(b: *Builder) !void {
 
     const mode = b.standardReleaseOptions();
 
-    // Build lz4
+    // LZ4
     //
     // To make cross compiling easier we embed the lz4 source code which is small enough and is easily compiled
     // with Zig's C compiling abilities.
@@ -25,7 +25,30 @@ pub fn build(b: *Builder) !void {
     lz4.setBuildMode(mode);
     lz4.addIncludeDir("src");
 
+    var lz4_tests = b.addTest("src/lz4.zig");
+    lz4_tests.linkLibrary(lz4);
+    lz4_tests.setTarget(target);
+    lz4_tests.setBuildMode(mode);
+    lz4_tests.addIncludeDir("src");
+
+    const lz4_test_step = b.step("lz4-test", "Run the lz4 tests");
+    lz4_test_step.dependOn(&lz4_tests.step);
+
+    // Snappy
+    const with_snappy = b.option(bool, "with_snappy", "Enable Snappy compression") orelse false;
+    if (with_snappy) {
+        var snappy_tests = b.addTest("src/snappy.zig");
+        snappy_tests.linkLibC();
+        snappy_tests.linkSystemLibrary("snappy");
+        snappy_tests.setTarget(target);
+        snappy_tests.setBuildMode(mode);
+
+        const snappy_test_step = b.step("snappy-test", "Run the snappy tests");
+        snappy_test_step.dependOn(&snappy_tests.step);
+    }
+
     // Build library
+    //
     const lib = b.addStaticLibrary("zig-cassandra", "src/lib.zig");
     lib.linkLibrary(lz4);
     lib.setTarget(target);
@@ -33,14 +56,17 @@ pub fn build(b: *Builder) !void {
     lib.addIncludeDir("src");
 
     // Optionally link snappy.
-    // We don't embed the code for snappy so we must link the system library.
-    // However we must keep this optional.
-    const with_snappy = b.option(bool, "with_snappy", "Enable Snappy compression") orelse false;
+    // We don't embed the code for snappy so we must link the system library, however we must keep this optional.
+    lib.addBuildOption(bool, "with_snappy", with_snappy);
     if (with_snappy) {
-        lib.addBuildOption(bool, "with_snappy", with_snappy);
+        lib.linkLibC();
+        lib.linkSystemLibrary("snappy");
     }
 
     lib.install();
+
+    // Add the main tests for the library.
+    //
 
     var main_tests = b.addTest("src/lib.zig");
     main_tests.linkLibrary(lz4);
@@ -66,11 +92,12 @@ pub fn build(b: *Builder) !void {
     const test_step = b.step("test", "Run library tests");
     test_step.dependOn(&main_tests.step);
 
-    // Build example
-    const example = b.addExecutable("example", "src/example.zig");
-    example.linkLibrary(lz4);
-    example.setTarget(target);
-    example.setBuildMode(mode);
-    example.install();
-    example.addIncludeDir("src");
+    // Add the example
+    //
+    // const example = b.addExecutable("example", "src/example.zig");
+    // example.linkLibrary(lz4);
+    // example.setTarget(target);
+    // example.setBuildMode(mode);
+    // example.install();
+    // example.addIncludeDir("src");
 }
