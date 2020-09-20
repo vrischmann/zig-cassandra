@@ -93,10 +93,11 @@ pub fn build(b: *Builder) !void {
 
     // Add the example
     //
-    // const example = b.addExecutable("example", "src/example.zig");
-    // example.linkLibrary(lz4);
-    // example.setTarget(target);
-    // example.setBuildMode(mode);
-    // example.install();
-    // example.addIncludeDir("src");
+    const example = b.addExecutable("example", "src/example.zig");
+    example.linkLibrary(lz4);
+    example.setTarget(target);
+    example.setBuildMode(mode);
+    example.install();
+    example.addIncludeDir("src");
+    maybeLinkSnappy(example, with_snappy);
 }
