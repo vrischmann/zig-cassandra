@@ -2,6 +2,7 @@ const std = @import("std");
 const heap = std.heap;
 const mem = std.mem;
 const net = std.net;
+const big = std.math.big;
 
 const cql = @import("lib.zig");
 const casstest = @import("casstest.zig");
@@ -158,6 +159,11 @@ fn doInsert(allocator: *mem.Allocator, client: *cql.Client, n: usize) !void {
         else => return err,
     };
 
+    var positive_varint = try big.int.Managed.init(allocator);
+    try positive_varint.setString(10, "40502020");
+    var negative_varint = try big.int.Managed.init(allocator);
+    try negative_varint.setString(10, "-350956306");
+
     var buffer: [16384]u8 = undefined;
     var fba = heap.FixedBufferAllocator.init(&buffer);
 
@@ -173,6 +179,7 @@ fn doInsert(allocator: *mem.Allocator, client: *cql.Client, n: usize) !void {
                 @as([]const u8, try std.fmt.allocPrint(&fba.allocator, "Vincent {}", .{i}))
             else
                 null,
+            .balance = if (i % 2 == 0) positive_varint.toConst() else negative_varint.toConst(),
         };
 
         _ = client.execute(
