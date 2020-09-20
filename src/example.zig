@@ -1,5 +1,6 @@
 const std = @import("std");
 const heap = std.heap;
+const log = std.log;
 const mem = std.mem;
 const net = std.net;
 const big = std.math.big;
@@ -150,7 +151,7 @@ fn doInsert(allocator: *mem.Allocator, client: *cql.Client, n: usize) !void {
     const query_id = client.prepare(
         allocator,
         options,
-        "INSERT INTO foobar.age_to_ids(age, ids, name, balance) VALUES(?, ?, ?, ?)",
+        "INSERT INTO foobar.age_to_ids(age, name, ids, balance) VALUES(?, ?, ?, ?)",
         casstest.Args.AgeToIDs{},
     ) catch |err| switch (err) {
         error.QueryPreparationFailed => {
@@ -174,11 +175,11 @@ fn doInsert(allocator: *mem.Allocator, client: *cql.Client, n: usize) !void {
 
         const args = casstest.Args.AgeToIDs{
             .age = @intCast(u32, i) * @as(u32, 10),
-            .ids = [_]u8{ 0, 2, 4, 8 },
             .name = if (i % 2 == 0)
                 @as([]const u8, try std.fmt.allocPrint(&fba.allocator, "Vincent {}", .{i}))
             else
                 null,
+            .ids = [_]u8{ 0, 2, 4, 8 },
             .balance = if (i % 2 == 0) positive_varint.toConst() else negative_varint.toConst(),
         };
 
@@ -189,7 +190,10 @@ fn doInsert(allocator: *mem.Allocator, client: *cql.Client, n: usize) !void {
             args,
         ) catch |err| switch (err) {
             error.QueryExecutionFailed => {
-                std.debug.warn("error message: {}\n", .{diags.message});
+                log.warn("error message: {}\n", .{diags.message});
+            },
+            error.InvalidPreparedStatementExecuteArgs => {
+                log.warn("execute diags: ({})\n", .{diags.execute});
             },
             else => |e| return e,
         };
