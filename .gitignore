@@ -1,2 +1,3 @@
 /zig-cache
 /vgcore.*
+/build_runner.zig
