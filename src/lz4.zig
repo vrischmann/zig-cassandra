@@ -1,4 +1,5 @@
 const std = @import("std");
+const assert = std.debug.assert;
 const mem = std.mem;
 
 const c = @cImport(@cInclude("lz4.h"));
@@ -9,7 +10,7 @@ const length_size = 4;
 pub fn compress(allocator: *mem.Allocator, data: []const u8) ![]const u8 {
     const max_dst_size = c.LZ4_compressBound(@intCast(c_int, data.len));
 
-    const buf = try allocator.alloc(u8, @intCast(usize, max_dst_size) + length_size);
+    var buf = try allocator.alloc(u8, @intCast(usize, max_dst_size) + length_size);
     errdefer allocator.free(buf);
 
     // Encode the uncompressed length before the compressed byted.
@@ -27,7 +28,9 @@ pub fn compress(allocator: *mem.Allocator, data: []const u8) ![]const u8 {
         return error.CompressionFailed;
     }
 
-    return buf[0 .. @intCast(usize, compressed_data_size) + length_size];
+    buf = try allocator.realloc(buf, @intCast(usize, compressed_data_size) + length_size);
+
+    return buf;
 }
 
 pub fn decompress(allocator: *mem.Allocator, data: []const u8) ![]const u8 {
@@ -50,11 +53,13 @@ pub fn decompress(allocator: *mem.Allocator, data: []const u8) ![]const u8 {
         return error.DecompressionFailed;
     }
 
+    assert(max_decompressed_size == decompressed_size);
+
     return buf[0..@intCast(usize, decompressed_size)];
 }
 
 test "lz4: compress and decompress" {
-    const exp = "Dolorem in eos repellat facilis voluptatum sed. Autem ipsum quaerat voluptas ut cum impedit. Ut sapiente dolor eos sit. Dolorum nihil nobis voluptas est et sunt voluptatem. Veniam labore quae explicabo." ** 10;
+    const exp = "Dolorem in eos repellat facilis voluptatum sed. Autem ipsum quaerat voluptas ut cum impedit. Ut sapiente dolor eos sit. Dolorum nihil nobis voluptas est et sunt voluptatem. Veniam labore quae explicabo." ** 100;
 
     const compressed = try compress(testing.allocator, exp);
     defer testing.allocator.free(compressed);
