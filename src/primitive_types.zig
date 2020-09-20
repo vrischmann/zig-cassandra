@@ -90,10 +90,14 @@ pub const ProtocolVersion = packed struct {
     pub fn is(self: Self, comptime version: comptime_int) bool {
         return self.version & 0x7 == @as(u8, version);
     }
-    pub fn is_request(self: Self) bool {
+    pub fn isAtLeast(self: Self, comptime version: comptime_int) bool {
+        const tmp = self.version & 0x7;
+        return tmp >= version;
+    }
+    pub fn isRequest(self: Self) bool {
         return self.version & 0x0f == self.version;
     }
-    pub fn is_response(self: Self) bool {
+    pub fn isResponse(self: Self) bool {
         return self.version & 0xf0 == 0x80;
     }
 
@@ -280,8 +284,8 @@ test "protocol version: serialize and deserialize" {
             var v1 = try d.deserialize(ProtocolVersion);
             var v2 = try d.deserialize(ProtocolVersion);
             testing.expect(v1.is(tc.exp));
-            testing.expect(v1.is_request());
-            testing.expect(v2.is_response());
+            testing.expect(v1.isRequest());
+            testing.expect(v2.isResponse());
         }
     }
 }

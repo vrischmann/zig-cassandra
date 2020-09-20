@@ -109,7 +109,7 @@ pub const RowsMetadata = struct {
         allocator.free(self.column_specs);
     }
 
-    pub fn read(allocator: *mem.Allocator, pr: *PrimitiveReader) !Self {
+    pub fn read(allocator: *mem.Allocator, protocol_version: ProtocolVersion, pr: *PrimitiveReader) !Self {
         var metadata = Self{
             .paging_state = null,
             .new_metadata_id = null,
@@ -124,9 +124,10 @@ pub const RowsMetadata = struct {
         if (flags & FlagHasMorePages == FlagHasMorePages) {
             metadata.paging_state = try pr.readBytes(allocator);
         }
-        // Only valid with Protocol v5
-        if (flags & FlagMetadataChanged == FlagMetadataChanged) {
-            metadata.new_metadata_id = try pr.readShortBytes(allocator);
+        if (protocol_version.is(5)) {
+            if (flags & FlagMetadataChanged == FlagMetadataChanged) {
+                metadata.new_metadata_id = try pr.readShortBytes(allocator);
+            }
         }
 
         if (flags & FlagNoMetadata == FlagNoMetadata) {
@@ -174,12 +175,16 @@ pub const PreparedMetadata = struct {
         allocator.free(self.column_specs);
     }
 
-    pub fn read(allocator: *mem.Allocator, pr: *PrimitiveReader) !Self {
+    pub fn read(allocator: *mem.Allocator, protocol_version: ProtocolVersion, pr: *PrimitiveReader) !Self {
         var metadata = Self{
             .global_table_spec = null,
             .pk_indexes = undefined,
             .column_specs = undefined,
         };
+
+        if (protocol_version.is(3)) {
+            unreachable;
+        }
 
         const flags = try pr.readInt(u32);
         const columns_count = @as(usize, try pr.readInt(u32));

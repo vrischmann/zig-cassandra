@@ -30,13 +30,13 @@ const Rows = struct {
     metadata: RowsMetadata,
     data: []RowData,
 
-    pub fn read(allocator: *mem.Allocator, pr: *PrimitiveReader) !Self {
+    pub fn read(allocator: *mem.Allocator, protocol_version: ProtocolVersion, pr: *PrimitiveReader) !Self {
         var rows = Self{
             .metadata = undefined,
             .data = undefined,
         };
 
-        rows.metadata = try RowsMetadata.read(allocator, pr);
+        rows.metadata = try RowsMetadata.read(allocator, protocol_version, pr);
 
         // Iterate over rows
         const rows_count = @as(usize, try pr.readInt(u32));
@@ -91,8 +91,9 @@ const Prepared = struct {
         if (protocol_version.is(5)) {
             prepared.result_metadata_id = (try pr.readShortBytes(allocator)) orelse return error.NoResultMetadataIDInPreparedFrame;
         }
-        prepared.metadata = try PreparedMetadata.read(allocator, pr);
-        prepared.rows_metadata = try RowsMetadata.read(allocator, pr);
+
+        prepared.metadata = try PreparedMetadata.read(allocator, protocol_version, pr);
+        prepared.rows_metadata = try RowsMetadata.read(allocator, protocol_version, pr);
 
         return prepared;
     }
@@ -124,7 +125,7 @@ pub const ResultFrame = struct {
         switch (kind) {
             .Void => frame.result = Result{ .Void = .{} },
             .Rows => {
-                const rows = try Rows.read(allocator, pr);
+                const rows = try Rows.read(allocator, protocol_version, pr);
                 frame.result = Result{ .Rows = rows };
             },
             .SetKeyspace => {
