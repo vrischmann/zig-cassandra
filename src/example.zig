@@ -263,6 +263,44 @@ const usage =
     \\
 ;
 
+fn parseArg(comptime T: type, arg: []const u8) !T {
+    switch (@typeInfo(T)) {
+        .Int => return std.fmt.parseInt(T, arg, 10),
+        .Optional => |p| {
+            if (arg.len == 0) return null;
+            return try parseArg(p.child, arg);
+        },
+        .Pointer => |p| {
+            switch (p.size) {
+                .Slice => {
+                    if (p.child == u8) return arg;
+                },
+                else => @compileError("invalid type " ++ @typeName(T)),
+            }
+        },
+        else => @compileError("invalid type " ++ @typeName(T)),
+    }
+}
+
+fn findArg(comptime T: type, args: []const []const u8, key: []const u8, default: T) !T {
+    for (args) |arg| {
+        var it = mem.tokenize(arg, "=");
+        const k = it.next().?;
+        const v = it.next() orelse return default;
+
+        if (!mem.eql(u8, key, k)) {
+            continue;
+        }
+
+        if (T == []const u8) {
+            return v;
+        }
+
+        return parseArg(T, v) catch default;
+    }
+    return default;
+}
+
 pub fn main() anyerror!void {
     var gpa = heap.GeneralPurposeAllocator(.{}){};
     const allocator = &gpa.allocator;
@@ -287,8 +325,12 @@ pub fn main() anyerror!void {
     // such as the protocol version, if compression is enabled, etc.
 
     var init_options = cql.InitOptions{};
-    init_options.protocol_version = cql.ProtocolVersion{ .version = @as(u8, 5) };
-    init_options.compression = cql.CompressionAlgorithm.LZ4;
+    init_options.protocol_version = cql.ProtocolVersion{ .version = try findArg(u8, args, "protocol_version", 4) };
+    init_options.compression = blk: {
+        const tmp = try findArg(?[]const u8, args, "compression", null);
+        if (tmp == null) break :blk null;
+        break :blk try cql.CompressionAlgorithm.fromString(tmp.?);
+    };
     init_options.username = "cassandra";
     init_options.password = "cassandra";
 
