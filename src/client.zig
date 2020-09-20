@@ -9,6 +9,7 @@ const mem = std.mem;
 const net = std.net;
 
 const lz4 = @import("lz4.zig");
+const snappy = comptime if (build_options.with_snappy) @import("snappy.zig");
 
 const FrameHeader = @import("frame.zig").FrameHeader;
 const FrameFlags = @import("frame.zig").FrameFlags;
@@ -622,11 +623,7 @@ pub const Client = struct {
                             raw_frame.body = compressed_data;
                         },
                         .Snappy => {
-                            if (!build_options.with_snappy) {
-                                std.debug.panic("snappy compression is not available, make sure you built the client correctly", .{});
-                            }
-
-                            const snappy = @import("snappy.zig");
+                            comptime if (!build_options.with_snappy) return error.InvalidCompressedFrame;
 
                             const compressed_data = try snappy.compress(allocator, written);
 
@@ -675,46 +672,21 @@ pub const Client = struct {
         var raw_frame = try self.raw_frame_reader.read(allocator);
 
         if (raw_frame.header.flags & FrameFlags.Compression == FrameFlags.Compression) {
-            const decompressed_data = try lz4.decompress(allocator, raw_frame.body);
-            raw_frame.body = decompressed_data;
+            const compression = self.options.compression orelse return error.InvalidCompressedFrame;
+
+            switch (compression) {
+                .LZ4 => {
+                    const decompressed_data = try lz4.decompress(allocator, raw_frame.body);
+                    raw_frame.body = decompressed_data;
+                },
+                .Snappy => {
+                    comptime if (!build_options.with_snappy) return error.InvalidCompressedFrame;
+
+                    const decompressed_data = try snappy.decompress(allocator, raw_frame.body);
+                    raw_frame.body = decompressed_data;
+                },
+            }
         }
-
-        return raw_frame;
-    }
-
-    fn makeRawFrame(self: *Client, allocator: *mem.Allocator, opcode: Opcode, force_no_compression: bool) !RawFrame {
-        var raw_frame: RawFrame = undefined;
-
-        const written = self.primitive_writer.getWritten();
-
-        raw_frame.header = FrameHeader{
-            .version = self.options.protocol_version,
-            .flags = 0,
-            .stream = 0,
-            .opcode = opcode,
-            .body_len = @intCast(u32, written.len),
-        };
-
-        if (force_no_compression) {
-            raw_frame.body = written;
-        } else {
-            raw_frame.body = if (self.options.compression) |compression| blk: {
-                switch (compression) {
-                    .LZ4 => {
-                        const compressed_data = try lz4.compress(allocator, written);
-
-                        raw_frame.header.flags |= FrameFlags.Compression;
-                        raw_frame.header.body_len = @intCast(u32, compressed_data.len);
-
-                        break :blk compressed_data;
-                    },
-                    else => std.debug.panic("compression algorithm {} not handled yet", .{compression}),
-                }
-            } else written;
-        }
-
-        // TODO(vincent): implement streams
-        // TODO(vincent): only compress if it's useful ?
 
         return raw_frame;
     }
