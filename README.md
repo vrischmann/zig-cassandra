@@ -16,7 +16,6 @@ TODO
 * Use proper error sets for stuff
 * Cleanup code that won't be used, some frames are never written by a client for example.
 * Add an abstraction for a Stream
-* Compression (snappy)
 * Handle named values in a statement
 * Batching
 * Cluster client / client pool capable of maintaining a connection to each node in the cluster + autodiscovery with events
