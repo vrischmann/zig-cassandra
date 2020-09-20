@@ -26,7 +26,7 @@ pub fn build(b: *Builder) !void {
     // Define options
 
     const with_snappy = b.option(bool, "with_snappy", "Enable Snappy compression") orelse false;
-    const with_cassandra = b.option(bool, "with_cassandra", "Run tests which need a Cassandra node running to work.") orelse false;
+    const with_cassandra = b.option([]const u8, "with_cassandra", "Run tests which need a Cassandra node running to work.") orelse null;
 
     // LZ4
     //
@@ -82,7 +82,7 @@ pub fn build(b: *Builder) !void {
     main_tests.setBuildMode(mode);
     main_tests.addIncludeDir("src");
     maybeLinkSnappy(main_tests, with_snappy);
-    main_tests.addBuildOption(bool, "with_cassandra", with_cassandra);
+    main_tests.addBuildOption(?[]const u8, "with_cassandra", with_cassandra);
 
     const test_step = b.step("test", "Run library tests");
     test_step.dependOn(&main_tests.step);

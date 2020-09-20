@@ -767,42 +767,67 @@ fn testWithCassandra(harness: *casstest.Harness) !void {
 }
 
 test "client: insert then query" {
-    if (!build_options.with_cassandra) return error.SkipZigTest;
+    if (build_options.with_cassandra == null) return error.SkipZigTest;
 
-    const compression_algorithms = blk: {
-        if (build_options.with_snappy) {
-            break :blk [_]?CompressionAlgorithm{
-                null,
-                CompressionAlgorithm.LZ4,
-                CompressionAlgorithm.Snappy,
-            };
-        }
-        break :blk [_]?CompressionAlgorithm{
-            null,
-            CompressionAlgorithm.LZ4,
+    const testParameters = struct {
+        const Self = @This();
+
+        pairs: []pair,
+
+        const pair = struct {
+            compression: ?CompressionAlgorithm,
+            protocol_version: ?ProtocolVersion,
         };
-    };
 
-    const protocol_versions = [_]ProtocolVersion{
-        // ProtocolVersion{ .version = @as(u8, 3) },
-        ProtocolVersion{ .version = @as(u8, 4) },
-        // ProtocolVersion{ .version = @as(u8, 5) },
-    };
-
-    for (compression_algorithms) |compression_algorithm| {
-        for (protocol_versions) |protocol_version| {
-            var arena = testing.arenaAllocator();
-            defer arena.deinit();
-
-            var harness = try casstest.Harness.init(
-                &arena.allocator,
-                compression_algorithm,
-                protocol_version,
-            );
-            defer harness.deinit();
-
-            try testWithCassandra(&harness);
+        pub fn deinit(self: *Self) void {
+            std.testing.allocator.free(self.pairs);
         }
+
+        pub fn init(s: []const u8) !Self {
+            var self: Self = undefined;
+
+            var pairs = std.ArrayList(pair).init(std.testing.allocator);
+            errdefer pairs.deinit();
+
+            var it = mem.tokenize(s, ",");
+            while (true) {
+                const token = it.next() orelse break;
+
+                var it2 = mem.tokenize(token, ":");
+                const key = it2.next() orelse continue;
+                const value = it2.next() orelse std.debug.panic("invalid token {}\n", .{token});
+
+                var p: pair = undefined;
+                if (mem.eql(u8, "compression", key)) {
+                    p.compression = try CompressionAlgorithm.fromString(value);
+                } else if (mem.eql(u8, "protocol", key)) {
+                    p.protocol_version = try ProtocolVersion.fromString(value);
+                }
+
+                try pairs.append(p);
+            }
+
+            self.pairs = pairs.span();
+
+            return self;
+        }
+    };
+
+    var params = try testParameters.init(build_options.with_cassandra.?);
+    defer params.deinit();
+
+    for (params.pairs) |pair| {
+        var arena = testing.arenaAllocator();
+        defer arena.deinit();
+
+        var harness = try casstest.Harness.init(
+            &arena.allocator,
+            pair.compression,
+            pair.protocol_version,
+        );
+        defer harness.deinit();
+
+        try testWithCassandra(&harness);
     }
 }
 
