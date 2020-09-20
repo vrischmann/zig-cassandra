@@ -18,7 +18,7 @@ fn doQuery(allocator: *mem.Allocator, client: *cql.Client) !void {
     // We want query diagonistics in case of failure.
     var diags = cql.QueryOptions.Diagnostics{};
     errdefer {
-        std.debug.warn("diags: {}\n", .{diags});
+        log.warn("diags: {}", .{diags});
     }
 
     var paging_state_buffer: [1024]u8 = undefined;
@@ -70,7 +70,7 @@ fn doQuery(allocator: *mem.Allocator, client: *cql.Client) !void {
         }
     }
 
-    std.debug.warn("read {} rows\n", .{total});
+    log.info("read {} rows", .{total});
 }
 
 fn doPrepare(allocator: *mem.Allocator, client: *cql.Client) ![]const u8 {
@@ -95,7 +95,7 @@ fn doPrepare(allocator: *mem.Allocator, client: *cql.Client) ![]const u8 {
         else => return err,
     };
 
-    std.debug.warn("prepared query id is {x}\n", .{query_id});
+    log.info("prepared query id is {x}", .{query_id});
 
     return query_id;
 }
@@ -311,6 +311,8 @@ fn findArg(comptime T: type, args: []const []const u8, key: []const u8, default:
     }
     return default;
 }
+
+pub const log_level: log.Level = .debug;
 
 pub fn main() anyerror!void {
     var gpa = heap.GeneralPurposeAllocator(.{}){};

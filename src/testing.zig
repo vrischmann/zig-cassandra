@@ -46,7 +46,7 @@ pub fn printHRBytes(comptime fmt: []const u8, exp: []const u8, args: anytype) vo
     }
 
     var span = buffer.span();
-    std.debug.warn(fmt, .{span} ++ args);
+    std.debug.print(fmt, .{span} ++ args);
 }
 
 /// Creates an arena allocator backed by the testing allocator.
