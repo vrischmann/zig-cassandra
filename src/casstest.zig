@@ -94,6 +94,8 @@ pub const Harness = struct {
         init_options.username = "cassandra";
         init_options.password = "cassandra";
 
+        std.debug.print("protocol version: {} compression algorithm: {}\n", .{ protocol_version, compression_algorithm });
+
         var init_diags = InitOptions.Diagnostics{};
         init_options.diags = &init_diags;
 
