@@ -720,21 +720,8 @@ pub const Client = struct {
     }
 };
 
-test "client: insert then query" {
-    if (!build_options.with_cassandra) return error.SkipZigTest;
-
-    var arena = testing.arenaAllocator();
-    defer arena.deinit();
-
-    var harness = try casstest.Harness.init(
-        &arena.allocator,
-        build_options.compression_algorithm,
-        build_options.protocol_version,
-    );
-    defer harness.deinit();
-
+fn testWithCassandra(harness: *casstest.Harness) !void {
     // Insert some data
-
     const nb_rows = 2;
 
     try harness.insertTestData(.AgeToIDs, nb_rows);
@@ -804,6 +791,47 @@ test "client: insert then query" {
             Callback.do,
         );
         testing.expect(res);
+    }
+}
+
+test "client: insert then query" {
+    if (!build_options.with_cassandra) return error.SkipZigTest;
+
+    const compression_algorithms = blk: {
+        if (build_options.with_snappy) {
+            break :blk [_]?CompressionAlgorithm{
+                null,
+                CompressionAlgorithm.LZ4,
+                CompressionAlgorithm.Snappy,
+            };
+        }
+
+        break :blk [_]?CompressionAlgorithm{
+            null,
+            CompressionAlgorithm.LZ4,
+        };
+    };
+
+    const protocol_versions = [_]ProtocolVersion{
+        ProtocolVersion{ .version = @as(u8, 3) },
+        ProtocolVersion{ .version = @as(u8, 4) },
+        ProtocolVersion{ .version = @as(u8, 5) },
+    };
+
+    for (compression_algorithms) |compression_algorithm| {
+        for (protocol_versions) |protocol_version| {
+            var arena = testing.arenaAllocator();
+            defer arena.deinit();
+
+            var harness = try casstest.Harness.init(
+                &arena.allocator,
+                compression_algorithm,
+                protocol_version,
+            );
+            defer harness.deinit();
+
+            try testWithCassandra(&harness);
+        }
     }
 }
 

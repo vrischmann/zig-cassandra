@@ -27,8 +27,6 @@ pub fn build(b: *Builder) !void {
 
     const with_snappy = b.option(bool, "with_snappy", "Enable Snappy compression") orelse false;
     const with_cassandra = b.option(bool, "with_cassandra", "Run tests which need a Cassandra node running to work.") orelse false;
-    const compression_algorithm = b.option([]const u8, "compression_algorithm", "Compress the CQL frames using this algorithm in the tests.");
-    const protocol_version = b.option(u8, "protocol_version", "Talk to cassandra using this protocol version in the tests.") orelse 4;
 
     // LZ4
     //
@@ -85,8 +83,6 @@ pub fn build(b: *Builder) !void {
     main_tests.addIncludeDir("src");
     maybeLinkSnappy(main_tests, with_snappy);
     main_tests.addBuildOption(bool, "with_cassandra", with_cassandra);
-    main_tests.addBuildOption(?[]const u8, "compression_algorithm", compression_algorithm);
-    main_tests.addBuildOption(u8, "protocol_version", protocol_version);
 
     const test_step = b.step("test", "Run library tests");
     test_step.dependOn(&main_tests.step);

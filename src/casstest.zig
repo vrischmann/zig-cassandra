@@ -73,7 +73,7 @@ pub const Harness = struct {
 
     client: *Client,
 
-    pub fn init(allocator: *mem.Allocator, compression_algorithm: ?[]const u8, protocol_version: u8) !Self {
+    pub fn init(allocator: *mem.Allocator, compression_algorithm: ?CompressionAlgorithm, protocol_version: ProtocolVersion) !Self {
         var self: Self = undefined;
         self.allocator = allocator;
 
@@ -89,10 +89,8 @@ pub const Harness = struct {
         var address = std.net.Address.initIp4([_]u8{ 127, 0, 0, 1 }, 9042);
 
         var init_options = InitOptions{};
-        init_options.protocol_version = ProtocolVersion{ .version = protocol_version };
-        if (compression_algorithm) |s| {
-            init_options.compression = try CompressionAlgorithm.fromString(s);
-        }
+        init_options.protocol_version = protocol_version;
+        init_options.compression = compression_algorithm;
         init_options.username = "cassandra";
         init_options.password = "cassandra";
 
