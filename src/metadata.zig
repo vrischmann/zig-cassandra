@@ -65,7 +65,11 @@ pub const ColumnSpec = struct {
                 spec.custom_class_name = try pr.readString(allocator);
             },
             .List, .Set => {
-                spec.listset_element_type_option = try readOptionID(pr);
+                const option = try readOptionID(pr);
+                spec.listset_element_type_option = option;
+                if (option == .Custom) {
+                    spec.custom_class_name = try pr.readString(allocator);
+                }
             },
             .Map => {
                 spec.map_key_type_option = try readOptionID(pr);
@@ -162,6 +166,7 @@ pub const PreparedMetadata = struct {
     column_specs: []const ColumnSpec,
 
     const FlagGlobalTablesSpec = 0x0001;
+    const FlagNoMetadata = 0x0004;
 
     pub fn deinit(self: *const Self, allocator: *mem.Allocator) void {
         if (self.global_table_spec) |spec| {
@@ -182,24 +187,23 @@ pub const PreparedMetadata = struct {
             .column_specs = undefined,
         };
 
-        if (protocol_version.is(3)) {
-            unreachable;
-        }
-
         const flags = try pr.readInt(u32);
         const columns_count = @as(usize, try pr.readInt(u32));
-        const pk_count = @as(usize, try pr.readInt(u32));
 
-        // Read the partition key indexes
+        if (protocol_version.isAtLeast(4)) {
+            const pk_count = @as(usize, try pr.readInt(u32));
 
-        var pk_indexes = try allocator.alloc(u16, pk_count);
-        errdefer allocator.free(pk_indexes);
+            // Read the partition key indexes
 
-        var i: usize = 0;
-        while (i < pk_count) : (i += 1) {
-            pk_indexes[i] = try pr.readInt(u16);
+            var pk_indexes = try allocator.alloc(u16, pk_count);
+            errdefer allocator.free(pk_indexes);
+
+            var i: usize = 0;
+            while (i < pk_count) : (i += 1) {
+                pk_indexes[i] = try pr.readInt(u16);
+            }
+            metadata.pk_indexes = pk_indexes;
         }
-        metadata.pk_indexes = pk_indexes;
 
         // Next are the table spec and column spec
 
@@ -216,7 +220,7 @@ pub const PreparedMetadata = struct {
         var column_specs = try allocator.alloc(ColumnSpec, columns_count);
         errdefer allocator.free(column_specs);
 
-        i = 0;
+        var i: usize = 0;
         while (i < columns_count) : (i += 1) {
             column_specs[i] = try ColumnSpec.read(allocator, pr, metadata.global_table_spec != null);
         }
