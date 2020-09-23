@@ -197,6 +197,11 @@ pub const Iterator = struct {
             u8, i8 => {
                 switch (option) {
                     .Tinyint => return readIntFromSlice(Type, column_data),
+                    .Custom => {
+                        // TODO(vincent): remove this !! only temporary for testing
+                        const new_option = try getOptionIDFromCassandraClassName("org.apache.cassandra.db.marshal.ByteType");
+                        return self.readInt(diags, new_option, column_data, Type);
+                    },
                     else => {
                         diags.incompatible_metadata.incompatible_types.cql_type_name = @tagName(option);
                         diags.incompatible_metadata.incompatible_types.native_type_name = @typeName(Type);
@@ -429,6 +434,13 @@ pub const Iterator = struct {
         }
 
         return array;
+    }
+
+    fn getOptionIDFromCassandraClassName(name: []const u8) !OptionID {
+        if (mem.eql(u8, "org.apache.cassandra.db.marshal.ByteType", name)) {
+            return .Tinyint;
+        }
+        return .Custom;
     }
 };
 
