@@ -114,11 +114,9 @@ pub const Iterator = struct {
         // TODO(vincent): handle packed enum
         // TODO(vincent): handle union
 
-        const option = column_spec.option;
-
         switch (type_info) {
-            .Int => return try self.readInt(diags, option, column_data, Type),
-            .Float => return try self.readFloat(diags, option, column_data, Type),
+            .Int => return try self.readInt(diags, column_spec, column_data, Type),
+            .Float => return try self.readFloat(diags, column_spec, column_data, Type),
             .Pointer => |pointer| switch (pointer.size) {
                 .One => {
                     return try self.readType(allocator, diags, column_spec, column_data, @TypeOf(pointer.child));
@@ -129,7 +127,7 @@ pub const Iterator = struct {
                 else => @compileError("invalid pointer size " ++ @tagName(pointer.size)),
             },
             .Struct => return try self.readStruct(allocator, diags, column_spec, column_data, Type),
-            .Array => return try self.readArray(diags, option, column_data, Type),
+            .Array => return try self.readArray(diags, column_spec, column_data, Type),
             else => @compileError("field type " ++ @typeName(Type) ++ " not handled yet"),
         }
     }
@@ -190,13 +188,34 @@ pub const Iterator = struct {
         return mem.readIntBig(Type, bytes);
     }
 
-    fn readInt(self: *Self, diags: *Diags, option: OptionID, column_data: []const u8, comptime Type: type) !Type {
+    fn readInt(self: *Self, diags: *Diags, column_spec: ColumnSpec, column_data: []const u8, comptime Type: type) !Type {
         var r: Type = 0;
+
+        const option = column_spec.option;
 
         switch (Type) {
             u8, i8 => {
                 switch (option) {
                     .Tinyint => return readIntFromSlice(Type, column_data),
+                    .Custom => {
+                        if (column_spec.custom_class_name) |class_name| {
+                            const new_option = getOptionIDFromCassandraClassName(class_name) catch |err| switch (err) {};
+                            switch (new_option) {
+                                .Tinyint => {
+                                    var new_column_spec = column_spec;
+                                    new_column_spec.option = new_option;
+                                    return self.readInt(diags, new_column_spec, column_data, Type);
+                                },
+                                else => {
+                                    diags.incompatible_metadata.incompatible_types.cql_type_name = @tagName(new_option);
+                                    diags.incompatible_metadata.incompatible_types.native_type_name = @typeName(Type);
+                                    return error.IncompatibleMetadata;
+                                },
+                            }
+                        } else {
+                            return error.NoCQLCustomClassName;
+                        }
+                    },
                     else => {
                         diags.incompatible_metadata.incompatible_types.cql_type_name = @tagName(option);
                         diags.incompatible_metadata.incompatible_types.native_type_name = @typeName(Type);
@@ -254,8 +273,10 @@ pub const Iterator = struct {
         return r;
     }
 
-    fn readFloat(self: *Self, diags: *Diags, option: OptionID, column_data: []const u8, comptime Type: type) !Type {
+    fn readFloat(self: *Self, diags: *Diags, column_spec: ColumnSpec, column_data: []const u8, comptime Type: type) !Type {
         var r: Type = 0.0;
+
+        const option = column_spec.option;
 
         switch (Type) {
             f32 => {
@@ -356,8 +377,17 @@ pub const Iterator = struct {
                             return error.InvalidColumnSpec;
                         }
 
-                        var child_column_spec: ColumnSpec = undefined;
-                        child_column_spec.option = column_spec.listset_element_type_option.?;
+                        const child_option = column_spec.listset_element_type_option.?;
+
+                        var child_column_spec = switch (child_option) {
+                            .Custom => ColumnSpec{
+                                .custom_class_name = column_spec.custom_class_name.?,
+                                .option = child_option,
+                            },
+                            else => ColumnSpec{
+                                .option = child_option,
+                            },
+                        };
 
                         var pr = PrimitiveReader.init();
                         pr.reset(column_data);
@@ -410,10 +440,12 @@ pub const Iterator = struct {
         @compileError("type " ++ @typeName(Type) ++ " is invalid");
     }
 
-    fn readArray(self: *Self, diags: *Diags, option: OptionID, column_data: []const u8, comptime Type: type) !Type {
+    fn readArray(self: *Self, diags: *Diags, column_spec: ColumnSpec, column_data: []const u8, comptime Type: type) !Type {
         const ChildType = std.meta.Elem(Type);
 
         var array: Type = undefined;
+
+        const option = column_spec.option;
 
         // NOTE(vincent): Arrays are fixed size and the only thing we know has a fixed size with CQL is a UUID.
         // Maybe in the future we could allow more advanced stuff like reading blobs for arrays of packed struct/union/enum
@@ -429,6 +461,13 @@ pub const Iterator = struct {
         }
 
         return array;
+    }
+
+    fn getOptionIDFromCassandraClassName(name: []const u8) !OptionID {
+        if (mem.eql(u8, "org.apache.cassandra.db.marshal.ByteType", name)) {
+            return .Tinyint;
+        }
+        return .Custom;
     }
 };
 
