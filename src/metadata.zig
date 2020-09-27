@@ -19,17 +19,17 @@ fn readOptionID(pr: *PrimitiveReader) !OptionID {
 pub const ColumnSpec = struct {
     const Self = @This();
 
-    keyspace: ?[]const u8,
-    table: ?[]const u8,
-    name: []const u8,
-
     option: OptionID,
 
+    keyspace: ?[]const u8 = null,
+    table: ?[]const u8 = null,
+    name: []const u8 = "",
+
     // TODO(vincent): not a fan of this but for now it's fine.
-    listset_element_type_option: ?OptionID,
-    map_key_type_option: ?OptionID,
-    map_value_type_option: ?OptionID,
-    custom_class_name: ?[]const u8,
+    listset_element_type_option: ?OptionID = null,
+    map_key_type_option: ?OptionID = null,
+    map_value_type_option: ?OptionID = null,
+    custom_class_name: ?[]const u8 = null,
 
     pub fn deinit(self: Self, allocator: *mem.Allocator) void {
         if (self.keyspace) |str| allocator.free(str);
