@@ -136,12 +136,17 @@ pub const Harness = struct {
 
         switch (table) {
             .AgeToIDs => {
-                const query_id = try self.client.prepare(
+                const query_id = self.client.prepare(
                     self.allocator,
                     options,
                     "INSERT INTO foobar.age_to_ids(age, name, ids, balance) VALUES(?, ?, ?, ?)",
                     Args.AgeToIDs{},
-                );
+                ) catch |err| switch (err) {
+                    error.QueryPreparationFailed => {
+                        std.debug.panic("query preparation failed, received cassandra error: {}\n", .{diags.message});
+                    },
+                    else => return err,
+                };
 
                 var i: usize = 0;
                 while (i < n) : (i += 1) {
@@ -163,7 +168,7 @@ pub const Harness = struct {
                         },
                     ) catch |err| switch (err) {
                         error.QueryExecutionFailed => {
-                            std.debug.panic("query preparation failed, received cassandra error: {}\n", .{diags.message});
+                            std.debug.panic("query execution failed, received cassandra error: {}\n", .{diags.message});
                         },
                         else => return err,
                     };
@@ -171,12 +176,17 @@ pub const Harness = struct {
             },
 
             .User => {
-                const query_id = try self.client.prepare(
+                const query_id = self.client.prepare(
                     self.allocator,
                     options,
                     "INSERT INTO foobar.user(id, secondary_id) VALUES(?, ?)",
                     Args.User{},
-                );
+                ) catch |err| switch (err) {
+                    error.QueryPreparationFailed => {
+                        std.debug.panic("query preparation failed, received cassandra error: {}\n", .{diags.message});
+                    },
+                    else => return err,
+                };
 
                 var i: usize = 0;
                 while (i < n) : (i += 1) {
