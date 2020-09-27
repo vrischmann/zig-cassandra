@@ -377,8 +377,17 @@ pub const Iterator = struct {
                             return error.InvalidColumnSpec;
                         }
 
-                        var child_column_spec: ColumnSpec = undefined;
-                        child_column_spec.option = column_spec.listset_element_type_option.?;
+                        const child_option = column_spec.listset_element_type_option.?;
+
+                        var child_column_spec = switch (child_option) {
+                            .Custom => ColumnSpec{
+                                .custom_class_name = column_spec.custom_class_name.?,
+                                .option = child_option,
+                            },
+                            else => ColumnSpec{
+                                .option = child_option,
+                            },
+                        };
 
                         var pr = PrimitiveReader.init();
                         pr.reset(column_data);
