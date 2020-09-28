@@ -476,7 +476,8 @@ test "client: insert then query" {
     var arena = testing.arenaAllocator();
     defer arena.deinit();
 
-    var harness = try casstest.Harness.init(
+    var harness: casstest.Harness = undefined;
+    try harness.init(
         &arena.allocator,
         params.compression,
         params.protocol_version,

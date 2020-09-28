@@ -75,8 +75,7 @@ pub const Harness = struct {
     connection: Connection,
     client: Client,
 
-    pub fn init(allocator: *mem.Allocator, compression_algorithm: ?CompressionAlgorithm, protocol_version: ?ProtocolVersion) !Self {
-        var self: Self = undefined;
+    pub fn init(self: *Self, allocator: *mem.Allocator, compression_algorithm: ?CompressionAlgorithm, protocol_version: ?ProtocolVersion) !void {
         self.allocator = allocator;
         self.connection = undefined;
         self.client = undefined;
@@ -119,8 +118,6 @@ pub const Harness = struct {
         inline for (Truncate) |query| {
             _ = try self.client.query(allocator, .{}, query, .{});
         }
-
-        return self;
     }
 
     pub fn deinit(self: *Self) void {
