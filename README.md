@@ -1,8 +1,6 @@
 # Cassandra client in Zig
 
-Experiment with writing a Cassandra client in Zig.
-
-The goal is only to support CQL.
+This is a work in progress Cassandra client in Zig.
 
 # Available features
 
