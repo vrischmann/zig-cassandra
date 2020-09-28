@@ -161,15 +161,18 @@ pub const Client = struct {
                 .keyspace = null,
             };
 
-            try self.connection.writeFrame(allocator, .{
+            var f = async self.connection.writeFrame(allocator, .{
                 .opcode = .Prepare,
                 .body = prepare_frame,
             });
+            try await f;
         }
 
-        var read_frame = try self.connection.readFrame(allocator, Connection.ReadFrameOptions{
+        var f = async self.connection.readFrame(allocator, Connection.ReadFrameOptions{
             .frame_allocator = self.allocator,
         });
+        var read_frame = try await f;
+
         switch (read_frame) {
             .Result => |frame| switch (frame.result) {
                 .Prepared => |prepared| {
@@ -336,14 +339,20 @@ pub const Client = struct {
                 .result_metadata_id = ps_result_metadata_id,
                 .query_parameters = query_parameters,
             };
-            try self.connection.writeFrame(allocator, .{
+
+            var f = async self.connection.writeFrame(allocator, .{
                 .opcode = .Execute,
                 .body = execute_frame,
             });
+            try await f;
         }
 
         // Read either RESULT or ERROR
-        return switch (try self.connection.readFrame(allocator, null)) {
+
+        var f = async self.connection.readFrame(allocator, null);
+        var read_frame = try await f;
+
+        return switch (read_frame) {
             .Result => |frame| {
                 return switch (frame.result) {
                     .Rows => |rows| blk: {

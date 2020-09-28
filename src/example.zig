@@ -8,6 +8,8 @@ const big = std.math.big;
 const cql = @import("lib.zig");
 const casstest = @import("casstest.zig");
 
+pub const io_mode = .evented;
+
 /// Runs a single SELECT reading all data from the age_to_ids table.
 ///
 /// This function demonstrates multiple things:

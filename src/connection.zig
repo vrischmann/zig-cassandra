@@ -359,6 +359,13 @@ pub const Connection = struct {
     }
 
     fn readRawFrame(self: *Self, allocator: *mem.Allocator) !RawFrame {
+        // Lock the reader if necessary
+        var heldReadLock: std.event.Lock.Held = undefined;
+        if (std.io.is_async) {
+            heldReadLock = self.read_lock.acquire();
+        }
+        defer if (std.io.is_async) heldReadLock.release();
+
         var raw_frame = try self.raw_frame_reader.read(allocator);
 
         if (raw_frame.header.flags & FrameFlags.Compression == FrameFlags.Compression) {
