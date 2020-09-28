@@ -7,9 +7,7 @@ const ArrayList = std.ArrayList;
 pub const ProtocolVersion = @import("client.zig").ProtocolVersion;
 pub const CompressionAlgorithm = @import("client.zig").CompressionAlgorithm;
 
-pub const InitOptions = @import("client.zig").InitOptions;
-pub const QueryOptions = @import("client.zig").QueryOptions;
-
+pub const Connection = @import("connection.zig").Connection;
 pub const Client = @import("client.zig").Client;
 pub const Iterator = @import("iterator.zig").Iterator;
 
