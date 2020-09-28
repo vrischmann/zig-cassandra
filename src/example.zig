@@ -16,7 +16,7 @@ const casstest = @import("casstest.zig");
 ///  * using the paging state and page size
 fn doQuery(allocator: *mem.Allocator, client: *cql.Client) !void {
     // We want query diagonistics in case of failure.
-    var diags = cql.QueryOptions.Diagnostics{};
+    var diags = cql.Client.QueryOptions.Diagnostics{};
     errdefer {
         log.warn("diags: {}", .{diags});
     }
@@ -25,7 +25,7 @@ fn doQuery(allocator: *mem.Allocator, client: *cql.Client) !void {
     var paging_state_allocator = std.heap.FixedBufferAllocator.init(&paging_state_buffer);
 
     // Read max 48 rows per query.
-    var options = cql.QueryOptions{
+    var options = cql.Client.QueryOptions{
         .page_size = 48,
         .paging_state = null,
         .diags = &diags,
@@ -75,8 +75,8 @@ fn doQuery(allocator: *mem.Allocator, client: *cql.Client) !void {
 
 fn doPrepare(allocator: *mem.Allocator, client: *cql.Client) ![]const u8 {
     // We want query diagonistics in case of failure.
-    var diags = cql.QueryOptions.Diagnostics{};
-    var options = cql.QueryOptions{
+    var diags = cql.Client.QueryOptions.Diagnostics{};
+    var options = cql.Client.QueryOptions{
         .diags = &diags,
     };
 
@@ -106,8 +106,8 @@ fn doExecute(allocator: *mem.Allocator, client: *cql.Client, query_id: []const u
     const result_allocator = &result_arena.allocator;
 
     // We want query diagonistics in case of failure.
-    var diags = cql.QueryOptions.Diagnostics{};
-    var options = cql.QueryOptions{
+    var diags = cql.Client.QueryOptions.Diagnostics{};
+    var options = cql.Client.QueryOptions{
         .diags = &diags,
     };
 
@@ -143,8 +143,8 @@ fn doPrepareOnceThenExec(allocator: *mem.Allocator, client: *cql.Client, n: usiz
 
 fn doInsert(allocator: *mem.Allocator, client: *cql.Client, n: usize) !void {
     // We want query diagonistics in case of failure.
-    var diags = cql.QueryOptions.Diagnostics{};
-    var options = cql.QueryOptions{
+    var diags = cql.Client.QueryOptions.Diagnostics{};
+    var options = cql.Client.QueryOptions{
         .diags = &diags,
     };
 
@@ -337,7 +337,7 @@ pub fn main() anyerror!void {
     // The struct InitOptions can be used to control some aspects of the CQL client,
     // such as the protocol version, if compression is enabled, etc.
 
-    var init_options = cql.InitOptions{};
+    var init_options = cql.Connection.InitOptions{};
     init_options.protocol_version = cql.ProtocolVersion{ .version = try findArg(u8, args, "protocol_version", 4) };
     init_options.compression = blk: {
         const tmp = try findArg(?[]const u8, args, "compression", null);
@@ -349,10 +349,11 @@ pub fn main() anyerror!void {
 
     // Additionally a Diagnostics struct can be provided.
     // If initialization fails for some reason, this struct will be populated.
-    var init_diags = cql.InitOptions.Diagnostics{};
+    var init_diags = cql.Connection.InitOptions.Diagnostics{};
     init_options.diags = &init_diags;
-    var client: cql.Client = undefined;
-    client.initIp4(allocator, address, init_options) catch |err| switch (err) {
+
+    var connection: cql.Connection = undefined;
+    connection.initIp4(allocator, address, init_options) catch |err| switch (err) {
         error.NoUsername, error.NoPassword => {
             std.debug.panic("the server requires authentication, please set the username and password", .{});
         },
@@ -364,15 +365,18 @@ pub fn main() anyerror!void {
         },
         else => return err,
     };
-    defer client.close();
+    defer connection.close();
+
+    var client = cql.Client.initWithConnection(allocator, &connection, .{});
+    defer client.deinit();
 
     // Try to create the keyspace and table.
     {
         var arena = std.heap.ArenaAllocator.init(allocator);
         defer arena.deinit();
 
-        var options = cql.QueryOptions{};
-        var diags = cql.QueryOptions.Diagnostics{};
+        var options = cql.Client.QueryOptions{};
+        var diags = cql.Client.QueryOptions.Diagnostics{};
         options.diags = &diags;
 
         inline for (casstest.DDL) |query| {

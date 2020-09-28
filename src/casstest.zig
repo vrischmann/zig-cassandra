@@ -4,6 +4,7 @@ const mem = std.mem;
 
 usingnamespace @import("primitive_types.zig");
 usingnamespace @import("iterator.zig");
+usingnamespace @import("connection.zig");
 usingnamespace @import("client.zig");
 
 const testing = @import("testing.zig");
@@ -71,11 +72,14 @@ pub const Harness = struct {
     positive_varint: big.int.Managed = undefined,
     negative_varint: big.int.Managed = undefined,
 
-    client: *Client,
+    connection: Connection,
+    client: Client,
 
     pub fn init(allocator: *mem.Allocator, compression_algorithm: ?CompressionAlgorithm, protocol_version: ?ProtocolVersion) !Self {
         var self: Self = undefined;
         self.allocator = allocator;
+        self.connection = undefined;
+        self.client = undefined;
 
         // Create the varints.
 
@@ -88,33 +92,32 @@ pub const Harness = struct {
 
         var address = std.net.Address.initIp4([_]u8{ 127, 0, 0, 1 }, 9042);
 
-        var init_options = InitOptions{};
+        var init_options = Connection.InitOptions{};
         init_options.protocol_version = protocol_version orelse ProtocolVersion{ .version = @as(u8, 4) };
         init_options.compression = compression_algorithm;
         init_options.username = "cassandra";
         init_options.password = "cassandra";
+        var init_diags = Connection.InitOptions.Diagnostics{};
+        init_options.diags = &init_diags;
 
         std.debug.print("protocol version provided: {} (using {}) compression algorithm: {}\n", .{ protocol_version, init_options.protocol_version, compression_algorithm });
 
-        var init_diags = InitOptions.Diagnostics{};
-        init_options.diags = &init_diags;
-
-        self.client = try allocator.create(Client);
-        errdefer allocator.destroy(self.client);
-        self.client.initIp4(allocator, address, init_options) catch |err| switch (err) {
+        self.connection.initIp4(allocator, address, init_options) catch |err| switch (err) {
             error.HandshakeFailed => {
                 std.debug.panic("unable to handhsake, error: {}", .{init_diags.message});
             },
             else => return err,
         };
 
+        self.client = Client.initWithConnection(allocator, &self.connection, .{});
+
         // Create the keyspace and tables if necessary.
 
         inline for (DDL) |query| {
-            _ = try self.client.query(allocator, QueryOptions{}, query, .{});
+            _ = try self.client.query(allocator, .{}, query, .{});
         }
         inline for (Truncate) |query| {
-            _ = try self.client.query(allocator, QueryOptions{}, query, .{});
+            _ = try self.client.query(allocator, .{}, query, .{});
         }
 
         return self;
@@ -123,15 +126,16 @@ pub const Harness = struct {
     pub fn deinit(self: *Self) void {
         self.positive_varint.deinit();
         self.negative_varint.deinit();
-        self.client.close();
+        self.client.deinit();
+        self.connection.close();
     }
 
     pub fn insertTestData(self: *Self, comptime table: Table, n: usize) !void {
         var buffer: [16384]u8 = undefined;
         var fba = std.heap.FixedBufferAllocator.init(&buffer);
 
-        var options = QueryOptions{};
-        var diags = QueryOptions.Diagnostics{};
+        var options = Client.QueryOptions{};
+        var diags = Client.QueryOptions.Diagnostics{};
         options.diags = &diags;
 
         switch (table) {
@@ -222,8 +226,8 @@ pub const Harness = struct {
         var arena = std.heap.ArenaAllocator.init(self.allocator);
         defer arena.deinit();
 
-        var diags = QueryOptions.Diagnostics{};
-        var options = QueryOptions{
+        var diags = Client.QueryOptions.Diagnostics{};
+        var options = Client.QueryOptions{
             .diags = &diags,
         };
 
