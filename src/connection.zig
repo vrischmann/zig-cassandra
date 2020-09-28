@@ -121,8 +121,8 @@ pub const Connection = struct {
         self.buffered_writer = BufferedWriterType{ .unbuffered_writer = self.socket.writer() };
 
         if (std.io.is_async) {
-            self.read_lock = std.event.Lock.init();
-            self.write_lock = std.event.Lock.init();
+            self.read_lock = std.event.Lock{};
+            self.write_lock = std.event.Lock{};
         }
 
         self.raw_frame_reader = RawFrameReaderType.init(self.buffered_reader.reader());
@@ -259,9 +259,7 @@ pub const Connection = struct {
         if (std.io.is_async) {
             heldWriteLock = self.write_lock.acquire();
         }
-        defer if (std.io.is_async) {
-            heldWriteLock.release();
-        };
+        defer if (std.io.is_async) heldWriteLock.release();
 
         // Reset primitive writer
         // TODO(vincent): for async we probably should do something else for the primitive writer.
