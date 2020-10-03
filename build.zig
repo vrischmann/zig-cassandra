@@ -15,11 +15,7 @@ fn linkSnappy(obj: *std.build.LibExeObjStep) void {
 }
 
 pub fn build(b: *Builder) !void {
-    var target = b.standardTargetOptions(.{
-        .default_target = .{
-            .abi = .musl,
-        },
-    });
+    var target = b.standardTargetOptions(.{});
 
     const mode = b.standardReleaseOptions();
 
