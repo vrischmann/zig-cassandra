@@ -1,8 +1,4 @@
 const std = @import("std");
-const mem = std.mem;
-const meta = std.meta;
-const net = std.net;
-const ArrayList = std.ArrayList;
 
 pub const ProtocolVersion = @import("primitive_types.zig").ProtocolVersion;
 pub const CompressionAlgorithm = @import("primitive_types.zig").CompressionAlgorithm;
