@@ -292,7 +292,7 @@ pub const Client = struct {
         // If not compatible we produce a diagnostic.
         {
             const prepared = ps_metadata.column_specs;
-            const computed = option_ids.span();
+            const computed = option_ids.getItems();
 
             if (prepared.len != computed.len) {
                 diags.execute.not_enough_args = true;
@@ -498,7 +498,7 @@ const OptionIDArrayList = struct {
         self.pos += 1;
     }
 
-    pub fn span(self: *Self) []?OptionID {
+    pub fn getItems(self: *Self) []?OptionID {
         return self.items[0..self.pos];
     }
 };
@@ -509,7 +509,7 @@ test "option id array list" {
     try option_ids.append(.Tinyint);
     try option_ids.append(.Smallint);
 
-    const items = option_ids.span();
+    const items = option_ids.getItems();
     testing.expectEqual(@as(usize, 2), items.len);
     testing.expectEqual(OptionID.Tinyint, items[0].?);
     testing.expectEqual(OptionID.Smallint, items[1].?);
@@ -752,8 +752,8 @@ test "compute values: ints" {
         .u_bigint_ptr = &my_u64,
     });
 
-    var v = values.span();
-    var o = options.span();
+    var v = values.items;
+    var o = options.getItems();
 
     testing.expectEqual(@as(usize, 9), v.len);
     testing.expectEqual(@as(usize, 9), o.len);
@@ -798,8 +798,8 @@ test "compute values: floats" {
         .f64_ptr = &my_f64,
     });
 
-    var v = values.span();
-    var o = options.span();
+    var v = values.items;
+    var o = options.getItems();
 
     testing.expectEqual(@as(usize, 3), v.len);
     testing.expectEqual(@as(usize, 3), o.len);
@@ -824,8 +824,8 @@ test "compute values: strings" {
         .string = @as([]const u8, try mem.dupe(allocator, u8, "foobar")),
     });
 
-    var v = values.span();
-    var o = options.span();
+    var v = values.items;
+    var o = options.getItems();
 
     testing.expectEqual(@as(usize, 1), v.len);
     testing.expectEqual(@as(usize, 1), o.len);
@@ -847,8 +847,8 @@ test "compute values: bool" {
         .bool2 = false,
     });
 
-    var v = values.span();
-    var o = options.span();
+    var v = values.items;
+    var o = options.getItems();
 
     testing.expectEqual(@as(usize, 2), v.len);
     testing.expectEqual(@as(usize, 2), o.len);
@@ -872,8 +872,8 @@ test "compute values: set/list" {
         .string2 = @as([]const u16, &[_]u16{ 0x01, 0x2050 }),
     });
 
-    var v = values.span();
-    var o = options.span();
+    var v = values.items;
+    var o = options.getItems();
 
     testing.expectEqual(@as(usize, 2), v.len);
     testing.expectEqual(@as(usize, 2), o.len);
@@ -902,8 +902,8 @@ test "compute values: uuid" {
         },
     });
 
-    var v = values.span();
-    var o = options.span();
+    var v = values.items;
+    var o = options.getItems();
 
     testing.expectEqual(@as(usize, 1), v.len);
     testing.expectEqual(@as(usize, 1), o.len);
@@ -930,8 +930,8 @@ test "compute values: not set and null" {
         .nullable = null,
     });
 
-    var v = values.span();
-    var o = options.span();
+    var v = values.items;
+    var o = options.getItems();
 
     testing.expectEqual(@as(usize, 2), v.len);
     testing.expectEqual(@as(usize, 2), o.len);

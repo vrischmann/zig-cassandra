@@ -27,7 +27,7 @@ pub const PrimitiveWriter = struct {
     }
 
     pub fn getWritten(self: *Self) []u8 {
-        return self.wbuf.span();
+        return self.wbuf.items;
     }
 
     /// Write either a short, a int or a long to the buffer.
