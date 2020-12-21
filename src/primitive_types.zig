@@ -87,6 +87,16 @@ pub const ProtocolVersion = packed struct {
 
     version: u8,
 
+    pub fn init(b: u8) !Self {
+        var res = Self{
+            .version = b,
+        };
+        if ((res.version & 0x7) < 3 or (res.version & 0x7) > 5) {
+            return error.InvalidProtocolVersion;
+        }
+        return res;
+    }
+
     pub fn is(self: Self, comptime version: comptime_int) bool {
         return self.version & 0x7 == @as(u8, version);
     }
@@ -121,17 +131,6 @@ pub const ProtocolVersion = packed struct {
         } else if (self.is(5)) {
             return "5/v5-beta";
         } else {
-            return error.InvalidProtocolVersion;
-        }
-    }
-
-    pub fn serialize(self: @This(), serializer: anytype) !void {
-        return serializer.serialize(self.version);
-    }
-
-    pub fn deserialize(self: *@This(), deserializer: anytype) !void {
-        self.version = try deserializer.deserialize(u8);
-        if ((self.version & 0x7) < 3 or (self.version & 0x7) > 5) {
             return error.InvalidProtocolVersion;
         }
     }
@@ -275,14 +274,11 @@ test "protocol version: serialize and deserialize" {
     inline for (testCases) |tc| {
         var version: ProtocolVersion = undefined;
 
-        var in = std.io.fixedBufferStream(&tc.b);
-
-        var d = std.io.deserializer(std.builtin.Endian.Big, std.io.Packing.Byte, in.reader());
         if (tc.err) |err| {
-            testing.expectError(err, d.deserialize(ProtocolVersion));
+            testing.expectError(err, ProtocolVersion.init(tc.b[0]));
         } else {
-            var v1 = try d.deserialize(ProtocolVersion);
-            var v2 = try d.deserialize(ProtocolVersion);
+            var v1 = try ProtocolVersion.init(tc.b[0]);
+            var v2 = try ProtocolVersion.init(tc.b[1]);
             testing.expect(v1.is(tc.exp));
             testing.expect(v1.isRequest());
             testing.expect(v2.isResponse());

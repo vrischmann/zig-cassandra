@@ -25,6 +25,23 @@ pub const FrameHeader = packed struct {
     stream: i16,
     opcode: Opcode,
     body_len: u32,
+
+    pub fn init(comptime ReaderType: type, in: ReaderType) !FrameHeader {
+        var buf: [@sizeOf(FrameHeader)]u8 = undefined;
+
+        const read = try in.readAll(&buf);
+        if (read != @sizeOf(FrameHeader)) {
+            return error.UnexpectedEOF;
+        }
+
+        return FrameHeader{
+            .version = try ProtocolVersion.init(buf[0]),
+            .flags = buf[1],
+            .stream = mem.readIntBig(i16, @ptrCast(*[2]u8, buf[2..4])),
+            .opcode = @intToEnum(Opcode, buf[4]),
+            .body_len = mem.readIntBig(u32, @ptrCast(*[4]u8, buf[5..9])),
+        };
+    }
 };
 
 pub const RawFrame = struct {
@@ -134,8 +151,9 @@ test "frame header: read and write" {
 
     // deserialize the header
 
-    var deserializer = io.deserializer(.Big, io.Packing.Bit, fbs.reader());
-    const header = try deserializer.deserialize(FrameHeader);
+    var reader = fbs.reader();
+
+    const header = try FrameHeader.init(@TypeOf(reader), fbs.reader());
     testing.expect(header.version.is(4));
     testing.expect(header.version.isRequest());
     testing.expectEqual(@as(u8, 0), header.flags);
@@ -143,16 +161,6 @@ test "frame header: read and write" {
     testing.expectEqual(Opcode.Options, header.opcode);
     testing.expectEqual(@as(u32, 0), header.body_len);
     testing.expectEqual(@as(usize, 0), exp.len - @sizeOf(FrameHeader));
-
-    // reserialize it
-
-    var new_buf: [32]u8 = undefined;
-    var new_fbs = io.fixedBufferStream(&new_buf);
-
-    var serializer = io.serializer(.Big, io.Packing.Bit, new_fbs.writer());
-    _ = try serializer.serialize(header);
-
-    testing.expectEqualSlices(u8, exp, new_fbs.getWritten());
 }
 
 test "" {
