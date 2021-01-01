@@ -93,13 +93,10 @@ pub const Iterator = struct {
         inline for (@typeInfo(child).Struct.fields) |struct_field, _i| {
             const i = @as(usize, _i);
 
-            const field_type_info = @typeInfo(struct_field.field_type);
-            const field_name = struct_field.name;
-
             const column_spec = self.metadata.column_specs[i];
             const column_data = self.rows[self.pos].slice[i];
 
-            @field(args, field_name) = try self.readType(allocator, diags, column_spec, column_data.slice, struct_field.field_type);
+            @field(args, struct_field.name) = try self.readType(allocator, diags, column_spec, column_data.slice, struct_field.field_type);
         }
 
         self.pos += 1;
