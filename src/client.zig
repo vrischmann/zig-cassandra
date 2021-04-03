@@ -91,7 +91,7 @@ pub const Client = struct {
                         }
                     }
                     if (value.first_incompatible_arg) |v| {
-                        try std.fmt.format(fbw, "first incompatible arg: {{position: {}, prepared: (name: {}, type: {}), argument: {}}}", .{
+                        try std.fmt.format(fbw, "first incompatible arg: {{position: {}, prepared: (name: {s}, type: {}), argument: {}}}", .{
                             v.position,
                             v.prepared.name,
                             v.prepared.option,
@@ -458,7 +458,7 @@ test "client: insert then query" {
 
                 var it2 = mem.tokenize(token, ":");
                 const key = it2.next() orelse continue;
-                const value = it2.next() orelse std.debug.panic("invalid token {}\n", .{token});
+                const value = it2.next() orelse std.debug.panic("invalid token {s}\n", .{token});
 
                 if (mem.eql(u8, "compression", key)) {
                     self.compression = try CompressionAlgorithm.fromString(value);

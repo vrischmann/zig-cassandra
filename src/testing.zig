@@ -103,8 +103,8 @@ pub fn expectSameRawFrame(frame: anytype, header: FrameHeader, exp: []const u8) 
     };
 
     if (!std.mem.eql(u8, exp, source.buffer.getWritten())) {
-        printHRBytes("\n==> exp   : {}\n", exp, .{});
-        printHRBytes("==> source: {}\n", source.buffer.getWritten(), .{});
+        printHRBytes("\n==> exp   : {s}\n", exp, .{});
+        printHRBytes("==> source: {s}\n", source.buffer.getWritten(), .{});
         std.debug.panic("frames are different\n", .{});
     }
 }
