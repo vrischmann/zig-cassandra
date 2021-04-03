@@ -103,7 +103,7 @@ pub const Harness = struct {
 
         self.connection.initIp4(allocator, address, init_options) catch |err| switch (err) {
             error.HandshakeFailed => {
-                std.debug.panic("unable to handhsake, error: {}", .{init_diags.message});
+                std.debug.panic("unable to handhsake, error: {s}", .{init_diags.message});
             },
             else => return err,
         };
@@ -144,7 +144,7 @@ pub const Harness = struct {
                     Args.AgeToIDs{},
                 ) catch |err| switch (err) {
                     error.QueryPreparationFailed => {
-                        std.debug.panic("query preparation failed, received cassandra error: {}\n", .{diags.message});
+                        std.debug.panic("query preparation failed, received cassandra error: {s}\n", .{diags.message});
                     },
                     else => return err,
                 };
@@ -169,7 +169,7 @@ pub const Harness = struct {
                         },
                     ) catch |err| switch (err) {
                         error.QueryExecutionFailed => {
-                            std.debug.panic("query execution failed, received cassandra error: {}\n", .{diags.message});
+                            std.debug.panic("query execution failed, received cassandra error: {s}\n", .{diags.message});
                         },
                         else => return err,
                     };
@@ -184,7 +184,7 @@ pub const Harness = struct {
                     Args.User{},
                 ) catch |err| switch (err) {
                     error.QueryPreparationFailed => {
-                        std.debug.panic("query preparation failed, received cassandra error: {}\n", .{diags.message});
+                        std.debug.panic("query preparation failed, received cassandra error: {s}\n", .{diags.message});
                     },
                     else => return err,
                 };
@@ -203,7 +203,7 @@ pub const Harness = struct {
                         },
                     ) catch |err| switch (err) {
                         error.QueryExecutionFailed => {
-                            std.debug.panic("query preparation failed, received cassandra error: {}\n", .{diags.message});
+                            std.debug.panic("query preparation failed, received cassandra error: {s}\n", .{diags.message});
                         },
                         else => return err,
                     };
@@ -230,7 +230,7 @@ pub const Harness = struct {
 
         var iter = (self.client.query(&arena.allocator, options, query, args) catch |err| switch (err) {
             error.QueryExecutionFailed => {
-                std.debug.panic("query preparation failed, received cassandra error: {}\n", .{diags.message});
+                std.debug.panic("query preparation failed, received cassandra error: {s}\n", .{diags.message});
             },
             else => return err,
         }).?;
@@ -254,7 +254,7 @@ pub const Harness = struct {
                     const im = iter_diags.incompatible_metadata;
                     const it = im.incompatible_types;
                     if (it.cql_type_name != null and it.native_type_name != null) {
-                        std.debug.panic("metadata incompatible. CQL type {} can't be scanned into native type {}\n", .{
+                        std.debug.panic("metadata incompatible. CQL type {s} can't be scanned into native type {s}\n", .{
                             it.cql_type_name, it.native_type_name,
                         });
                     } else {

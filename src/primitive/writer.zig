@@ -102,10 +102,11 @@ pub const PrimitiveWriter = struct {
         };
     }
 
-    pub inline fn writeInetaddr(self: *Self, inet: net.Address) !void {
+    pub fn writeInetaddr(self: *Self, inet: net.Address) callconv(.Inline) !void {
         return self.writeInetGeneric(inet, false);
     }
-    pub inline fn writeInet(self: *Self, inet: net.Address) !void {
+
+    pub fn writeInet(self: *Self, inet: net.Address) callconv(.Inline) !void {
         return self.writeInetGeneric(inet, true);
     }
 

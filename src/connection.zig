@@ -79,8 +79,8 @@ pub const Connection = struct {
         };
     };
 
-    const BufferedReaderType = io.BufferedReader(4096, std.fs.File.Reader);
-    const BufferedWriterType = io.BufferedWriter(4096, std.fs.File.Writer);
+    const BufferedReaderType = io.BufferedReader(4096, std.net.Stream.Reader);
+    const BufferedWriterType = io.BufferedWriter(4096, std.net.Stream.Writer);
 
     const RawFrameReaderType = RawFrameReader(BufferedReaderType.Reader);
     const RawFrameWriterType = RawFrameWriter(BufferedWriterType.Writer);
@@ -93,7 +93,7 @@ pub const Connection = struct {
     allocator: *mem.Allocator,
     options: InitOptions,
 
-    socket: std.fs.File,
+    socket: std.net.Stream,
 
     buffered_reader: BufferedReaderType,
     buffered_writer: BufferedWriterType,
@@ -216,7 +216,7 @@ pub const Connection = struct {
         // Write AUTH_RESPONSE
         {
             var buf: [512]u8 = undefined;
-            const token = try std.fmt.bufPrint(&buf, "\x00{}\x00{}", .{ self.options.username.?, self.options.password.? });
+            const token = try std.fmt.bufPrint(&buf, "\x00{s}\x00{s}", .{ self.options.username.?, self.options.password.? });
             var frame = AuthResponseFrame{ .token = token };
 
             try self.writeFrame(allocator, .{

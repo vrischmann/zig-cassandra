@@ -90,12 +90,12 @@ fn doPrepare(allocator: *mem.Allocator, client: *cql.Client) ![]const u8 {
         },
     ) catch |err| switch (err) {
         error.QueryPreparationFailed => {
-            std.debug.panic("query preparation failed, received cassandra error: {}\n", .{diags.message});
+            std.debug.panic("query preparation failed, received cassandra error: {s}\n", .{diags.message});
         },
         else => return err,
     };
 
-    log.info("prepared query id is {x}", .{query_id});
+    log.info("prepared query id is {s}", .{std.fmt.fmtSliceHexLower(query_id)});
 
     return query_id;
 }
@@ -155,7 +155,7 @@ fn doInsert(allocator: *mem.Allocator, client: *cql.Client, n: usize) !void {
         casstest.Args.AgeToIDs{},
     ) catch |err| switch (err) {
         error.QueryPreparationFailed => {
-            std.debug.panic("query preparation failed, received cassandra error: {}\n", .{diags.message});
+            std.debug.panic("query preparation failed, received cassandra error: {s}\n", .{diags.message});
         },
         else => return err,
     };
@@ -190,10 +190,10 @@ fn doInsert(allocator: *mem.Allocator, client: *cql.Client, n: usize) !void {
             args,
         ) catch |err| switch (err) {
             error.QueryExecutionFailed => {
-                log.warn("error message: {}\n", .{diags.message});
+                log.warn("error message: {s}\n", .{diags.message});
             },
             error.InvalidPreparedStatementExecuteArgs => {
-                log.warn("execute diags: ({})\n", .{diags.execute});
+                log.warn("execute diags: ({s})\n", .{diags.execute});
             },
             else => |e| return e,
         };
@@ -237,7 +237,7 @@ fn iterate(allocator: *mem.Allocator, iter: *cql.Iterator) !usize {
                 const im = iter_diags.incompatible_metadata;
                 const it = im.incompatible_types;
                 if (it.cql_type_name != null and it.native_type_name != null) {
-                    std.debug.panic("metadata incompatible. CQL type {} can't be scanned into native type {}\n", .{
+                    std.debug.panic("metadata incompatible. CQL type {s} can't be scanned into native type {s}\n", .{
                         it.cql_type_name, it.native_type_name,
                     });
                 } else {
@@ -255,7 +255,7 @@ fn iterate(allocator: *mem.Allocator, iter: *cql.Iterator) !usize {
 
         const ids = IDs{ .slice = row.ids };
 
-        std.debug.print("age: {} id: {} name: {} balance: {}\n", .{ row.age, ids, row.name, row.balance });
+        std.debug.print("age: {} id: {} name: {s} balance: {}\n", .{ row.age, ids, row.name, row.balance });
     }
 
     return count;
@@ -358,10 +358,10 @@ pub fn main() anyerror!void {
             std.debug.panic("the server requires authentication, please set the username and password", .{});
         },
         error.AuthenticationFailed => {
-            std.debug.panic("server authentication failed, error was: {}", .{init_diags.message});
+            std.debug.panic("server authentication failed, error was: {s}", .{init_diags.message});
         },
         error.HandshakeFailed => {
-            std.debug.panic("server handshake failed, error was: {}", .{init_diags.message});
+            std.debug.panic("server handshake failed, error was: {s}", .{init_diags.message});
         },
         else => return err,
     };
@@ -393,7 +393,7 @@ pub fn main() anyerror!void {
         _ = try doPrepare(allocator, &client);
     } else if (mem.eql(u8, cmd, "insert")) {
         if (args.len < 3) {
-            try std.fmt.format(stderr, "Usage: {} insert <iterations>\n", .{args[0]});
+            try std.fmt.format(stderr, "Usage: {s} insert <iterations>\n", .{args[0]});
             std.process.exit(1);
         }
 
@@ -402,7 +402,7 @@ pub fn main() anyerror!void {
         return doInsert(allocator, &client, n);
     } else if (mem.eql(u8, cmd, "prepare-then-exec")) {
         if (args.len < 3) {
-            try std.fmt.format(stderr, "Usage: {} prepared-then-exec <iterations>\n", .{args[0]});
+            try std.fmt.format(stderr, "Usage: {s} prepared-then-exec <iterations>\n", .{args[0]});
             std.process.exit(1);
         }
 
@@ -411,7 +411,7 @@ pub fn main() anyerror!void {
         return doPrepareThenExec(allocator, &client, n);
     } else if (mem.eql(u8, cmd, "prepare-once-then-exec")) {
         if (args.len < 3) {
-            try std.fmt.format(stderr, "Usage: {} prepared-then-exec <iterations>\n", .{args[0]});
+            try std.fmt.format(stderr, "Usage: {s} prepared-then-exec <iterations>\n", .{args[0]});
             std.process.exit(1);
         }
 

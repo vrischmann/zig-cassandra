@@ -135,12 +135,10 @@ pub const PrimitiveReader = struct {
         // TODO(vincent): implement this for uvint and vint
         unreachable;
     }
-
-    pub inline fn readInetaddr(self: *Self) !net.Address {
+    pub fn readInetaddr(self: *Self) callconv(.Inline) !net.Address {
         return self.readInetGeneric(false);
     }
-
-    pub inline fn readInet(self: *Self) !net.Address {
+    pub fn readInet(self: *Self) callconv(.Inline) !net.Address {
         return self.readInetGeneric(true);
     }
 
