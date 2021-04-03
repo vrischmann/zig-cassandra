@@ -74,6 +74,10 @@ pub fn fromBytes(allocator: *mem.Allocator, data: []const u8) !big.int.Managed {
         return n;
     }
 
+    // NOTE(vincent): we have to make a new big.int.Managed to return
+    // because we can't use n to make the subtraction.
+    defer n.deinit();
+
     const shift = data.len * 8;
     // Capacity is:
     // * one for the 1 big.int
@@ -89,10 +93,11 @@ pub fn fromBytes(allocator: *mem.Allocator, data: []const u8) !big.int.Managed {
     // 1 << shift
     tmp_mutable.shiftLeft(big_one, shift);
 
-    // n = n - (1 << shift)
-    try n.sub(n.toConst(), tmp_mutable.toConst());
+    // res = n - (1 << shift)
+    var res = try big.int.Managed.init(allocator);
+    try res.sub(n.toConst(), tmp_mutable.toConst());
 
-    return n;
+    return res;
 }
 
 /// rawBytes encodes n into buf and returns the number of bytes written.
