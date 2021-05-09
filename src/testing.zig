@@ -3,6 +3,7 @@ const io = std.io;
 
 pub const allocator = std.testing.allocator;
 pub const expect = std.testing.expect;
+pub const expectApproxEqAbs = std.testing.expectApproxEqAbs;
 pub const expectError = std.testing.expectError;
 pub const expectEqual = std.testing.expectEqual;
 pub const expectEqualSlices = std.testing.expectEqualSlices;
@@ -13,13 +14,6 @@ const FrameHeader = @import("frame.zig").FrameHeader;
 const RawFrame = @import("frame.zig").RawFrame;
 const RawFrameReader = @import("frame.zig").RawFrameReader;
 const RawFrameWriter = @import("frame.zig").RawFrameWriter;
-
-pub fn expectInDelta(a: anytype, b: anytype, delta: @TypeOf(a)) void {
-    const dt = a - b;
-    if (dt < -delta or dt > delta) {
-        std.debug.panic("expected a {e} to be within {e} of b {}, but got {e}", .{ a, delta, b, dt });
-    }
-}
 
 pub fn printHRBytes(comptime fmt: []const u8, exp: []const u8, args: anytype) void {
     const hextable = "0123456789abcdef";

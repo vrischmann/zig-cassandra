@@ -819,7 +819,7 @@ test "iterator scan: f64" {
 
         try testIteratorScan(&arena.allocator, column_specs, test_data, null, &row);
 
-        testing.expectInDelta(@as(f64, 2.03), row.f_64, 0.000001);
+        try testing.expectApproxEqAbs(@as(f64, 2.03), row.f_64, 0.000001);
     }
 
     {
@@ -828,7 +828,7 @@ test "iterator scan: f64" {
 
         try testIteratorScan(&arena.allocator, column_specs, test_data, null, &row);
 
-        testing.expectInDelta(@as(f64, 45202.00024), row.f_64, 0.000001);
+        try testing.expectApproxEqAbs(@as(f64, 45202.00024), row.f_64, 0.000001);
     }
 }
 
@@ -847,7 +847,7 @@ test "iterator scan: f128" {
 
         try testIteratorScan(&arena.allocator, column_specs, test_data, null, &row);
 
-        testing.expectInDelta(@as(f128, 2.03), row.f_128, 0.000001);
+        try testing.expectApproxEqAbs(@as(f128, 2.03), row.f_128, 0.000001);
     }
 
     {
@@ -856,7 +856,7 @@ test "iterator scan: f128" {
 
         try testIteratorScan(&arena.allocator, column_specs, test_data, null, &row);
 
-        testing.expectInDelta(@as(f128, 45202.00024), row.f_128, 0.000001);
+        try testing.expectApproxEqAbs(@as(f128, 45202.00024), row.f_128, 0.000001);
     }
 }
 
