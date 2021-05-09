@@ -20,5 +20,5 @@ test "options frame" {
     const data = "\x04\x00\x00\x05\x05\x00\x00\x00\x00";
     const raw_frame = try testing.readRawFrame(&arena.allocator, data);
 
-    checkHeader(Opcode.Options, data.len, raw_frame.header);
+    try checkHeader(Opcode.Options, data.len, raw_frame.header);
 }

@@ -127,10 +127,10 @@ test "map" {
         _ = try m.put(k2, v3);
     }
 
-    testing.expectEqual(@as(usize, 2), m.count());
+    try testing.expectEqual(@as(usize, 2), m.count());
 
-    testing.expectEqualStrings("heo", m.getEntry("foo").?.value);
-    testing.expectEqualStrings("baz", m.getEntry("bar").?.value);
+    try testing.expectEqualStrings("heo", m.getEntry("foo").?.value);
+    try testing.expectEqualStrings("baz", m.getEntry("bar").?.value);
 }
 
 test "multimap" {
@@ -154,22 +154,22 @@ test "multimap" {
         _ = try m.put(k2, v2);
     }
 
-    testing.expectEqual(@as(usize, 2), m.count());
+    try testing.expectEqual(@as(usize, 2), m.count());
 
     var it = m.iterator();
     while (it.next()) |entry| {
-        testing.expect(std.mem.eql(u8, "foo", entry.key) or std.mem.eql(u8, "fou", entry.key));
+        try testing.expect(std.mem.eql(u8, "foo", entry.key) or std.mem.eql(u8, "fou", entry.key));
 
         const slice = entry.value;
-        testing.expectEqualStrings("bar", slice[0]);
-        testing.expectEqualStrings("baz", slice[1]);
+        try testing.expectEqualStrings("bar", slice[0]);
+        try testing.expectEqualStrings("baz", slice[1]);
     }
 
     const slice = m.get("foo").?;
-    testing.expectEqualStrings("bar", slice[0]);
-    testing.expectEqualStrings("baz", slice[1]);
+    try testing.expectEqualStrings("bar", slice[0]);
+    try testing.expectEqualStrings("baz", slice[1]);
 
     const slice2 = m.get("fou").?;
-    testing.expectEqualStrings("bar", slice[0]);
-    testing.expectEqualStrings("baz", slice[1]);
+    try testing.expectEqualStrings("bar", slice[0]);
+    try testing.expectEqualStrings("baz", slice[1]);
 }

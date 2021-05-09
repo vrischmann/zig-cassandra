@@ -193,15 +193,15 @@ test "error frame: invalid query, no keyspace specified" {
     const data = "\x84\x00\x00\x02\x00\x00\x00\x00\x5e\x00\x00\x22\x00\x00\x58\x4e\x6f\x20\x6b\x65\x79\x73\x70\x61\x63\x65\x20\x68\x61\x73\x20\x62\x65\x65\x6e\x20\x73\x70\x65\x63\x69\x66\x69\x65\x64\x2e\x20\x55\x53\x45\x20\x61\x20\x6b\x65\x79\x73\x70\x61\x63\x65\x2c\x20\x6f\x72\x20\x65\x78\x70\x6c\x69\x63\x69\x74\x6c\x79\x20\x73\x70\x65\x63\x69\x66\x79\x20\x6b\x65\x79\x73\x70\x61\x63\x65\x2e\x74\x61\x62\x6c\x65\x6e\x61\x6d\x65";
     const raw_frame = try testing.readRawFrame(&arena.allocator, data);
 
-    checkHeader(Opcode.Error, data.len, raw_frame.header);
+    try checkHeader(Opcode.Error, data.len, raw_frame.header);
 
     var pr = PrimitiveReader.init();
     pr.reset(raw_frame.body);
 
     const frame = try ErrorFrame.read(&arena.allocator, &pr);
 
-    testing.expectEqual(ErrorCode.InvalidQuery, frame.error_code);
-    testing.expectEqualStrings("No keyspace has been specified. USE a keyspace, or explicitly specify keyspace.tablename", frame.message);
+    try testing.expectEqual(ErrorCode.InvalidQuery, frame.error_code);
+    try testing.expectEqualStrings("No keyspace has been specified. USE a keyspace, or explicitly specify keyspace.tablename", frame.message);
 }
 
 test "error frame: already exists" {
@@ -211,18 +211,18 @@ test "error frame: already exists" {
     const data = "\x84\x00\x00\x23\x00\x00\x00\x00\x53\x00\x00\x24\x00\x00\x3e\x43\x61\x6e\x6e\x6f\x74\x20\x61\x64\x64\x20\x61\x6c\x72\x65\x61\x64\x79\x20\x65\x78\x69\x73\x74\x69\x6e\x67\x20\x74\x61\x62\x6c\x65\x20\x22\x68\x65\x6c\x6c\x6f\x22\x20\x74\x6f\x20\x6b\x65\x79\x73\x70\x61\x63\x65\x20\x22\x66\x6f\x6f\x62\x61\x72\x22\x00\x06\x66\x6f\x6f\x62\x61\x72\x00\x05\x68\x65\x6c\x6c\x6f";
     const raw_frame = try testing.readRawFrame(&arena.allocator, data);
 
-    checkHeader(Opcode.Error, data.len, raw_frame.header);
+    try checkHeader(Opcode.Error, data.len, raw_frame.header);
 
     var pr = PrimitiveReader.init();
     pr.reset(raw_frame.body);
 
     const frame = try ErrorFrame.read(&arena.allocator, &pr);
 
-    testing.expectEqual(ErrorCode.AlreadyExists, frame.error_code);
-    testing.expectEqualStrings("Cannot add already existing table \"hello\" to keyspace \"foobar\"", frame.message);
+    try testing.expectEqual(ErrorCode.AlreadyExists, frame.error_code);
+    try testing.expectEqualStrings("Cannot add already existing table \"hello\" to keyspace \"foobar\"", frame.message);
     const already_exists_error = frame.already_exists.?;
-    testing.expectEqualStrings("foobar", already_exists_error.keyspace);
-    testing.expectEqualStrings("hello", already_exists_error.table);
+    try testing.expectEqualStrings("foobar", already_exists_error.keyspace);
+    try testing.expectEqualStrings("hello", already_exists_error.table);
 }
 
 test "error frame: syntax error" {
@@ -232,13 +232,13 @@ test "error frame: syntax error" {
     const data = "\x84\x00\x00\x2f\x00\x00\x00\x00\x41\x00\x00\x20\x00\x00\x3b\x6c\x69\x6e\x65\x20\x32\x3a\x30\x20\x6d\x69\x73\x6d\x61\x74\x63\x68\x65\x64\x20\x69\x6e\x70\x75\x74\x20\x27\x3b\x27\x20\x65\x78\x70\x65\x63\x74\x69\x6e\x67\x20\x4b\x5f\x46\x52\x4f\x4d\x20\x28\x73\x65\x6c\x65\x63\x74\x2a\x5b\x3b\x5d\x29";
     const raw_frame = try testing.readRawFrame(&arena.allocator, data);
 
-    checkHeader(Opcode.Error, data.len, raw_frame.header);
+    try checkHeader(Opcode.Error, data.len, raw_frame.header);
 
     var pr = PrimitiveReader.init();
     pr.reset(raw_frame.body);
 
     const frame = try ErrorFrame.read(&arena.allocator, &pr);
 
-    testing.expectEqual(ErrorCode.SyntaxError, frame.error_code);
-    testing.expectEqualStrings("line 2:0 mismatched input ';' expecting K_FROM (select*[;])", frame.message);
+    try testing.expectEqual(ErrorCode.SyntaxError, frame.error_code);
+    try testing.expectEqualStrings("line 2:0 mismatched input ';' expecting K_FROM (select*[;])", frame.message);
 }

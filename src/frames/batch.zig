@@ -217,33 +217,33 @@ test "batch frame: query type string" {
     const exp = "\x04\x00\x00\xc0\x0d\x00\x00\x00\xcc\x00\x00\x03\x00\x00\x00\x00\x3b\x49\x4e\x53\x45\x52\x54\x20\x49\x4e\x54\x4f\x20\x66\x6f\x6f\x62\x61\x72\x2e\x75\x73\x65\x72\x28\x69\x64\x2c\x20\x6e\x61\x6d\x65\x29\x20\x76\x61\x6c\x75\x65\x73\x28\x75\x75\x69\x64\x28\x29\x2c\x20\x27\x76\x69\x6e\x63\x65\x6e\x74\x27\x29\x00\x00\x00\x00\x00\x00\x3b\x49\x4e\x53\x45\x52\x54\x20\x49\x4e\x54\x4f\x20\x66\x6f\x6f\x62\x61\x72\x2e\x75\x73\x65\x72\x28\x69\x64\x2c\x20\x6e\x61\x6d\x65\x29\x20\x76\x61\x6c\x75\x65\x73\x28\x75\x75\x69\x64\x28\x29\x2c\x20\x27\x76\x69\x6e\x63\x65\x6e\x74\x27\x29\x00\x00\x00\x00\x00\x00\x3b\x49\x4e\x53\x45\x52\x54\x20\x49\x4e\x54\x4f\x20\x66\x6f\x6f\x62\x61\x72\x2e\x75\x73\x65\x72\x28\x69\x64\x2c\x20\x6e\x61\x6d\x65\x29\x20\x76\x61\x6c\x75\x65\x73\x28\x75\x75\x69\x64\x28\x29\x2c\x20\x27\x76\x69\x6e\x63\x65\x6e\x74\x27\x29\x00\x00\x00\x00\x00";
     const raw_frame = try testing.readRawFrame(&arena.allocator, exp);
 
-    checkHeader(Opcode.Batch, exp.len, raw_frame.header);
+    try checkHeader(Opcode.Batch, exp.len, raw_frame.header);
 
     var pr = PrimitiveReader.init();
     pr.reset(raw_frame.body);
 
     const frame = try BatchFrame.read(&arena.allocator, raw_frame.header.version, &pr);
 
-    testing.expectEqual(BatchType.Logged, frame.batch_type);
+    try testing.expectEqual(BatchType.Logged, frame.batch_type);
 
-    testing.expectEqual(@as(usize, 3), frame.queries.len);
+    try testing.expectEqual(@as(usize, 3), frame.queries.len);
     for (frame.queries) |query| {
         const exp_query = "INSERT INTO foobar.user(id, name) values(uuid(), 'vincent')";
-        testing.expectEqualStrings(exp_query, query.query_string.?);
-        testing.expect(query.query_id == null);
-        testing.expect(query.values == .Normal);
-        testing.expectEqual(@as(usize, 0), query.values.Normal.len);
+        try testing.expectEqualStrings(exp_query, query.query_string.?);
+        try testing.expect(query.query_id == null);
+        try testing.expect(query.values == .Normal);
+        try testing.expectEqual(@as(usize, 0), query.values.Normal.len);
     }
 
-    testing.expectEqual(Consistency.Any, frame.consistency_level);
-    testing.expect(frame.serial_consistency_level == null);
-    testing.expect(frame.timestamp == null);
-    testing.expect(frame.keyspace == null);
-    testing.expect(frame.now_in_seconds == null);
+    try testing.expectEqual(Consistency.Any, frame.consistency_level);
+    try testing.expect(frame.serial_consistency_level == null);
+    try testing.expect(frame.timestamp == null);
+    try testing.expect(frame.keyspace == null);
+    try testing.expect(frame.now_in_seconds == null);
 
     // write
 
-    testing.expectSameRawFrame(frame, raw_frame.header, exp);
+    try testing.expectSameRawFrame(frame, raw_frame.header, exp);
 }
 
 test "batch frame: query type prepared" {
@@ -255,14 +255,14 @@ test "batch frame: query type prepared" {
     const exp = "\x04\x00\x01\x00\x0d\x00\x00\x00\xa2\x00\x00\x03\x01\x00\x10\x88\xb7\xd6\x81\x8b\x2d\x8d\x97\xfc\x41\xc1\x34\x7b\x27\xde\x65\x00\x02\x00\x00\x00\x10\x3a\x9a\xab\x41\x68\x24\x4a\xef\x9d\xf5\x72\xc7\x84\xab\xa2\x57\x00\x00\x00\x07\x56\x69\x6e\x63\x65\x6e\x74\x01\x00\x10\x88\xb7\xd6\x81\x8b\x2d\x8d\x97\xfc\x41\xc1\x34\x7b\x27\xde\x65\x00\x02\x00\x00\x00\x10\xed\x54\xb0\x6d\xcc\xb2\x43\x51\x96\x51\x74\x5e\xee\xae\xd2\xfe\x00\x00\x00\x07\x56\x69\x6e\x63\x65\x6e\x74\x01\x00\x10\x88\xb7\xd6\x81\x8b\x2d\x8d\x97\xfc\x41\xc1\x34\x7b\x27\xde\x65\x00\x02\x00\x00\x00\x10\x79\xdf\x8a\x28\x5a\x60\x47\x19\x9b\x42\x84\xea\x69\x10\x1a\xe6\x00\x00\x00\x07\x56\x69\x6e\x63\x65\x6e\x74\x00\x00\x00";
     const raw_frame = try testing.readRawFrame(&arena.allocator, exp);
 
-    checkHeader(Opcode.Batch, exp.len, raw_frame.header);
+    try checkHeader(Opcode.Batch, exp.len, raw_frame.header);
 
     var pr = PrimitiveReader.init();
     pr.reset(raw_frame.body);
 
     const frame = try BatchFrame.read(&arena.allocator, raw_frame.header.version, &pr);
 
-    testing.expectEqual(BatchType.Logged, frame.batch_type);
+    try testing.expectEqual(BatchType.Logged, frame.batch_type);
 
     const expUUIDs = &[_][]const u8{
         "\x3a\x9a\xab\x41\x68\x24\x4a\xef\x9d\xf5\x72\xc7\x84\xab\xa2\x57",
@@ -270,32 +270,32 @@ test "batch frame: query type prepared" {
         "\x79\xdf\x8a\x28\x5a\x60\x47\x19\x9b\x42\x84\xea\x69\x10\x1a\xe6",
     };
 
-    testing.expectEqual(@as(usize, 3), frame.queries.len);
+    try testing.expectEqual(@as(usize, 3), frame.queries.len);
     var i: usize = 0;
     for (frame.queries) |query| {
-        testing.expect(query.query_string == null);
+        try testing.expect(query.query_string == null);
         const exp_query_id = "\x88\xb7\xd6\x81\x8b\x2d\x8d\x97\xfc\x41\xc1\x34\x7b\x27\xde\x65";
-        testing.expectEqualSlices(u8, exp_query_id, query.query_id.?);
+        try testing.expectEqualSlices(u8, exp_query_id, query.query_id.?);
 
-        testing.expect(query.values == .Normal);
-        testing.expectEqual(@as(usize, 2), query.values.Normal.len);
+        try testing.expect(query.values == .Normal);
+        try testing.expectEqual(@as(usize, 2), query.values.Normal.len);
 
         const value1 = query.values.Normal[0];
-        testing.expectEqualSlices(u8, expUUIDs[i], value1.Set);
+        try testing.expectEqualSlices(u8, expUUIDs[i], value1.Set);
 
         const value2 = query.values.Normal[1];
-        testing.expectEqualStrings("Vincent", value2.Set);
+        try testing.expectEqualStrings("Vincent", value2.Set);
 
         i += 1;
     }
 
-    testing.expectEqual(Consistency.Any, frame.consistency_level);
-    testing.expect(frame.serial_consistency_level == null);
-    testing.expect(frame.timestamp == null);
-    testing.expect(frame.keyspace == null);
-    testing.expect(frame.now_in_seconds == null);
+    try testing.expectEqual(Consistency.Any, frame.consistency_level);
+    try testing.expect(frame.serial_consistency_level == null);
+    try testing.expect(frame.timestamp == null);
+    try testing.expect(frame.keyspace == null);
+    try testing.expect(frame.now_in_seconds == null);
 
     // write
 
-    testing.expectSameRawFrame(frame, raw_frame.header, exp);
+    try testing.expectSameRawFrame(frame, raw_frame.header, exp);
 }

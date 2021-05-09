@@ -209,16 +209,16 @@ test "primitive reader: read int" {
     var pr = PrimitiveReader.init();
 
     pr.reset("\x00\x20\x11\x00");
-    testing.expectEqual(@as(i32, 2101504), try pr.readInt(i32));
+    try testing.expectEqual(@as(i32, 2101504), try pr.readInt(i32));
 
     pr.reset("\x00\x00\x40\x00\x00\x20\x11\x00");
-    testing.expectEqual(@as(i64, 70368746279168), try pr.readInt(i64));
+    try testing.expectEqual(@as(i64, 70368746279168), try pr.readInt(i64));
 
     pr.reset("\x11\x00");
-    testing.expectEqual(@as(u16, 4352), try pr.readInt(u16));
+    try testing.expectEqual(@as(u16, 4352), try pr.readInt(u16));
 
     pr.reset("\xff");
-    testing.expectEqual(@as(u8, 0xFF), try pr.readByte());
+    try testing.expectEqual(@as(u8, 0xFF), try pr.readByte());
 }
 
 test "primitive reader: read strings and bytes" {
@@ -230,35 +230,35 @@ test "primitive reader: read strings and bytes" {
     {
         // short string
         pr.reset("\x00\x06foobar");
-        testing.expectEqualStrings("foobar", try pr.readString(&arena.allocator));
+        try testing.expectEqualStrings("foobar", try pr.readString(&arena.allocator));
 
         // long string
         pr.reset("\x00\x00\x00\x06foobar");
-        testing.expectEqualStrings("foobar", try pr.readLongString(&arena.allocator));
+        try testing.expectEqualStrings("foobar", try pr.readLongString(&arena.allocator));
     }
 
     {
         // int32 + bytes
         pr.reset("\x00\x00\x00\x0A123456789A");
-        testing.expectEqualStrings("123456789A", (try pr.readBytes(&arena.allocator)).?);
+        try testing.expectEqualStrings("123456789A", (try pr.readBytes(&arena.allocator)).?);
 
         pr.reset("\x00\x00\x00\x00");
-        testing.expectEqualStrings("", (try pr.readBytes(&arena.allocator)).?);
+        try testing.expectEqualStrings("", (try pr.readBytes(&arena.allocator)).?);
 
         pr.reset("\xff\xff\xff\xff");
-        testing.expect((try pr.readBytes(&arena.allocator)) == null);
+        try testing.expect((try pr.readBytes(&arena.allocator)) == null);
     }
 
     {
         // int16 + bytes
         pr.reset("\x00\x0A123456789A");
-        testing.expectEqualStrings("123456789A", (try pr.readShortBytes(&arena.allocator)).?);
+        try testing.expectEqualStrings("123456789A", (try pr.readShortBytes(&arena.allocator)).?);
 
         pr.reset("\x00\x00");
-        testing.expectEqualStrings("", (try pr.readShortBytes(&arena.allocator)).?);
+        try testing.expectEqualStrings("", (try pr.readShortBytes(&arena.allocator)).?);
 
         pr.reset("\xff\xff");
-        testing.expect((try pr.readShortBytes(&arena.allocator)) == null);
+        try testing.expect((try pr.readShortBytes(&arena.allocator)) == null);
     }
 }
 
@@ -272,7 +272,7 @@ test "primitive reader: read uuid" {
     try std.os.getrandom(&uuid);
     pr.reset(&uuid);
 
-    testing.expectEqualSlices(u8, &uuid, &(try pr.readUUID()));
+    try testing.expectEqualSlices(u8, &uuid, &(try pr.readUUID()));
 }
 
 test "primitive reader: read string list" {
@@ -284,13 +284,13 @@ test "primitive reader: read string list" {
     pr.reset("\x00\x02\x00\x03foo\x00\x03bar");
 
     var result = try pr.readStringList(&arena.allocator);
-    testing.expectEqual(@as(usize, 2), result.len);
+    try testing.expectEqual(@as(usize, 2), result.len);
 
     var tmp = result[0];
-    testing.expectEqualStrings("foo", tmp);
+    try testing.expectEqualStrings("foo", tmp);
 
     tmp = result[1];
-    testing.expectEqualStrings("bar", tmp);
+    try testing.expectEqualStrings("bar", tmp);
 }
 
 test "primitive reader: read value" {
@@ -303,20 +303,20 @@ test "primitive reader: read value" {
     pr.reset("\x00\x00\x00\x02\x61\x62");
 
     var value = try pr.readValue(&arena.allocator);
-    testing.expect(value == .Set);
-    testing.expectEqualStrings("ab", value.Set);
+    try testing.expect(value == .Set);
+    try testing.expectEqualStrings("ab", value.Set);
 
     // Null value
 
     pr.reset("\xff\xff\xff\xff");
     var value2 = try pr.readValue(&arena.allocator);
-    testing.expect(value2 == .Null);
+    try testing.expect(value2 == .Null);
 
     // "Not set" value
 
     pr.reset("\xff\xff\xff\xfe");
     var value3 = try pr.readValue(&arena.allocator);
-    testing.expect(value3 == .NotSet);
+    try testing.expect(value3 == .NotSet);
 }
 
 test "primitive reader: read inet and inetaddr" {
@@ -329,33 +329,33 @@ test "primitive reader: read inet and inetaddr" {
     pr.reset("\x04\x12\x34\x56\x78\x00\x00\x00\x22");
 
     var result = try pr.readInet();
-    testing.expectEqual(@as(u16, os.AF_INET), result.any.family);
-    testing.expectEqual(@as(u32, 0x78563412), result.in.sa.addr);
-    testing.expectEqual(@as(u16, 34), result.getPort());
+    try testing.expectEqual(@as(u16, os.AF_INET), result.any.family);
+    try testing.expectEqual(@as(u32, 0x78563412), result.in.sa.addr);
+    try testing.expectEqual(@as(u16, 34), result.getPort());
 
     // IPv6
     pr.reset("\x10\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\x00\x00\x00\x22");
 
     result = try pr.readInet();
-    testing.expectEqual(@as(u16, os.AF_INET6), result.any.family);
-    testing.expectEqualSlices(u8, &[_]u8{0xff} ** 16, &result.in6.sa.addr);
-    testing.expectEqual(@as(u16, 34), result.getPort());
+    try testing.expectEqual(@as(u16, os.AF_INET6), result.any.family);
+    try testing.expectEqualSlices(u8, &[_]u8{0xff} ** 16, &result.in6.sa.addr);
+    try testing.expectEqual(@as(u16, 34), result.getPort());
 
     // IPv4 without port
     pr.reset("\x04\x12\x34\x56\x78");
 
     result = try pr.readInetaddr();
-    testing.expectEqual(@as(u16, os.AF_INET), result.any.family);
-    testing.expectEqual(@as(u32, 0x78563412), result.in.sa.addr);
-    testing.expectEqual(@as(u16, 0), result.getPort());
+    try testing.expectEqual(@as(u16, os.AF_INET), result.any.family);
+    try testing.expectEqual(@as(u32, 0x78563412), result.in.sa.addr);
+    try testing.expectEqual(@as(u16, 0), result.getPort());
 
     // IPv6 without port
     pr.reset("\x10\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff");
 
     result = try pr.readInetaddr();
-    testing.expectEqual(@as(u16, os.AF_INET6), result.any.family);
-    testing.expectEqualSlices(u8, &[_]u8{0xff} ** 16, &result.in6.sa.addr);
-    testing.expectEqual(@as(u16, 0), result.getPort());
+    try testing.expectEqual(@as(u16, os.AF_INET6), result.any.family);
+    try testing.expectEqualSlices(u8, &[_]u8{0xff} ** 16, &result.in6.sa.addr);
+    try testing.expectEqual(@as(u16, 0), result.getPort());
 }
 
 test "primitive reader: read consistency" {
@@ -386,7 +386,7 @@ test "primitive reader: read consistency" {
     for (testCases) |tc| {
         pr.reset(tc.b);
         var result = try pr.readConsistency();
-        testing.expectEqual(tc.exp, result);
+        try testing.expectEqual(tc.exp, result);
     }
 }
 
@@ -401,12 +401,12 @@ test "primitive reader: read stringmap" {
     pr.reset("\x00\x02\x00\x03foo\x00\x03baz\x00\x03bar\x00\x03baz");
 
     var result = try pr.readStringMap(&arena.allocator);
-    testing.expectEqual(@as(usize, 2), result.count());
+    try testing.expectEqual(@as(usize, 2), result.count());
 
     var it = result.iterator();
     while (it.next()) |entry| {
-        testing.expect(std.mem.eql(u8, "foo", entry.key) or std.mem.eql(u8, "bar", entry.key));
-        testing.expectEqualStrings("baz", entry.value);
+        try testing.expect(std.mem.eql(u8, "foo", entry.key) or std.mem.eql(u8, "bar", entry.key));
+        try testing.expectEqualStrings("baz", entry.value);
     }
 }
 
@@ -421,9 +421,9 @@ test "primitive reader: read string multimap" {
     pr.reset("\x00\x01\x00\x03foo\x00\x02\x00\x03bar\x00\x03baz");
 
     var result = try pr.readStringMultimap(&arena.allocator);
-    testing.expectEqual(@as(usize, 1), result.count());
+    try testing.expectEqual(@as(usize, 1), result.count());
 
     const slice = result.get("foo").?;
-    testing.expectEqualStrings("bar", slice[0]);
-    testing.expectEqualStrings("baz", slice[1]);
+    try testing.expectEqualStrings("bar", slice[0]);
+    try testing.expectEqualStrings("baz", slice[1]);
 }

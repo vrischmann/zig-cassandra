@@ -212,7 +212,7 @@ test "bigint: toBytes" {
         const data = try toBytes(testing.allocator, n.toConst());
         defer testing.allocator.free(data);
 
-        testing.expectEqualSlices(u8, tc.exp_data, data);
+        try testing.expectEqualSlices(u8, tc.exp_data, data);
     }
 }
 
@@ -240,6 +240,6 @@ test "bigint: fromBytes" {
         var buf: [1024]u8 = undefined;
         const formatted_n = try std.fmt.bufPrint(&buf, "{}", .{n});
 
-        testing.expectEqualStrings(tc.exp, formatted_n);
+        try testing.expectEqualStrings(tc.exp, formatted_n);
     }
 }

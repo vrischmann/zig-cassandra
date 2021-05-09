@@ -136,13 +136,13 @@ pub const RowData = struct {
     slice: []const ColumnData,
 };
 
-pub fn checkHeader(opcode: Opcode, data_len: usize, header: FrameHeader) void {
+pub fn checkHeader(opcode: Opcode, data_len: usize, header: FrameHeader) !void {
     // We can only use v4 for now
-    testing.expect(header.version.is(4));
+    try testing.expect(header.version.is(4));
     // Don't care about the flags here
     // Don't care about the stream
-    testing.expectEqual(opcode, header.opcode);
-    testing.expectEqual(@as(usize, header.body_len), data_len - @sizeOf(FrameHeader));
+    try testing.expectEqual(opcode, header.opcode);
+    try testing.expectEqual(@as(usize, header.body_len), data_len - @sizeOf(FrameHeader));
 }
 
 test "frame header: read and write" {
@@ -154,13 +154,13 @@ test "frame header: read and write" {
     var reader = fbs.reader();
 
     const header = try FrameHeader.init(@TypeOf(reader), fbs.reader());
-    testing.expect(header.version.is(4));
-    testing.expect(header.version.isRequest());
-    testing.expectEqual(@as(u8, 0), header.flags);
-    testing.expectEqual(@as(i16, 215), header.stream);
-    testing.expectEqual(Opcode.Options, header.opcode);
-    testing.expectEqual(@as(u32, 0), header.body_len);
-    testing.expectEqual(@as(usize, 0), exp.len - @sizeOf(FrameHeader));
+    try testing.expect(header.version.is(4));
+    try testing.expect(header.version.isRequest());
+    try testing.expectEqual(@as(u8, 0), header.flags);
+    try testing.expectEqual(@as(i16, 215), header.stream);
+    try testing.expectEqual(Opcode.Options, header.opcode);
+    try testing.expectEqual(@as(u32, 0), header.body_len);
+    try testing.expectEqual(@as(usize, 0), exp.len - @sizeOf(FrameHeader));
 }
 
 test "" {

@@ -153,14 +153,14 @@ test "result frame: void" {
     const data = "\x84\x00\x00\x9d\x08\x00\x00\x00\x04\x00\x00\x00\x01";
     const raw_frame = try testing.readRawFrame(&arena.allocator, data);
 
-    checkHeader(Opcode.Result, data.len, raw_frame.header);
+    try checkHeader(Opcode.Result, data.len, raw_frame.header);
 
     var pr = PrimitiveReader.init();
     pr.reset(raw_frame.body);
 
     const frame = try ResultFrame.read(&arena.allocator, raw_frame.header.version, &pr);
 
-    testing.expect(frame.result == .Void);
+    try testing.expect(frame.result == .Void);
 }
 
 test "result frame: rows" {
@@ -170,53 +170,53 @@ test "result frame: rows" {
     const data = "\x84\x00\x00\x20\x08\x00\x00\x00\xa2\x00\x00\x00\x02\x00\x00\x00\x01\x00\x00\x00\x03\x00\x06\x66\x6f\x6f\x62\x61\x72\x00\x04\x75\x73\x65\x72\x00\x02\x69\x64\x00\x0c\x00\x03\x61\x67\x65\x00\x14\x00\x04\x6e\x61\x6d\x65\x00\x0d\x00\x00\x00\x03\x00\x00\x00\x10\x35\x94\x43\xf3\xb7\xc4\x47\xb2\x8a\xb4\xe2\x42\x39\x79\x36\xf8\x00\x00\x00\x01\x00\x00\x00\x00\x08\x56\x69\x6e\x63\x65\x6e\x74\x30\x00\x00\x00\x10\xd7\x77\xd5\xd7\x58\xc0\x4d\x2b\x8c\xf9\xa3\x53\xfa\x8e\x6c\x96\x00\x00\x00\x01\x01\x00\x00\x00\x08\x56\x69\x6e\x63\x65\x6e\x74\x31\x00\x00\x00\x10\x94\xa4\x7b\xb2\x8c\xf7\x43\x3d\x97\x6e\x72\x74\xb3\xfd\xd3\x31\x00\x00\x00\x01\x02\x00\x00\x00\x08\x56\x69\x6e\x63\x65\x6e\x74\x32";
     const raw_frame = try testing.readRawFrame(&arena.allocator, data);
 
-    checkHeader(Opcode.Result, data.len, raw_frame.header);
+    try checkHeader(Opcode.Result, data.len, raw_frame.header);
 
     var pr = PrimitiveReader.init();
     pr.reset(raw_frame.body);
 
     const frame = try ResultFrame.read(&arena.allocator, raw_frame.header.version, &pr);
 
-    testing.expect(frame.result == .Rows);
+    try testing.expect(frame.result == .Rows);
 
     // check metadata
 
     const metadata = frame.result.Rows.metadata;
-    testing.expect(metadata.paging_state == null);
-    testing.expect(metadata.new_metadata_id == null);
-    testing.expectEqualStrings("foobar", metadata.global_table_spec.?.keyspace);
-    testing.expectEqualStrings("user", metadata.global_table_spec.?.table);
-    testing.expectEqual(@as(usize, 3), metadata.column_specs.len);
+    try testing.expect(metadata.paging_state == null);
+    try testing.expect(metadata.new_metadata_id == null);
+    try testing.expectEqualStrings("foobar", metadata.global_table_spec.?.keyspace);
+    try testing.expectEqualStrings("user", metadata.global_table_spec.?.table);
+    try testing.expectEqual(@as(usize, 3), metadata.column_specs.len);
 
     const col1 = metadata.column_specs[0];
-    testing.expectEqualStrings("id", col1.name);
-    testing.expectEqual(OptionID.UUID, col1.option);
+    try testing.expectEqualStrings("id", col1.name);
+    try testing.expectEqual(OptionID.UUID, col1.option);
     const col2 = metadata.column_specs[1];
-    testing.expectEqualStrings("age", col2.name);
-    testing.expectEqual(OptionID.Tinyint, col2.option);
+    try testing.expectEqualStrings("age", col2.name);
+    try testing.expectEqual(OptionID.Tinyint, col2.option);
     const col3 = metadata.column_specs[2];
-    testing.expectEqualStrings("name", col3.name);
-    testing.expectEqual(OptionID.Varchar, col3.option);
+    try testing.expectEqualStrings("name", col3.name);
+    try testing.expectEqual(OptionID.Varchar, col3.option);
 
     // check data
 
     const rows = frame.result.Rows;
-    testing.expectEqual(@as(usize, 3), rows.data.len);
+    try testing.expectEqual(@as(usize, 3), rows.data.len);
 
     const row1 = rows.data[0].slice;
-    testing.expectEqualSlices(u8, "\x35\x94\x43\xf3\xb7\xc4\x47\xb2\x8a\xb4\xe2\x42\x39\x79\x36\xf8", row1[0].slice);
-    testing.expectEqualSlices(u8, "\x00", row1[1].slice);
-    testing.expectEqualSlices(u8, "\x56\x69\x6e\x63\x65\x6e\x74\x30", row1[2].slice);
+    try testing.expectEqualSlices(u8, "\x35\x94\x43\xf3\xb7\xc4\x47\xb2\x8a\xb4\xe2\x42\x39\x79\x36\xf8", row1[0].slice);
+    try testing.expectEqualSlices(u8, "\x00", row1[1].slice);
+    try testing.expectEqualSlices(u8, "\x56\x69\x6e\x63\x65\x6e\x74\x30", row1[2].slice);
 
     const row2 = rows.data[1].slice;
-    testing.expectEqualSlices(u8, "\xd7\x77\xd5\xd7\x58\xc0\x4d\x2b\x8c\xf9\xa3\x53\xfa\x8e\x6c\x96", row2[0].slice);
-    testing.expectEqualSlices(u8, "\x01", row2[1].slice);
-    testing.expectEqualSlices(u8, "\x56\x69\x6e\x63\x65\x6e\x74\x31", row2[2].slice);
+    try testing.expectEqualSlices(u8, "\xd7\x77\xd5\xd7\x58\xc0\x4d\x2b\x8c\xf9\xa3\x53\xfa\x8e\x6c\x96", row2[0].slice);
+    try testing.expectEqualSlices(u8, "\x01", row2[1].slice);
+    try testing.expectEqualSlices(u8, "\x56\x69\x6e\x63\x65\x6e\x74\x31", row2[2].slice);
 
     const row3 = rows.data[2].slice;
-    testing.expectEqualSlices(u8, "\x94\xa4\x7b\xb2\x8c\xf7\x43\x3d\x97\x6e\x72\x74\xb3\xfd\xd3\x31", row3[0].slice);
-    testing.expectEqualSlices(u8, "\x02", row3[1].slice);
-    testing.expectEqualSlices(u8, "\x56\x69\x6e\x63\x65\x6e\x74\x32", row3[2].slice);
+    try testing.expectEqualSlices(u8, "\x94\xa4\x7b\xb2\x8c\xf7\x43\x3d\x97\x6e\x72\x74\xb3\xfd\xd3\x31", row3[0].slice);
+    try testing.expectEqualSlices(u8, "\x02", row3[1].slice);
+    try testing.expectEqualSlices(u8, "\x56\x69\x6e\x63\x65\x6e\x74\x32", row3[2].slice);
 }
 
 test "result frame: rows, don't skip metadata" {
@@ -226,43 +226,43 @@ test "result frame: rows, don't skip metadata" {
     const data = "\x84\x00\x00\x00\x08\x00\x00\x02\x3a\x00\x00\x00\x02\x00\x00\x00\x01\x00\x00\x00\x03\x00\x06\x66\x6f\x6f\x62\x61\x72\x00\x04\x75\x73\x65\x72\x00\x02\x69\x64\x00\x0c\x00\x03\x61\x67\x65\x00\x00\x00\x28\x6f\x72\x67\x2e\x61\x70\x61\x63\x68\x65\x2e\x63\x61\x73\x73\x61\x6e\x64\x72\x61\x2e\x64\x62\x2e\x6d\x61\x72\x73\x68\x61\x6c\x2e\x42\x79\x74\x65\x54\x79\x70\x65\x00\x04\x6e\x61\x6d\x65\x00\x0d\x00\x00\x00\x0d\x00\x00\x00\x10\x35\x94\x43\xf3\xb7\xc4\x47\xb2\x8a\xb4\xe2\x42\x39\x79\x36\xf8\x00\x00\x00\x01\x00\x00\x00\x00\x08\x56\x69\x6e\x63\x65\x6e\x74\x30\x00\x00\x00\x10\x87\x0e\x45\x7f\x56\x4a\x4f\xd5\xb5\xd6\x4a\x48\x4b\xe0\x67\x67\x00\x00\x00\x01\x01\x00\x00\x00\x08\x56\x69\x6e\x63\x65\x6e\x74\x31\x00\x00\x00\x10\xc5\xb1\x12\xf4\x0d\xea\x4d\x22\x83\x5b\xe0\x25\xef\x69\x0c\xe1\x00\x00\x00\x01\x01\x00\x00\x00\x08\x56\x69\x6e\x63\x65\x6e\x74\x31\x00\x00\x00\x10\xd7\x77\xd5\xd7\x58\xc0\x4d\x2b\x8c\xf9\xa3\x53\xfa\x8e\x6c\x96\x00\x00\x00\x01\x01\x00\x00\x00\x08\x56\x69\x6e\x63\x65\x6e\x74\x31\x00\x00\x00\x10\x65\x54\x02\x89\x33\xe1\x42\x73\x82\xcc\x1c\xdb\x3d\x24\x5e\x40\x00\x00\x00\x01\x00\x00\x00\x00\x08\x56\x69\x6e\x63\x65\x6e\x74\x30\x00\x00\x00\x10\x6a\xd1\x07\x9d\x27\x23\x47\x76\x8b\x7f\x39\x4d\xe3\xb8\x97\xc5\x00\x00\x00\x01\x02\x00\x00\x00\x08\x56\x69\x6e\x63\x65\x6e\x74\x32\x00\x00\x00\x10\xe9\xef\xfe\xa6\xeb\xc5\x4d\xb9\xaf\xc7\xd7\xc0\x28\x43\x27\x40\x00\x00\x00\x01\x00\x00\x00\x00\x08\x56\x69\x6e\x63\x65\x6e\x74\x30\x00\x00\x00\x10\x96\xe6\xdd\x62\x14\xc9\x4e\x7c\xa1\x2f\x98\x5e\xe9\xe0\x91\x0d\x00\x00\x00\x01\x02\x00\x00\x00\x08\x56\x69\x6e\x63\x65\x6e\x74\x32\x00\x00\x00\x10\xef\xd5\x5a\x9b\xec\x7f\x4c\x5c\x89\xc3\x8c\xfa\x28\xf9\x6d\xfe\x00\x00\x00\x01\x00\x00\x00\x00\x08\x56\x69\x6e\x63\x65\x6e\x74\x30\x00\x00\x00\x10\x94\xa4\x7b\xb2\x8c\xf7\x43\x3d\x97\x6e\x72\x74\xb3\xfd\xd3\x31\x00\x00\x00\x01\x02\x00\x00\x00\x08\x56\x69\x6e\x63\x65\x6e\x74\x32\x00\x00\x00\x10\xe6\x02\xc7\x47\xbf\xca\x44\xbc\x9d\xc6\x6b\x04\x0f\xb7\x15\xed\x00\x00\x00\x01\x78\x00\x00\x00\x04\x48\x61\x68\x61\x00\x00\x00\x10\xac\x5e\xcc\xa8\x8e\xa1\x42\x2f\x86\xe6\xa0\x93\xbe\xd2\x73\x22\x00\x00\x00\x01\x02\x00\x00\x00\x08\x56\x69\x6e\x63\x65\x6e\x74\x32\x00\x00\x00\x10\xbe\x90\x37\x66\x31\xe5\x43\x93\xbc\x99\x43\xd3\x69\xf8\xe6\xba\x00\x00\x00\x01\x01\x00\x00\x00\x08\x56\x69\x6e\x63\x65\x6e\x74\x31";
     const raw_frame = try testing.readRawFrame(&arena.allocator, data);
 
-    checkHeader(Opcode.Result, data.len, raw_frame.header);
+    try checkHeader(Opcode.Result, data.len, raw_frame.header);
 
     var pr = PrimitiveReader.init();
     pr.reset(raw_frame.body);
 
     const frame = try ResultFrame.read(&arena.allocator, raw_frame.header.version, &pr);
 
-    testing.expect(frame.result == .Rows);
+    try testing.expect(frame.result == .Rows);
 
     // check metadata
 
     const metadata = frame.result.Rows.metadata;
-    testing.expect(metadata.paging_state == null);
-    testing.expect(metadata.new_metadata_id == null);
-    testing.expectEqualStrings("foobar", metadata.global_table_spec.?.keyspace);
-    testing.expectEqualStrings("user", metadata.global_table_spec.?.table);
-    testing.expectEqual(@as(usize, 3), metadata.column_specs.len);
+    try testing.expect(metadata.paging_state == null);
+    try testing.expect(metadata.new_metadata_id == null);
+    try testing.expectEqualStrings("foobar", metadata.global_table_spec.?.keyspace);
+    try testing.expectEqualStrings("user", metadata.global_table_spec.?.table);
+    try testing.expectEqual(@as(usize, 3), metadata.column_specs.len);
 
     const col1 = metadata.column_specs[0];
-    testing.expectEqualStrings("id", col1.name);
-    testing.expectEqual(OptionID.UUID, col1.option);
+    try testing.expectEqualStrings("id", col1.name);
+    try testing.expectEqual(OptionID.UUID, col1.option);
     const col2 = metadata.column_specs[1];
-    testing.expectEqualStrings("age", col2.name);
-    testing.expectEqual(OptionID.Custom, col2.option);
+    try testing.expectEqualStrings("age", col2.name);
+    try testing.expectEqual(OptionID.Custom, col2.option);
     const col3 = metadata.column_specs[2];
-    testing.expectEqualStrings("name", col3.name);
-    testing.expectEqual(OptionID.Varchar, col3.option);
+    try testing.expectEqualStrings("name", col3.name);
+    try testing.expectEqual(OptionID.Varchar, col3.option);
 
     // check data
 
     const rows = frame.result.Rows;
-    testing.expectEqual(@as(usize, 13), rows.data.len);
+    try testing.expectEqual(@as(usize, 13), rows.data.len);
 
     const row1 = rows.data[0].slice;
-    testing.expectEqualSlices(u8, "\x35\x94\x43\xf3\xb7\xc4\x47\xb2\x8a\xb4\xe2\x42\x39\x79\x36\xf8", row1[0].slice);
-    testing.expectEqualSlices(u8, "\x00", row1[1].slice);
-    testing.expectEqualSlices(u8, "\x56\x69\x6e\x63\x65\x6e\x74\x30", row1[2].slice);
+    try testing.expectEqualSlices(u8, "\x35\x94\x43\xf3\xb7\xc4\x47\xb2\x8a\xb4\xe2\x42\x39\x79\x36\xf8", row1[0].slice);
+    try testing.expectEqualSlices(u8, "\x00", row1[1].slice);
+    try testing.expectEqualSlices(u8, "\x56\x69\x6e\x63\x65\x6e\x74\x30", row1[2].slice);
 }
 
 test "result frame: rows, list of uuid" {
@@ -272,39 +272,39 @@ test "result frame: rows, list of uuid" {
     const data = "\x84\x00\x00\x00\x08\x00\x00\x00\x58\x00\x00\x00\x02\x00\x00\x00\x01\x00\x00\x00\x02\x00\x06\x66\x6f\x6f\x62\x61\x72\x00\x0a\x61\x67\x65\x5f\x74\x6f\x5f\x69\x64\x73\x00\x03\x61\x67\x65\x00\x09\x00\x03\x69\x64\x73\x00\x20\x00\x0c\x00\x00\x00\x01\x00\x00\x00\x04\x00\x00\x00\x78\x00\x00\x00\x18\x00\x00\x00\x01\x00\x00\x00\x10\xe6\x02\xc7\x47\xbf\xca\x44\xbc\x9d\xc6\x6b\x04\x0f\xb7\x15\xed";
     const raw_frame = try testing.readRawFrame(&arena.allocator, data);
 
-    checkHeader(Opcode.Result, data.len, raw_frame.header);
+    try checkHeader(Opcode.Result, data.len, raw_frame.header);
 
     var pr = PrimitiveReader.init();
     pr.reset(raw_frame.body);
 
     const frame = try ResultFrame.read(&arena.allocator, raw_frame.header.version, &pr);
 
-    testing.expect(frame.result == .Rows);
+    try testing.expect(frame.result == .Rows);
 
     // check metadata
 
     const metadata = frame.result.Rows.metadata;
-    testing.expect(metadata.paging_state == null);
-    testing.expect(metadata.new_metadata_id == null);
-    testing.expectEqualStrings("foobar", metadata.global_table_spec.?.keyspace);
-    testing.expectEqualStrings("age_to_ids", metadata.global_table_spec.?.table);
-    testing.expectEqual(@as(usize, 2), metadata.column_specs.len);
+    try testing.expect(metadata.paging_state == null);
+    try testing.expect(metadata.new_metadata_id == null);
+    try testing.expectEqualStrings("foobar", metadata.global_table_spec.?.keyspace);
+    try testing.expectEqualStrings("age_to_ids", metadata.global_table_spec.?.table);
+    try testing.expectEqual(@as(usize, 2), metadata.column_specs.len);
 
     const col1 = metadata.column_specs[0];
-    testing.expectEqualStrings("age", col1.name);
-    testing.expectEqual(OptionID.Int, col1.option);
+    try testing.expectEqualStrings("age", col1.name);
+    try testing.expectEqual(OptionID.Int, col1.option);
     const col2 = metadata.column_specs[1];
-    testing.expectEqualStrings("ids", col2.name);
-    testing.expectEqual(OptionID.List, col2.option);
+    try testing.expectEqualStrings("ids", col2.name);
+    try testing.expectEqual(OptionID.List, col2.option);
 
     // check data
 
     const rows = frame.result.Rows;
-    testing.expectEqual(@as(usize, 1), rows.data.len);
+    try testing.expectEqual(@as(usize, 1), rows.data.len);
 
     const row1 = rows.data[0].slice;
-    testing.expectEqualSlices(u8, "\x00\x00\x00\x78", row1[0].slice);
-    testing.expectEqualSlices(u8, "\x00\x00\x00\x01\x00\x00\x00\x10\xe6\x02\xc7\x47\xbf\xca\x44\xbc\x9d\xc6\x6b\x04\x0f\xb7\x15\xed", row1[1].slice);
+    try testing.expectEqualSlices(u8, "\x00\x00\x00\x78", row1[0].slice);
+    try testing.expectEqualSlices(u8, "\x00\x00\x00\x01\x00\x00\x00\x10\xe6\x02\xc7\x47\xbf\xca\x44\xbc\x9d\xc6\x6b\x04\x0f\xb7\x15\xed", row1[1].slice);
 }
 
 test "result frame: set keyspace" {
@@ -314,15 +314,15 @@ test "result frame: set keyspace" {
     const data = "\x84\x00\x00\x77\x08\x00\x00\x00\x0c\x00\x00\x00\x03\x00\x06\x66\x6f\x6f\x62\x61\x72";
     const raw_frame = try testing.readRawFrame(&arena.allocator, data);
 
-    checkHeader(Opcode.Result, data.len, raw_frame.header);
+    try checkHeader(Opcode.Result, data.len, raw_frame.header);
 
     var pr = PrimitiveReader.init();
     pr.reset(raw_frame.body);
 
     const frame = try ResultFrame.read(&arena.allocator, raw_frame.header.version, &pr);
 
-    testing.expect(frame.result == .SetKeyspace);
-    testing.expectEqualStrings("foobar", frame.result.SetKeyspace);
+    try testing.expect(frame.result == .SetKeyspace);
+    try testing.expectEqualStrings("foobar", frame.result.SetKeyspace);
 }
 
 test "result frame: prepared insert" {
@@ -332,42 +332,42 @@ test "result frame: prepared insert" {
     const data = "\x84\x00\x00\x80\x08\x00\x00\x00\x4f\x00\x00\x00\x04\x00\x10\x63\x7c\x1c\x1f\xd0\x13\x4a\xb8\xfc\x94\xca\x67\xf2\x88\xb2\xa3\x00\x00\x00\x01\x00\x00\x00\x03\x00\x00\x00\x01\x00\x00\x00\x06\x66\x6f\x6f\x62\x61\x72\x00\x04\x75\x73\x65\x72\x00\x02\x69\x64\x00\x0c\x00\x03\x61\x67\x65\x00\x14\x00\x04\x6e\x61\x6d\x65\x00\x0d\x00\x00\x00\x04\x00\x00\x00\x00";
     const raw_frame = try testing.readRawFrame(&arena.allocator, data);
 
-    checkHeader(Opcode.Result, data.len, raw_frame.header);
+    try checkHeader(Opcode.Result, data.len, raw_frame.header);
 
     var pr = PrimitiveReader.init();
     pr.reset(raw_frame.body);
 
     const frame = try ResultFrame.read(&arena.allocator, raw_frame.header.version, &pr);
 
-    testing.expect(frame.result == .Prepared);
+    try testing.expect(frame.result == .Prepared);
 
     // check prepared metadata
 
     {
         const metadata = frame.result.Prepared.metadata;
-        testing.expectEqualStrings("foobar", metadata.global_table_spec.?.keyspace);
-        testing.expectEqualStrings("user", metadata.global_table_spec.?.table);
-        testing.expectEqual(@as(usize, 1), metadata.pk_indexes.len);
-        testing.expectEqual(@as(u16, 0), metadata.pk_indexes[0]);
-        testing.expectEqual(@as(usize, 3), metadata.column_specs.len);
+        try testing.expectEqualStrings("foobar", metadata.global_table_spec.?.keyspace);
+        try testing.expectEqualStrings("user", metadata.global_table_spec.?.table);
+        try testing.expectEqual(@as(usize, 1), metadata.pk_indexes.len);
+        try testing.expectEqual(@as(u16, 0), metadata.pk_indexes[0]);
+        try testing.expectEqual(@as(usize, 3), metadata.column_specs.len);
 
         const col1 = metadata.column_specs[0];
-        testing.expectEqualStrings("id", col1.name);
-        testing.expectEqual(OptionID.UUID, col1.option);
+        try testing.expectEqualStrings("id", col1.name);
+        try testing.expectEqual(OptionID.UUID, col1.option);
         const col2 = metadata.column_specs[1];
-        testing.expectEqualStrings("age", col2.name);
-        testing.expectEqual(OptionID.Tinyint, col2.option);
+        try testing.expectEqualStrings("age", col2.name);
+        try testing.expectEqual(OptionID.Tinyint, col2.option);
         const col3 = metadata.column_specs[2];
-        testing.expectEqualStrings("name", col3.name);
-        testing.expectEqual(OptionID.Varchar, col3.option);
+        try testing.expectEqualStrings("name", col3.name);
+        try testing.expectEqual(OptionID.Varchar, col3.option);
     }
 
     // check rows metadata
 
     {
         const metadata = frame.result.Prepared.rows_metadata;
-        testing.expect(metadata.global_table_spec == null);
-        testing.expectEqual(@as(usize, 0), metadata.column_specs.len);
+        try testing.expect(metadata.global_table_spec == null);
+        try testing.expectEqual(@as(usize, 0), metadata.column_specs.len);
     }
 }
 
@@ -378,46 +378,46 @@ test "result frame: prepared select" {
     const data = "\x84\x00\x00\xc0\x08\x00\x00\x00\x63\x00\x00\x00\x04\x00\x10\x3b\x2e\x8d\x03\x43\xf4\x3b\xfc\xad\xa1\x78\x9c\x27\x0e\xcf\xee\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x06\x66\x6f\x6f\x62\x61\x72\x00\x04\x75\x73\x65\x72\x00\x02\x69\x64\x00\x0c\x00\x00\x00\x01\x00\x00\x00\x03\x00\x06\x66\x6f\x6f\x62\x61\x72\x00\x04\x75\x73\x65\x72\x00\x02\x69\x64\x00\x0c\x00\x03\x61\x67\x65\x00\x14\x00\x04\x6e\x61\x6d\x65\x00\x0d";
     const raw_frame = try testing.readRawFrame(&arena.allocator, data);
 
-    checkHeader(Opcode.Result, data.len, raw_frame.header);
+    try checkHeader(Opcode.Result, data.len, raw_frame.header);
 
     var pr = PrimitiveReader.init();
     pr.reset(raw_frame.body);
 
     const frame = try ResultFrame.read(&arena.allocator, raw_frame.header.version, &pr);
 
-    testing.expect(frame.result == .Prepared);
+    try testing.expect(frame.result == .Prepared);
 
     // check prepared metadata
 
     {
         const metadata = frame.result.Prepared.metadata;
-        testing.expectEqualStrings("foobar", metadata.global_table_spec.?.keyspace);
-        testing.expectEqualStrings("user", metadata.global_table_spec.?.table);
-        testing.expectEqual(@as(usize, 1), metadata.pk_indexes.len);
-        testing.expectEqual(@as(u16, 0), metadata.pk_indexes[0]);
-        testing.expectEqual(@as(usize, 1), metadata.column_specs.len);
+        try testing.expectEqualStrings("foobar", metadata.global_table_spec.?.keyspace);
+        try testing.expectEqualStrings("user", metadata.global_table_spec.?.table);
+        try testing.expectEqual(@as(usize, 1), metadata.pk_indexes.len);
+        try testing.expectEqual(@as(u16, 0), metadata.pk_indexes[0]);
+        try testing.expectEqual(@as(usize, 1), metadata.column_specs.len);
 
         const col1 = metadata.column_specs[0];
-        testing.expectEqualStrings("id", col1.name);
-        testing.expectEqual(OptionID.UUID, col1.option);
+        try testing.expectEqualStrings("id", col1.name);
+        try testing.expectEqual(OptionID.UUID, col1.option);
     }
 
     // check rows metadata
 
     {
         const metadata = frame.result.Prepared.rows_metadata;
-        testing.expectEqualStrings("foobar", metadata.global_table_spec.?.keyspace);
-        testing.expectEqualStrings("user", metadata.global_table_spec.?.table);
-        testing.expectEqual(@as(usize, 3), metadata.column_specs.len);
+        try testing.expectEqualStrings("foobar", metadata.global_table_spec.?.keyspace);
+        try testing.expectEqualStrings("user", metadata.global_table_spec.?.table);
+        try testing.expectEqual(@as(usize, 3), metadata.column_specs.len);
 
         const col1 = metadata.column_specs[0];
-        testing.expectEqualStrings("id", col1.name);
-        testing.expectEqual(OptionID.UUID, col1.option);
+        try testing.expectEqualStrings("id", col1.name);
+        try testing.expectEqual(OptionID.UUID, col1.option);
         const col2 = metadata.column_specs[1];
-        testing.expectEqualStrings("age", col2.name);
-        testing.expectEqual(OptionID.Tinyint, col2.option);
+        try testing.expectEqualStrings("age", col2.name);
+        try testing.expectEqual(OptionID.Tinyint, col2.option);
         const col3 = metadata.column_specs[2];
-        testing.expectEqualStrings("name", col3.name);
-        testing.expectEqual(OptionID.Varchar, col3.option);
+        try testing.expectEqualStrings("name", col3.name);
+        try testing.expectEqual(OptionID.Varchar, col3.option);
     }
 }

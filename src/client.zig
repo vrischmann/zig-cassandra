@@ -378,10 +378,10 @@ fn testWithCassandra(harness: *casstest.Harness) !void {
     {
         const Callback = struct {
             pub fn do(h: *casstest.Harness, i: usize, row: *casstest.Row.AgeToIDs) !bool {
-                testing.expectEqual(row.age, 0);
-                testing.expectEqualSlices(u8, &[_]u8{ 0, 2, 4, 8 }, row.ids);
-                testing.expectEqualStrings("Vincent 0", row.name);
-                testing.expect(h.positive_varint.toConst().eq(row.balance));
+                try testing.expectEqual(row.age, 0);
+                try testing.expectEqualSlices(u8, &[_]u8{ 0, 2, 4, 8 }, row.ids);
+                try testing.expectEqualStrings("Vincent 0", row.name);
+                try testing.expect(h.positive_varint.toConst().eq(row.balance));
                 return true;
             }
         };
@@ -394,16 +394,16 @@ fn testWithCassandra(harness: *casstest.Harness) !void {
             },
             Callback.do,
         );
-        testing.expect(res);
+        try testing.expect(res);
     }
 
     {
         const Callback = struct {
             pub fn do(h: *casstest.Harness, i: usize, row: *casstest.Row.AgeToIDs) !bool {
-                testing.expectEqual(@as(u32, 1), row.age);
-                testing.expectEqualSlices(u8, &[_]u8{ 0, 2, 4, 8 }, row.ids);
-                testing.expectEqualStrings("", row.name);
-                testing.expect(h.negative_varint.toConst().eq(row.balance));
+                try testing.expectEqual(@as(u32, 1), row.age);
+                try testing.expectEqualSlices(u8, &[_]u8{ 0, 2, 4, 8 }, row.ids);
+                try testing.expectEqualStrings("", row.name);
+                try testing.expect(h.negative_varint.toConst().eq(row.balance));
                 return true;
             }
         };
@@ -416,7 +416,7 @@ fn testWithCassandra(harness: *casstest.Harness) !void {
             },
             Callback.do,
         );
-        testing.expect(res);
+        try testing.expect(res);
     }
 
     // Read and validate the data for the user table
@@ -424,8 +424,8 @@ fn testWithCassandra(harness: *casstest.Harness) !void {
     {
         const Callback = struct {
             pub fn do(h: *casstest.Harness, i: usize, row: *casstest.Row.User) !bool {
-                testing.expectEqual(@as(u64, 2000), row.id);
-                testing.expectEqual(i + 25, row.secondary_id);
+                try testing.expectEqual(@as(u64, 2000), row.id);
+                try testing.expectEqual(i + 25, row.secondary_id);
                 return true;
             }
         };
@@ -436,7 +436,7 @@ fn testWithCassandra(harness: *casstest.Harness) !void {
             .{},
             Callback.do,
         );
-        testing.expect(res);
+        try testing.expect(res);
     }
 }
 
@@ -510,9 +510,9 @@ test "option id array list" {
     try option_ids.append(.Smallint);
 
     const items = option_ids.getItems();
-    testing.expectEqual(@as(usize, 2), items.len);
-    testing.expectEqual(OptionID.Tinyint, items[0].?);
-    testing.expectEqual(OptionID.Smallint, items[1].?);
+    try testing.expectEqual(@as(usize, 2), items.len);
+    try testing.expectEqual(OptionID.Tinyint, items[0].?);
+    try testing.expectEqual(OptionID.Smallint, items[1].?);
 }
 
 /// Compute a list of Value and OptionID for each field in the tuple or struct args.
@@ -725,9 +725,9 @@ test "serialize values" {
     var v2 = Value{ .Set = "barbaz" };
 
     var data = try serializeValues(&arenaAllocator.allocator, &[_]Value{ v1, v2 });
-    testing.expectEqual(@as(usize, 24), data.len);
-    testing.expectEqualSlices(u8, "\x00\x00\x00\x02", data[0..4]);
-    testing.expectEqualStrings("\x00\x00\x00\x06foobar\x00\x00\x00\x06barbaz", data[4..]);
+    try testing.expectEqual(@as(usize, 24), data.len);
+    try testing.expectEqualSlices(u8, "\x00\x00\x00\x02", data[0..4]);
+    try testing.expectEqualStrings("\x00\x00\x00\x06foobar\x00\x00\x00\x06barbaz", data[4..]);
 }
 
 test "compute values: ints" {
@@ -755,31 +755,31 @@ test "compute values: ints" {
     var v = values.items;
     var o = options.getItems();
 
-    testing.expectEqual(@as(usize, 9), v.len);
-    testing.expectEqual(@as(usize, 9), o.len);
+    try testing.expectEqual(@as(usize, 9), v.len);
+    try testing.expectEqual(@as(usize, 9), o.len);
 
-    testing.expectEqualSlices(u8, "\x7f", v[0].Set);
-    testing.expectEqual(OptionID.Tinyint, o[0].?);
-    testing.expectEqualSlices(u8, "\xff", v[1].Set);
-    testing.expectEqual(OptionID.Tinyint, o[1].?);
+    try testing.expectEqualSlices(u8, "\x7f", v[0].Set);
+    try testing.expectEqual(OptionID.Tinyint, o[0].?);
+    try testing.expectEqualSlices(u8, "\xff", v[1].Set);
+    try testing.expectEqual(OptionID.Tinyint, o[1].?);
 
-    testing.expectEqualSlices(u8, "\x7f\xff", v[2].Set);
-    testing.expectEqual(OptionID.Smallint, o[2].?);
-    testing.expectEqualSlices(u8, "\xde\xdf", v[3].Set);
-    testing.expectEqual(OptionID.Smallint, o[3].?);
+    try testing.expectEqualSlices(u8, "\x7f\xff", v[2].Set);
+    try testing.expectEqual(OptionID.Smallint, o[2].?);
+    try testing.expectEqualSlices(u8, "\xde\xdf", v[3].Set);
+    try testing.expectEqual(OptionID.Smallint, o[3].?);
 
-    testing.expectEqualSlices(u8, "\x7f\xff\xff\xff", v[4].Set);
-    testing.expectEqual(OptionID.Int, o[4].?);
-    testing.expectEqualSlices(u8, "\xab\xab\xab\xaf", v[5].Set);
-    testing.expectEqual(OptionID.Int, o[5].?);
+    try testing.expectEqualSlices(u8, "\x7f\xff\xff\xff", v[4].Set);
+    try testing.expectEqual(OptionID.Int, o[4].?);
+    try testing.expectEqualSlices(u8, "\xab\xab\xab\xaf", v[5].Set);
+    try testing.expectEqual(OptionID.Int, o[5].?);
 
-    testing.expectEqualSlices(u8, "\x7f\xff\xff\xff\xff\xff\xff\xff", v[6].Set);
-    testing.expectEqual(OptionID.Bigint, o[6].?);
-    testing.expectEqualSlices(u8, "\xdc\xdc\xdc\xdc\xdc\xdc\xdc\xdf", v[7].Set);
-    testing.expectEqual(OptionID.Bigint, o[7].?);
+    try testing.expectEqualSlices(u8, "\x7f\xff\xff\xff\xff\xff\xff\xff", v[6].Set);
+    try testing.expectEqual(OptionID.Bigint, o[6].?);
+    try testing.expectEqualSlices(u8, "\xdc\xdc\xdc\xdc\xdc\xdc\xdc\xdf", v[7].Set);
+    try testing.expectEqual(OptionID.Bigint, o[7].?);
 
-    testing.expectEqualSlices(u8, "\x00\x00\x00\x00\x00\x00\x4e\x20", v[8].Set);
-    testing.expectEqual(OptionID.Bigint, o[8].?);
+    try testing.expectEqualSlices(u8, "\x00\x00\x00\x00\x00\x00\x4e\x20", v[8].Set);
+    try testing.expectEqual(OptionID.Bigint, o[8].?);
 }
 
 test "compute values: floats" {
@@ -801,15 +801,15 @@ test "compute values: floats" {
     var v = values.items;
     var o = options.getItems();
 
-    testing.expectEqual(@as(usize, 3), v.len);
-    testing.expectEqual(@as(usize, 3), o.len);
+    try testing.expectEqual(@as(usize, 3), v.len);
+    try testing.expectEqual(@as(usize, 3), o.len);
 
-    testing.expectEqualSlices(u8, "\x6f\x12\x03\x3b", v[0].Set);
-    testing.expectEqual(OptionID.Float, o[0].?);
-    testing.expectEqualSlices(u8, "\x46\xfd\x7d\x00\x08\xfb\x0d\x41", v[1].Set);
-    testing.expectEqual(OptionID.Double, o[1].?);
-    testing.expectEqualSlices(u8, "\xa4\x70\x3d\x0a\xd7\x23\x79\x40", v[2].Set);
-    testing.expectEqual(OptionID.Double, o[2].?);
+    try testing.expectEqualSlices(u8, "\x6f\x12\x03\x3b", v[0].Set);
+    try testing.expectEqual(OptionID.Float, o[0].?);
+    try testing.expectEqualSlices(u8, "\x46\xfd\x7d\x00\x08\xfb\x0d\x41", v[1].Set);
+    try testing.expectEqual(OptionID.Double, o[1].?);
+    try testing.expectEqualSlices(u8, "\xa4\x70\x3d\x0a\xd7\x23\x79\x40", v[2].Set);
+    try testing.expectEqual(OptionID.Double, o[2].?);
 }
 
 test "compute values: strings" {
@@ -827,11 +827,11 @@ test "compute values: strings" {
     var v = values.items;
     var o = options.getItems();
 
-    testing.expectEqual(@as(usize, 1), v.len);
-    testing.expectEqual(@as(usize, 1), o.len);
+    try testing.expectEqual(@as(usize, 1), v.len);
+    try testing.expectEqual(@as(usize, 1), o.len);
 
-    testing.expectEqualStrings("foobar", v[0].Set);
-    testing.expectEqual(OptionID.Varchar, o[0].?);
+    try testing.expectEqualStrings("foobar", v[0].Set);
+    try testing.expectEqual(OptionID.Varchar, o[0].?);
 }
 
 test "compute values: bool" {
@@ -850,13 +850,13 @@ test "compute values: bool" {
     var v = values.items;
     var o = options.getItems();
 
-    testing.expectEqual(@as(usize, 2), v.len);
-    testing.expectEqual(@as(usize, 2), o.len);
+    try testing.expectEqual(@as(usize, 2), v.len);
+    try testing.expectEqual(@as(usize, 2), o.len);
 
-    testing.expectEqualSlices(u8, "\x01", v[0].Set);
-    testing.expectEqual(OptionID.Boolean, o[0].?);
-    testing.expectEqualSlices(u8, "\x00", v[1].Set);
-    testing.expectEqual(OptionID.Boolean, o[1].?);
+    try testing.expectEqualSlices(u8, "\x01", v[0].Set);
+    try testing.expectEqual(OptionID.Boolean, o[0].?);
+    try testing.expectEqualSlices(u8, "\x00", v[1].Set);
+    try testing.expectEqual(OptionID.Boolean, o[1].?);
 }
 
 test "compute values: set/list" {
@@ -875,14 +875,14 @@ test "compute values: set/list" {
     var v = values.items;
     var o = options.getItems();
 
-    testing.expectEqual(@as(usize, 2), v.len);
-    testing.expectEqual(@as(usize, 2), o.len);
+    try testing.expectEqual(@as(usize, 2), v.len);
+    try testing.expectEqual(@as(usize, 2), o.len);
 
-    testing.expectEqualSlices(u8, "\x00\x00\x00\x02\x00\x00\x00\x02\x00\x01\x00\x00\x00\x02\x20\x50", v[0].Set);
-    testing.expect(o[0] == null);
+    try testing.expectEqualSlices(u8, "\x00\x00\x00\x02\x00\x00\x00\x02\x00\x01\x00\x00\x00\x02\x20\x50", v[0].Set);
+    try testing.expect(o[0] == null);
 
-    testing.expectEqualSlices(u8, "\x00\x00\x00\x02\x00\x00\x00\x02\x00\x01\x00\x00\x00\x02\x20\x50", v[1].Set);
-    testing.expect(o[1] == null);
+    try testing.expectEqualSlices(u8, "\x00\x00\x00\x02\x00\x00\x00\x02\x00\x01\x00\x00\x00\x02\x20\x50", v[1].Set);
+    try testing.expect(o[1] == null);
 }
 
 test "compute values: uuid" {
@@ -905,11 +905,11 @@ test "compute values: uuid" {
     var v = values.items;
     var o = options.getItems();
 
-    testing.expectEqual(@as(usize, 1), v.len);
-    testing.expectEqual(@as(usize, 1), o.len);
+    try testing.expectEqual(@as(usize, 1), v.len);
+    try testing.expectEqual(@as(usize, 1), o.len);
 
-    testing.expectEqualSlices(u8, "\x55\x94\xd5\xb1\xef\x84\x41\xc4\xb2\x4e\x68\x48\x8d\xcf\xa1\xc9", v[0].Set);
-    testing.expectEqual(OptionID.UUID, o[0].?);
+    try testing.expectEqualSlices(u8, "\x55\x94\xd5\xb1\xef\x84\x41\xc4\xb2\x4e\x68\x48\x8d\xcf\xa1\xc9", v[0].Set);
+    try testing.expectEqual(OptionID.UUID, o[0].?);
 }
 
 test "compute values: not set and null" {
@@ -933,14 +933,14 @@ test "compute values: not set and null" {
     var v = values.items;
     var o = options.getItems();
 
-    testing.expectEqual(@as(usize, 2), v.len);
-    testing.expectEqual(@as(usize, 2), o.len);
+    try testing.expectEqual(@as(usize, 2), v.len);
+    try testing.expectEqual(@as(usize, 2), o.len);
 
-    testing.expect(v[0] == .NotSet);
-    testing.expectEqual(OptionID.Int, o[0].?);
+    try testing.expect(v[0] == .NotSet);
+    try testing.expectEqual(OptionID.Int, o[0].?);
 
-    testing.expect(v[1] == .Null);
-    testing.expectEqual(OptionID.Bigint, o[1].?);
+    try testing.expect(v[1] == .Null);
+    try testing.expectEqual(OptionID.Bigint, o[1].?);
 }
 
 fn areOptionIDsEqual(prepared: []const ColumnSpec, computed: []const ?OptionID) bool {}
@@ -960,7 +960,7 @@ fn countBindMarkers(query_string: []const u8) usize {
 test "count bind markers" {
     const query_string = "select * from foobar.user where id = ? and name = ? and age < ?";
     const count = countBindMarkers(query_string);
-    testing.expectEqual(@as(usize, 3), count);
+    try testing.expectEqual(@as(usize, 3), count);
 }
 
 test "" {
