@@ -20,5 +20,5 @@ test "ready frame" {
     const data = "\x84\x00\x00\x02\x02\x00\x00\x00\x00";
     const raw_frame = try testing.readRawFrame(&arena.allocator, data);
 
-    checkHeader(Opcode.Ready, data.len, raw_frame.header);
+    try checkHeader(Opcode.Ready, data.len, raw_frame.header);
 }

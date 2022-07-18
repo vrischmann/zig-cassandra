@@ -163,16 +163,16 @@ test "primitive writer: write int" {
     try pw.reset(&arena.allocator);
 
     try pw.writeInt(i32, 2101504);
-    testing.expectEqualSlices(u8, "\x00\x20\x11\x00", pw.getWritten()[0..4]);
+    try testing.expectEqualSlices(u8, "\x00\x20\x11\x00", pw.getWritten()[0..4]);
 
     try pw.writeInt(i64, 70368746279168);
-    testing.expectEqualSlices(u8, "\x00\x00\x40\x00\x00\x20\x11\x00", pw.getWritten()[4..12]);
+    try testing.expectEqualSlices(u8, "\x00\x00\x40\x00\x00\x20\x11\x00", pw.getWritten()[4..12]);
 
     try pw.writeInt(i16, 4352);
-    testing.expectEqualSlices(u8, "\x11\x00", pw.getWritten()[12..14]);
+    try testing.expectEqualSlices(u8, "\x11\x00", pw.getWritten()[12..14]);
 
     try pw.writeByte(0xFF);
-    testing.expectEqualSlices(u8, "\xff", pw.getWritten()[14..15]);
+    try testing.expectEqualSlices(u8, "\xff", pw.getWritten()[14..15]);
 }
 
 test "primitive writer: write strings and bytes" {
@@ -185,36 +185,36 @@ test "primitive writer: write strings and bytes" {
     {
         // short string
         _ = try pw.writeString("foobar");
-        testing.expectEqualSlices(u8, "\x00\x06foobar", pw.getWritten()[0..8]);
+        try testing.expectEqualSlices(u8, "\x00\x06foobar", pw.getWritten()[0..8]);
 
         // long string
 
         _ = try pw.writeLongString("foobar");
-        testing.expectEqualSlices(u8, "\x00\x00\x00\x06foobar", pw.getWritten()[8..18]);
+        try testing.expectEqualSlices(u8, "\x00\x00\x00\x06foobar", pw.getWritten()[8..18]);
     }
 
     {
         // int32 + bytes
         _ = try pw.writeBytes("123456789A");
-        testing.expectEqualSlices(u8, "\x00\x00\x00\x0A123456789A", pw.getWritten()[18..32]);
+        try testing.expectEqualSlices(u8, "\x00\x00\x00\x0A123456789A", pw.getWritten()[18..32]);
 
         _ = try pw.writeBytes("");
-        testing.expectEqualSlices(u8, "\x00\x00\x00\x00", pw.getWritten()[32..36]);
+        try testing.expectEqualSlices(u8, "\x00\x00\x00\x00", pw.getWritten()[32..36]);
 
         _ = try pw.writeBytes(null);
-        testing.expectEqualSlices(u8, "\xff\xff\xff\xff", pw.getWritten()[36..40]);
+        try testing.expectEqualSlices(u8, "\xff\xff\xff\xff", pw.getWritten()[36..40]);
     }
 
     {
         // int16 + bytes
         _ = try pw.writeShortBytes("123456789A");
-        testing.expectEqualSlices(u8, "\x00\x0A123456789A", pw.getWritten()[40..52]);
+        try testing.expectEqualSlices(u8, "\x00\x0A123456789A", pw.getWritten()[40..52]);
 
         _ = try pw.writeShortBytes("");
-        testing.expectEqualSlices(u8, "\x00\x00", pw.getWritten()[52..54]);
+        try testing.expectEqualSlices(u8, "\x00\x00", pw.getWritten()[52..54]);
 
         _ = try pw.writeShortBytes(null);
-        testing.expectEqualSlices(u8, "\xff\xff", pw.getWritten()[54..56]);
+        try testing.expectEqualSlices(u8, "\xff\xff", pw.getWritten()[54..56]);
     }
 }
 
@@ -229,7 +229,7 @@ test "primitive writer: write uuid" {
     try std.os.getrandom(&uuid);
 
     _ = try pw.writeUUID(uuid);
-    testing.expectEqualSlices(u8, &uuid, pw.getWritten()[0..16]);
+    try testing.expectEqualSlices(u8, &uuid, pw.getWritten()[0..16]);
 }
 
 test "primitive writer: write string list" {
@@ -242,7 +242,7 @@ test "primitive writer: write string list" {
     const list = &[_][]const u8{ "foo", "bar" };
 
     _ = try pw.writeStringList(list);
-    testing.expectEqualSlices(u8, "\x00\x02\x00\x03foo\x00\x03bar", pw.getWritten()[0..12]);
+    try testing.expectEqualSlices(u8, "\x00\x02\x00\x03foo\x00\x03bar", pw.getWritten()[0..12]);
 }
 
 test "primitive writer: write value" {
@@ -254,15 +254,15 @@ test "primitive writer: write value" {
 
     // Normal value
     _ = try pw.writeValue(Value{ .Set = "ab" });
-    testing.expectEqualSlices(u8, "\x00\x00\x00\x02\x61\x62", pw.getWritten()[0..6]);
+    try testing.expectEqualSlices(u8, "\x00\x00\x00\x02\x61\x62", pw.getWritten()[0..6]);
 
     // Null value
     _ = try pw.writeValue(Value{ .Null = {} });
-    testing.expectEqualSlices(u8, "\xff\xff\xff\xff", pw.getWritten()[6..10]);
+    try testing.expectEqualSlices(u8, "\xff\xff\xff\xff", pw.getWritten()[6..10]);
 
     // "Not set" value
     _ = try pw.writeValue(Value{ .NotSet = {} });
-    testing.expectEqualSlices(u8, "\xff\xff\xff\xfe", pw.getWritten()[10..14]);
+    try testing.expectEqualSlices(u8, "\xff\xff\xff\xfe", pw.getWritten()[10..14]);
 }
 
 test "primitive writer: write inet and inetaddr" {
@@ -274,19 +274,19 @@ test "primitive writer: write inet and inetaddr" {
 
     // IPv4
     _ = try pw.writeInet(net.Address.initIp4([_]u8{ 0x78, 0x56, 0x34, 0x12 }, 34));
-    testing.expectEqualSlices(u8, "\x04\x78\x56\x34\x12\x00\x00\x00\x22", pw.getWritten()[0..9]);
+    try testing.expectEqualSlices(u8, "\x04\x78\x56\x34\x12\x00\x00\x00\x22", pw.getWritten()[0..9]);
 
     // IPv6
     _ = try pw.writeInet(net.Address.initIp6([_]u8{0xff} ** 16, 34, 0, 0));
-    testing.expectEqualSlices(u8, "\x10\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\x00\x00\x00\x22", pw.getWritten()[9..30]);
+    try testing.expectEqualSlices(u8, "\x10\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\x00\x00\x00\x22", pw.getWritten()[9..30]);
 
     // IPv4 without port
     _ = try pw.writeInetaddr(net.Address.initIp4([_]u8{ 0x78, 0x56, 0x34, 0x12 }, 34));
-    testing.expectEqualSlices(u8, "\x04\x78\x56\x34\x12", pw.getWritten()[30..35]);
+    try testing.expectEqualSlices(u8, "\x04\x78\x56\x34\x12", pw.getWritten()[30..35]);
 
     // IPv6 without port
     _ = try pw.writeInetaddr(net.Address.initIp6([_]u8{0xff} ** 16, 34, 0, 0));
-    testing.expectEqualSlices(u8, "\x10\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff", pw.getWritten()[35..52]);
+    try testing.expectEqualSlices(u8, "\x10\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff", pw.getWritten()[35..52]);
 }
 
 test "primitive writer: write consistency" {
@@ -318,6 +318,6 @@ test "primitive writer: write consistency" {
     for (testCases) |tc| {
         try pw.reset(&arena.allocator);
         _ = try pw.writeConsistency(tc.consistency);
-        testing.expectEqualSlices(u8, tc.exp, pw.getWritten()[0..2]);
+        try testing.expectEqualSlices(u8, tc.exp, pw.getWritten()[0..2]);
     }
 }

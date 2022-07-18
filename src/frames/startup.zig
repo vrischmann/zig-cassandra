@@ -80,17 +80,17 @@ test "startup frame" {
     const exp = "\x04\x00\x00\x00\x01\x00\x00\x00\x16\x00\x01\x00\x0b\x43\x51\x4c\x5f\x56\x45\x52\x53\x49\x4f\x4e\x00\x05\x33\x2e\x30\x2e\x30";
     const raw_frame = try testing.readRawFrame(&arena.allocator, exp);
 
-    checkHeader(Opcode.Startup, exp.len, raw_frame.header);
+    try checkHeader(Opcode.Startup, exp.len, raw_frame.header);
 
     var pr = PrimitiveReader.init();
     pr.reset(raw_frame.body);
 
     const frame = try StartupFrame.read(&arena.allocator, &pr);
 
-    testing.expectEqual(CQLVersion{ .major = 3, .minor = 0, .patch = 0 }, frame.cql_version);
-    testing.expect(frame.compression == null);
+    try testing.expectEqual(CQLVersion{ .major = 3, .minor = 0, .patch = 0 }, frame.cql_version);
+    try testing.expect(frame.compression == null);
 
     // write
 
-    testing.expectSameRawFrame(frame, raw_frame.header, exp);
+    try testing.expectSameRawFrame(frame, raw_frame.header, exp);
 }

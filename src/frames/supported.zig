@@ -77,22 +77,22 @@ test "supported frame" {
     const exp = "\x84\x00\x00\x09\x06\x00\x00\x00\x60\x00\x03\x00\x11\x50\x52\x4f\x54\x4f\x43\x4f\x4c\x5f\x56\x45\x52\x53\x49\x4f\x4e\x53\x00\x03\x00\x04\x33\x2f\x76\x33\x00\x04\x34\x2f\x76\x34\x00\x09\x35\x2f\x76\x35\x2d\x62\x65\x74\x61\x00\x0b\x43\x4f\x4d\x50\x52\x45\x53\x53\x49\x4f\x4e\x00\x02\x00\x06\x73\x6e\x61\x70\x70\x79\x00\x03\x6c\x7a\x34\x00\x0b\x43\x51\x4c\x5f\x56\x45\x52\x53\x49\x4f\x4e\x00\x01\x00\x05\x33\x2e\x34\x2e\x34";
     const raw_frame = try testing.readRawFrame(&arena.allocator, exp);
 
-    checkHeader(Opcode.Supported, exp.len, raw_frame.header);
+    try checkHeader(Opcode.Supported, exp.len, raw_frame.header);
 
     var pr = PrimitiveReader.init();
     pr.reset(raw_frame.body);
 
     const frame = try SupportedFrame.read(&arena.allocator, &pr);
 
-    testing.expectEqual(@as(usize, 1), frame.cql_versions.len);
-    testing.expectEqual(CQLVersion{ .major = 3, .minor = 4, .patch = 4 }, frame.cql_versions[0]);
+    try testing.expectEqual(@as(usize, 1), frame.cql_versions.len);
+    try testing.expectEqual(CQLVersion{ .major = 3, .minor = 4, .patch = 4 }, frame.cql_versions[0]);
 
-    testing.expectEqual(@as(usize, 3), frame.protocol_versions.len);
-    testing.expect(frame.protocol_versions[0].is(3));
-    testing.expect(frame.protocol_versions[1].is(4));
-    testing.expect(frame.protocol_versions[2].is(5));
+    try testing.expectEqual(@as(usize, 3), frame.protocol_versions.len);
+    try testing.expect(frame.protocol_versions[0].is(3));
+    try testing.expect(frame.protocol_versions[1].is(4));
+    try testing.expect(frame.protocol_versions[2].is(5));
 
-    testing.expectEqual(@as(usize, 2), frame.compression_algorithms.len);
-    testing.expectEqual(CompressionAlgorithm.Snappy, frame.compression_algorithms[0]);
-    testing.expectEqual(CompressionAlgorithm.LZ4, frame.compression_algorithms[1]);
+    try testing.expectEqual(@as(usize, 2), frame.compression_algorithms.len);
+    try testing.expectEqual(CompressionAlgorithm.Snappy, frame.compression_algorithms[0]);
+    try testing.expectEqual(CompressionAlgorithm.LZ4, frame.compression_algorithms[1]);
 }

@@ -506,7 +506,7 @@ fn testIteratorScan(allocator: *mem.Allocator, column_specs: []ColumnSpec, data:
     var options = Iterator.ScanOptions{
         .diags = diags,
     };
-    testing.expect(try iterator.scan(allocator, options, row));
+    try testing.expect(try iterator.scan(allocator, options, row));
 }
 
 test "iterator scan: incompatible metadata" {
@@ -526,9 +526,9 @@ test "iterator scan: incompatible metadata" {
         const test_data = &[_][]const u8{ "\x20", "\x20" };
 
         var err = testIteratorScan(&arena.allocator, column_specs, test_data, &diags, &row);
-        testing.expectError(error.IncompatibleMetadata, err);
-        testing.expectEqual(@as(usize, 1), diags.incompatible_metadata.metadata_columns);
-        testing.expectEqual(@as(usize, 2), diags.incompatible_metadata.struct_fields);
+        try testing.expectError(error.IncompatibleMetadata, err);
+        try testing.expectEqual(@as(usize, 1), diags.incompatible_metadata.metadata_columns);
+        try testing.expectEqual(@as(usize, 2), diags.incompatible_metadata.struct_fields);
     }
 
     diags.incompatible_metadata.metadata_columns = 0;
@@ -544,11 +544,11 @@ test "iterator scan: incompatible metadata" {
         const test_data = &[_][]const u8{"\x01"};
 
         var err = testIteratorScan(&arena.allocator, column_specs, test_data, &diags, &row);
-        testing.expectError(error.IncompatibleMetadata, err);
-        testing.expectEqual(@as(usize, 0), diags.incompatible_metadata.metadata_columns);
-        testing.expectEqual(@as(usize, 0), diags.incompatible_metadata.struct_fields);
-        testing.expectEqualStrings("Int", diags.incompatible_metadata.incompatible_types.cql_type_name.?);
-        testing.expectEqualStrings("u8", diags.incompatible_metadata.incompatible_types.native_type_name.?);
+        try testing.expectError(error.IncompatibleMetadata, err);
+        try testing.expectEqual(@as(usize, 0), diags.incompatible_metadata.metadata_columns);
+        try testing.expectEqual(@as(usize, 0), diags.incompatible_metadata.struct_fields);
+        try testing.expectEqualStrings("Int", diags.incompatible_metadata.incompatible_types.cql_type_name.?);
+        try testing.expectEqualStrings("u8", diags.incompatible_metadata.incompatible_types.native_type_name.?);
     }
 }
 
@@ -570,8 +570,8 @@ test "iterator scan: u8/i8" {
 
     try testIteratorScan(&arena.allocator, column_specs, test_data, null, &row);
 
-    testing.expectEqual(@as(u8, 0x20), row.u_8);
-    testing.expectEqual(@as(i8, 0x20), row.i_8);
+    try testing.expectEqual(@as(u8, 0x20), row.u_8);
+    try testing.expectEqual(@as(i8, 0x20), row.i_8);
 }
 
 test "iterator scan: u16/i16" {
@@ -593,8 +593,8 @@ test "iterator scan: u16/i16" {
 
         try testIteratorScan(&arena.allocator, column_specs, test_data, null, &row);
 
-        testing.expectEqual(@as(u16, 0x20), row.u_16);
-        testing.expectEqual(@as(i16, 0x20), row.i_16);
+        try testing.expectEqual(@as(u16, 0x20), row.u_16);
+        try testing.expectEqual(@as(i16, 0x20), row.i_16);
     }
 
     {
@@ -606,8 +606,8 @@ test "iterator scan: u16/i16" {
 
         try testIteratorScan(&arena.allocator, column_specs, test_data, null, &row);
 
-        testing.expectEqual(@as(u16, 0x2120), row.u_16);
-        testing.expectEqual(@as(i16, 0x2220), row.i_16);
+        try testing.expectEqual(@as(u16, 0x2120), row.u_16);
+        try testing.expectEqual(@as(i16, 0x2220), row.i_16);
     }
 }
 
@@ -630,8 +630,8 @@ test "iterator scan: u32/i32" {
 
         try testIteratorScan(&arena.allocator, column_specs, test_data, null, &row);
 
-        testing.expectEqual(@as(u32, 0x20), row.u_32);
-        testing.expectEqual(@as(i32, 0x20), row.i_32);
+        try testing.expectEqual(@as(u32, 0x20), row.u_32);
+        try testing.expectEqual(@as(i32, 0x20), row.i_32);
     }
 
     {
@@ -643,8 +643,8 @@ test "iterator scan: u32/i32" {
 
         try testIteratorScan(&arena.allocator, column_specs, test_data, null, &row);
 
-        testing.expectEqual(@as(u32, 0x2120), row.u_32);
-        testing.expectEqual(@as(i32, 0x2220), row.i_32);
+        try testing.expectEqual(@as(u32, 0x2120), row.u_32);
+        try testing.expectEqual(@as(i32, 0x2220), row.i_32);
     }
 
     {
@@ -656,8 +656,8 @@ test "iterator scan: u32/i32" {
 
         try testIteratorScan(&arena.allocator, column_specs, test_data, null, &row);
 
-        testing.expectEqual(@as(u32, 0x21222324), row.u_32);
-        testing.expectEqual(@as(i32, 0x25262728), row.i_32);
+        try testing.expectEqual(@as(u32, 0x21222324), row.u_32);
+        try testing.expectEqual(@as(i32, 0x25262728), row.i_32);
     }
 }
 
@@ -680,8 +680,8 @@ test "iterator scan: u64/i64" {
 
         try testIteratorScan(&arena.allocator, column_specs, test_data, null, &row);
 
-        testing.expectEqual(@as(u64, 0x20), row.u_64);
-        testing.expectEqual(@as(i64, 0x20), row.i_64);
+        try testing.expectEqual(@as(u64, 0x20), row.u_64);
+        try testing.expectEqual(@as(i64, 0x20), row.i_64);
     }
 
     {
@@ -693,8 +693,8 @@ test "iterator scan: u64/i64" {
 
         try testIteratorScan(&arena.allocator, column_specs, test_data, null, &row);
 
-        testing.expectEqual(@as(u64, 0x2220), row.u_64);
-        testing.expectEqual(@as(i64, 0x2320), row.i_64);
+        try testing.expectEqual(@as(u64, 0x2220), row.u_64);
+        try testing.expectEqual(@as(i64, 0x2320), row.i_64);
     }
 
     {
@@ -706,8 +706,8 @@ test "iterator scan: u64/i64" {
 
         try testIteratorScan(&arena.allocator, column_specs, test_data, null, &row);
 
-        testing.expectEqual(@as(u64, 0x24222821), row.u_64);
-        testing.expectEqual(@as(i64, 0x22292322), row.i_64);
+        try testing.expectEqual(@as(u64, 0x24222821), row.u_64);
+        try testing.expectEqual(@as(i64, 0x22292322), row.i_64);
     }
 
     {
@@ -719,8 +719,8 @@ test "iterator scan: u64/i64" {
 
         try testIteratorScan(&arena.allocator, column_specs, test_data, null, &row);
 
-        testing.expectEqual(@as(u64, 0x2122232425262728), row.u_64);
-        testing.expectEqual(@as(i64, 0x3132333435363738), row.i_64);
+        try testing.expectEqual(@as(u64, 0x2122232425262728), row.u_64);
+        try testing.expectEqual(@as(i64, 0x3132333435363738), row.i_64);
     }
 }
 
@@ -743,8 +743,8 @@ test "iterator scan: u128/i128" {
 
         try testIteratorScan(&arena.allocator, column_specs, test_data, null, &row);
 
-        testing.expectEqual(@as(u128, 0x20), row.u_128);
-        testing.expectEqual(@as(i128, 0x20), row.i_128);
+        try testing.expectEqual(@as(u128, 0x20), row.u_128);
+        try testing.expectEqual(@as(i128, 0x20), row.i_128);
     }
 
     {
@@ -756,8 +756,8 @@ test "iterator scan: u128/i128" {
 
         try testIteratorScan(&arena.allocator, column_specs, test_data, null, &row);
 
-        testing.expectEqual(@as(u128, 0x2220), row.u_128);
-        testing.expectEqual(@as(i128, 0x2320), row.i_128);
+        try testing.expectEqual(@as(u128, 0x2220), row.u_128);
+        try testing.expectEqual(@as(i128, 0x2320), row.i_128);
     }
 
     {
@@ -769,8 +769,8 @@ test "iterator scan: u128/i128" {
 
         try testIteratorScan(&arena.allocator, column_specs, test_data, null, &row);
 
-        testing.expectEqual(@as(u128, 0x24222821), row.u_128);
-        testing.expectEqual(@as(i128, 0x22292322), row.i_128);
+        try testing.expectEqual(@as(u128, 0x24222821), row.u_128);
+        try testing.expectEqual(@as(i128, 0x22292322), row.i_128);
     }
 
     {
@@ -782,8 +782,8 @@ test "iterator scan: u128/i128" {
 
         try testIteratorScan(&arena.allocator, column_specs, test_data, null, &row);
 
-        testing.expectEqual(@as(u128, 0x2122232425262728), row.u_128);
-        testing.expectEqual(@as(i128, 0x3132333435363738), row.i_128);
+        try testing.expectEqual(@as(u128, 0x2122232425262728), row.u_128);
+        try testing.expectEqual(@as(i128, 0x3132333435363738), row.i_128);
     }
 }
 
@@ -801,7 +801,7 @@ test "iterator scan: f32" {
 
     try testIteratorScan(&arena.allocator, column_specs, test_data, null, &row);
 
-    testing.expectEqual(@as(f32, 2.03), row.f_32);
+    try testing.expectEqual(@as(f32, 2.03), row.f_32);
 }
 
 test "iterator scan: f64" {
@@ -819,7 +819,7 @@ test "iterator scan: f64" {
 
         try testIteratorScan(&arena.allocator, column_specs, test_data, null, &row);
 
-        testing.expectInDelta(@as(f64, 2.03), row.f_64, 0.000001);
+        try testing.expectApproxEqAbs(@as(f64, 2.03), row.f_64, 0.000001);
     }
 
     {
@@ -828,7 +828,7 @@ test "iterator scan: f64" {
 
         try testIteratorScan(&arena.allocator, column_specs, test_data, null, &row);
 
-        testing.expectInDelta(@as(f64, 45202.00024), row.f_64, 0.000001);
+        try testing.expectApproxEqAbs(@as(f64, 45202.00024), row.f_64, 0.000001);
     }
 }
 
@@ -847,7 +847,7 @@ test "iterator scan: f128" {
 
         try testIteratorScan(&arena.allocator, column_specs, test_data, null, &row);
 
-        testing.expectInDelta(@as(f128, 2.03), row.f_128, 0.000001);
+        try testing.expectApproxEqAbs(@as(f128, 2.03), row.f_128, 0.000001);
     }
 
     {
@@ -856,7 +856,7 @@ test "iterator scan: f128" {
 
         try testIteratorScan(&arena.allocator, column_specs, test_data, null, &row);
 
-        testing.expectInDelta(@as(f128, 45202.00024), row.f_128, 0.000001);
+        try testing.expectApproxEqAbs(@as(f128, 45202.00024), row.f_128, 0.000001);
     }
 }
 
@@ -884,9 +884,9 @@ test "iterator scan: blobs, uuids, timeuuids" {
 
     try testIteratorScan(&arena.allocator, column_specs, test_data, null, &row);
 
-    testing.expectEqualStrings("Vincent", row.blob);
-    testing.expectEqualSlices(u8, "\x02\x9a\x93\xa9\xc3\x27\x4c\x79\xbe\x32\x71\x8e\x22\xb5\x02\x4c", &row.uuid);
-    testing.expectEqualSlices(u8, "\xe9\x13\x93\x2e\x7a\xb7\x11\xea\xbf\x1b\x10\xc3\x7b\x6e\x96\xcc", &row.tuuid);
+    try testing.expectEqualStrings("Vincent", row.blob);
+    try testing.expectEqualSlices(u8, "\x02\x9a\x93\xa9\xc3\x27\x4c\x79\xbe\x32\x71\x8e\x22\xb5\x02\x4c", &row.uuid);
+    try testing.expectEqualSlices(u8, "\xe9\x13\x93\x2e\x7a\xb7\x11\xea\xbf\x1b\x10\xc3\x7b\x6e\x96\xcc", &row.tuuid);
 }
 
 test "iterator scan: ascii/varchar" {
@@ -910,8 +910,8 @@ test "iterator scan: ascii/varchar" {
 
     try testIteratorScan(&arena.allocator, column_specs, test_data, null, &row);
 
-    testing.expectEqualStrings("Ascii vincent", row.ascii);
-    testing.expectEqualStrings("Varchar vincent", row.varchar);
+    try testing.expectEqualStrings("Ascii vincent", row.ascii);
+    try testing.expectEqualStrings("Varchar vincent", row.varchar);
 }
 
 test "iterator scan: set/list" {
@@ -945,21 +945,21 @@ test "iterator scan: set/list" {
 
     try testIteratorScan(&arena.allocator, column_specs, test_data, null, &row);
 
-    testing.expectEqual(@as(usize, 2), row.set.len);
-    testing.expectEqual(@as(u32, 0x21222324), row.set[0]);
-    testing.expectEqual(@as(u32, 0x31323334), row.set[1]);
+    try testing.expectEqual(@as(usize, 2), row.set.len);
+    try testing.expectEqual(@as(u32, 0x21222324), row.set[0]);
+    try testing.expectEqual(@as(u32, 0x31323334), row.set[1]);
 
-    testing.expectEqual(@as(usize, 2), row.list.len);
-    testing.expectEqual(@as(u32, 0x41424344), row.list[0]);
-    testing.expectEqual(@as(u32, 0x51525354), row.list[1]);
+    try testing.expectEqual(@as(usize, 2), row.list.len);
+    try testing.expectEqual(@as(u32, 0x41424344), row.list[0]);
+    try testing.expectEqual(@as(u32, 0x51525354), row.list[1]);
 
-    // testing.expectEqual(@as(usize, 2), row.set_of_uuid.len);
-    // testing.expectEqualSlices(u8, "\x14\x2d\x6b\x2d\x2c\xe6\x45\x80\x95\x53\x15\x87\xa9\x6d\xec\x94", row.set_of_uuid[0]);
-    // testing.expectEqualSlices(u8, "\x8a\xa8\xc1\x37\xd0\x53\x41\x12\xbf\xee\x5f\x96\x28\x7e\xe5\x1a", row.set_of_uuid[1]);
+    // try testing.expectEqual(@as(usize, 2), row.set_of_uuid.len);
+    // try testing.expectEqualSlices(u8, "\x14\x2d\x6b\x2d\x2c\xe6\x45\x80\x95\x53\x15\x87\xa9\x6d\xec\x94", row.set_of_uuid[0]);
+    // try testing.expectEqualSlices(u8, "\x8a\xa8\xc1\x37\xd0\x53\x41\x12\xbf\xee\x5f\x96\x28\x7e\xe5\x1a", row.set_of_uuid[1]);
 
-    // testing.expectEqual(@as(usize, 2), row.list_of_uuid.len);
-    // testing.expectEqualSlices(u8, "\x14\x2d\x6b\x2d\x2c\xe6\x45\x80\x95\x53\x15\x87\xa9\x6d\xec\x94", row.list_of_uuid[0]);
-    // testing.expectEqualSlices(u8, "\x8a\xa8\xc1\x37\xd0\x53\x41\x12\xbf\xee\x5f\x96\x28\x7e\xe5\x1a", row.list_of_uuid[1]);
+    // try testing.expectEqual(@as(usize, 2), row.list_of_uuid.len);
+    // try testing.expectEqualSlices(u8, "\x14\x2d\x6b\x2d\x2c\xe6\x45\x80\x95\x53\x15\x87\xa9\x6d\xec\x94", row.list_of_uuid[0]);
+    // try testing.expectEqualSlices(u8, "\x8a\xa8\xc1\x37\xd0\x53\x41\x12\xbf\xee\x5f\x96\x28\x7e\xe5\x1a", row.list_of_uuid[1]);
 }
 
 test "iterator scan: set of tinyint" {
@@ -981,9 +981,9 @@ test "iterator scan: set of tinyint" {
 
     try testIteratorScan(&arena.allocator, column_specs, test_data, null, &row);
 
-    testing.expectEqual(@as(usize, 2), row.set.len);
-    testing.expectEqual(@as(u8, 0x20), row.set[0]);
-    testing.expectEqual(@as(u8, 0x21), row.set[1]);
+    try testing.expectEqual(@as(usize, 2), row.set.len);
+    try testing.expectEqual(@as(u8, 0x20), row.set[0]);
+    try testing.expectEqual(@as(u8, 0x21), row.set[1]);
 }
 
 test "iterator scan: set of tinyint into RawBytes" {
@@ -1015,12 +1015,12 @@ test "iterator scan: set of tinyint into RawBytes" {
 
     try testIteratorScan(&arena.allocator, column_specs, test_data, null, &row);
 
-    testing.expectEqual(@as(u32, 0x10111213), row.age);
-    testing.expectEqualSlices(u8, test_data[2], row.set.data);
-    testing.expectEqualStrings("foobar", row.name);
-    testing.expectEqual(@as(usize, 2), row.list_timestamp.len);
-    testing.expectEqual(@as(u64, 0xbcbcbcbcbcbcbcbc), row.list_timestamp[0]);
-    testing.expectEqual(@as(u64, 0xbebebebebebebebe), row.list_timestamp[1]);
+    try testing.expectEqual(@as(u32, 0x10111213), row.age);
+    try testing.expectEqualSlices(u8, test_data[2], row.set.data);
+    try testing.expectEqualStrings("foobar", row.name);
+    try testing.expectEqual(@as(usize, 2), row.list_timestamp.len);
+    try testing.expectEqual(@as(u64, 0xbcbcbcbcbcbcbcbc), row.list_timestamp[0]);
+    try testing.expectEqual(@as(u64, 0xbebebebebebebebe), row.list_timestamp[1]);
 }
 
 test "iterator scan: into user provided scanner" {
@@ -1064,8 +1064,7 @@ test "iterator scan: into user provided scanner" {
 
     try testIteratorScan(&arena.allocator, column_specs, test_data, null, &row);
 
-    testing.expectEqual(@as(usize, 2), row.list_timestamp.data.len);
-    testing.expectEqual(@as(u64, 0xbcbcbcbcbcbcbcbc), row.list_timestamp.data[0]);
-    testing.expectEqual(@as(u64, 0xbebebebebebebebe), row.list_timestamp.data[1]);
-    testing.expectEqual(@as(u32, 0x10111213), row.age);
+    try testing.expectEqual(@as(usize, 2), row.list_timestamp.data.len);
+    try testing.expectEqual(@as(u64, 0xbcbcbcbcbcbcbcbc), row.list_timestamp.data[0]);
+    try testing.expectEqual(@as(u64, 0xbebebebebebebebe), row.list_timestamp.data[1]);
 }

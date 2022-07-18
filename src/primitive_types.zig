@@ -227,18 +227,18 @@ pub const OptionID = packed enum(u16) {
 };
 
 test "cql version: fromString" {
-    testing.expectEqual(CQLVersion{ .major = 3, .minor = 0, .patch = 0 }, try CQLVersion.fromString("3.0.0"));
-    testing.expectEqual(CQLVersion{ .major = 3, .minor = 4, .patch = 0 }, try CQLVersion.fromString("3.4.0"));
-    testing.expectEqual(CQLVersion{ .major = 3, .minor = 5, .patch = 4 }, try CQLVersion.fromString("3.5.4"));
-    testing.expectError(error.InvalidCQLVersion, CQLVersion.fromString("1.0.0"));
+    try testing.expectEqual(CQLVersion{ .major = 3, .minor = 0, .patch = 0 }, try CQLVersion.fromString("3.0.0"));
+    try testing.expectEqual(CQLVersion{ .major = 3, .minor = 4, .patch = 0 }, try CQLVersion.fromString("3.4.0"));
+    try testing.expectEqual(CQLVersion{ .major = 3, .minor = 5, .patch = 4 }, try CQLVersion.fromString("3.5.4"));
+    try testing.expectError(error.InvalidCQLVersion, CQLVersion.fromString("1.0.0"));
 }
 
 test "protocol version: fromString" {
-    testing.expect((try ProtocolVersion.fromString("3/v3")).is(3));
-    testing.expect((try ProtocolVersion.fromString("4/v4")).is(4));
-    testing.expect((try ProtocolVersion.fromString("5/v5")).is(5));
-    testing.expect((try ProtocolVersion.fromString("5/v5-beta")).is(5));
-    testing.expectError(error.InvalidProtocolVersion, ProtocolVersion.fromString("lalal"));
+    try testing.expect((try ProtocolVersion.fromString("3/v3")).is(3));
+    try testing.expect((try ProtocolVersion.fromString("4/v4")).is(4));
+    try testing.expect((try ProtocolVersion.fromString("5/v5")).is(5));
+    try testing.expect((try ProtocolVersion.fromString("5/v5-beta")).is(5));
+    try testing.expectError(error.InvalidProtocolVersion, ProtocolVersion.fromString("lalal"));
 }
 
 test "protocol version: serialize and deserialize" {
@@ -275,19 +275,19 @@ test "protocol version: serialize and deserialize" {
         var version: ProtocolVersion = undefined;
 
         if (tc.err) |err| {
-            testing.expectError(err, ProtocolVersion.init(tc.b[0]));
+            try testing.expectError(err, ProtocolVersion.init(tc.b[0]));
         } else {
             var v1 = try ProtocolVersion.init(tc.b[0]);
             var v2 = try ProtocolVersion.init(tc.b[1]);
-            testing.expect(v1.is(tc.exp));
-            testing.expect(v1.isRequest());
-            testing.expect(v2.isResponse());
+            try testing.expect(v1.is(tc.exp));
+            try testing.expect(v1.isRequest());
+            try testing.expect(v2.isResponse());
         }
     }
 }
 
 test "compression algorith: fromString" {
-    testing.expectEqual(CompressionAlgorithm.LZ4, try CompressionAlgorithm.fromString("lz4"));
-    testing.expectEqual(CompressionAlgorithm.Snappy, try CompressionAlgorithm.fromString("snappy"));
-    testing.expectError(error.InvalidCompressionAlgorithm, CompressionAlgorithm.fromString("foobar"));
+    try testing.expectEqual(CompressionAlgorithm.LZ4, try CompressionAlgorithm.fromString("lz4"));
+    try testing.expectEqual(CompressionAlgorithm.Snappy, try CompressionAlgorithm.fromString("snappy"));
+    try testing.expectError(error.InvalidCompressionAlgorithm, CompressionAlgorithm.fromString("foobar"));
 }

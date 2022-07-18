@@ -3,6 +3,7 @@ const io = std.io;
 
 pub const allocator = std.testing.allocator;
 pub const expect = std.testing.expect;
+pub const expectApproxEqAbs = std.testing.expectApproxEqAbs;
 pub const expectError = std.testing.expectError;
 pub const expectEqual = std.testing.expectEqual;
 pub const expectEqualSlices = std.testing.expectEqualSlices;
@@ -13,13 +14,6 @@ const FrameHeader = @import("frame.zig").FrameHeader;
 const RawFrame = @import("frame.zig").RawFrame;
 const RawFrameReader = @import("frame.zig").RawFrameReader;
 const RawFrameWriter = @import("frame.zig").RawFrameWriter;
-
-pub fn expectInDelta(a: anytype, b: anytype, delta: @TypeOf(a)) void {
-    const dt = a - b;
-    if (dt < -delta or dt > delta) {
-        std.debug.panic("expected a {e} to be within {e} of b {}, but got {e}", .{ a, delta, b, dt });
-    }
-}
 
 pub fn printHRBytes(comptime fmt: []const u8, exp: []const u8, args: anytype) void {
     const hextable = "0123456789abcdef";
@@ -65,25 +59,19 @@ pub fn readRawFrame(_allocator: *std.mem.Allocator, data: []const u8) !RawFrame 
     return fr.read(_allocator);
 }
 
-pub fn expectSameRawFrame(frame: anytype, header: FrameHeader, exp: []const u8) void {
+pub fn expectSameRawFrame(frame: anytype, header: FrameHeader, exp: []const u8) !void {
     var arena = arenaAllocator();
     defer arena.deinit();
 
     // Write frame body
     var pw: PrimitiveWriter = undefined;
-    pw.reset(&arena.allocator) catch |err| {
-        std.debug.panic("unable to initialize writer. err: {}\n", .{err});
-    };
+    try pw.reset(&arena.allocator);
 
     const function = @typeInfo(@TypeOf(frame.write)).BoundFn;
     if (function.args.len == 2) {
-        frame.write(&pw) catch |err| {
-            std.debug.panic("unable to write frame. err: {}\n", .{err});
-        };
+        try frame.write(&pw);
     } else if (function.args.len == 3) {
-        frame.write(header.version, &pw) catch |err| {
-            std.debug.panic("unable to write frame. err: {}\n", .{err});
-        };
+        try frame.write(header.version, &pw);
     }
 
     // Write raw frame
@@ -98,9 +86,7 @@ pub fn expectSameRawFrame(frame: anytype, header: FrameHeader, exp: []const u8) 
     var writer = source.writer();
     var fw = RawFrameWriter(@TypeOf(writer)).init(writer);
 
-    fw.write(raw_frame) catch |err| {
-        std.debug.panic("unable to write raw frame. err: {}\n", .{err});
-    };
+    try fw.write(raw_frame);
 
     if (!std.mem.eql(u8, exp, source.buffer.getWritten())) {
         printHRBytes("\n==> exp   : {s}\n", exp, .{});

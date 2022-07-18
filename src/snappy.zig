@@ -63,5 +63,5 @@ test "snappy: compress and decompress" {
     const decompressed = try decompress(testing.allocator, compressed);
     defer testing.allocator.free(decompressed);
 
-    testing.expectEqualStrings(exp, decompressed);
+    try testing.expectEqualStrings(exp, decompressed);
 }
