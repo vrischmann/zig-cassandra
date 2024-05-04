@@ -1,6 +1,8 @@
 # Cassandra client in Zig
 
-This is a work in progress Cassandra client in Zig.
+This was the start of a CQL client for Zig that is now unmaintained.
+
+It hasn't been updated for years and won't compile with any recent Zig release.
 
 # Available features
 
