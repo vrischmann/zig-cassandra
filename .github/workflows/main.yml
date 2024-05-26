@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  create:
+  push:
+    branches: master
+    paths:
+      - '**.zig'
+  pull_request:
+  schedule:
+    - cron: "0 13 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup zig
+        uses: goto-bus-stop/setup-zig@v2
+        with:
+          version: master
+
+      - run: zig fmt --check *.zig
+
+      - name: Restore cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            zig-cache
+            ~/.cache/zig
+          key: ${{ runner.os }}-${{ matrix.os }}-zig-${{ github.sha }}
+          restore-keys: ${{ runner.os }}-${{ matrix.os }}-zig-
+
+      - name: Run Tests in memory
+        run: zig build test --summary all
