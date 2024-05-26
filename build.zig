@@ -66,6 +66,8 @@ pub fn build(b: *std.Build) !void {
     const module = b.addModule("cassandra", .{
         .root_source_file = b.path("src/lib.zig"),
         .link_libc = true,
+        .target = target,
+        .optimize = optimize,
     });
     module.addIncludePath(b.path("src"));
     module.linkLibrary(lz4);
@@ -122,7 +124,12 @@ pub fn build(b: *std.Build) !void {
         example.linkSystemLibrary("snappy");
     }
 
+    const example_run_cmd = b.addRunArtifact(example);
+    example_run_cmd.step.dependOn(b.getInstallStep());
+    if (b.args) |args| {
+        example_run_cmd.addArgs(args);
+    }
+
     const example_run = b.step("example", "Run the example");
-    const example_install = b.addInstallArtifact(example, .{});
-    example_run.dependOn(&example_install.step);
+    example_run.dependOn(&example_run_cmd.step);
 }

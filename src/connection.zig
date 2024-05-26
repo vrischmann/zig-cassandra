@@ -13,7 +13,9 @@ const RawFrameReader = @import("frame.zig").RawFrameReader;
 const RawFrameWriter = @import("frame.zig").RawFrameWriter;
 
 const lz4 = @import("lz4.zig");
-const snappy = if (build_options.with_snappy) @import("snappy.zig");
+
+const enable_snappy = build_options.with_snappy;
+const snappy = if (enable_snappy) @import("snappy.zig");
 
 const message = @import("message.zig");
 const Opcode = message.Opcode;
@@ -327,7 +329,7 @@ pub const Connection = struct {
                         raw_frame.body = compressed_data;
                     },
                     .Snappy => {
-                        comptime if (!build_options.with_snappy) return error.InvalidCompressedFrame;
+                        if (comptime !enable_snappy) return error.InvalidCompressedFrame;
 
                         const compressed_data = try snappy.compress(allocator, written);
 
@@ -383,9 +385,7 @@ pub const Connection = struct {
                     raw_frame.body = decompressed_data;
                 },
                 .Snappy => {
-                    if (!build_options.with_snappy) {
-                        return error.InvalidCompressedFrame;
-                    }
+                    if (comptime !enable_snappy) return error.InvalidCompressedFrame;
 
                     const decompressed_data = try snappy.decompress(allocator, raw_frame.body);
                     raw_frame.body = decompressed_data;
