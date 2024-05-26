@@ -1,23 +1,9 @@
 const std = @import("std");
 const builtin = @import("builtin");
-const Builder = std.build.Builder;
 
-fn maybeLinkSnappy(obj: *std.build.LibExeObjStep, with_snappy: bool) void {
-    obj.addBuildOption(bool, "with_snappy", with_snappy);
-    if (!with_snappy) return;
-
-    linkSnappy(obj);
-}
-
-fn linkSnappy(obj: *std.build.LibExeObjStep) void {
-    obj.linkLibC();
-    obj.linkSystemLibrary("snappy");
-}
-
-pub fn build(b: *Builder) !void {
-    var target = b.standardTargetOptions(.{});
-
-    const mode = b.standardReleaseOptions();
+pub fn build(b: *std.Build) !void {
+    const target = b.standardTargetOptions(.{});
+    const optimize = b.standardOptimizeOption(.{});
 
     // Define options
 
@@ -29,67 +15,113 @@ pub fn build(b: *Builder) !void {
     // To make cross compiling easier we embed the lz4 source code which is small enough and is easily compiled
     // with Zig's C compiling abilities.
 
-    const lz4 = b.addStaticLibrary("lz4", null);
+    const lz4 = b.addStaticLibrary(.{
+        .name = "lz4",
+        .target = target,
+        .optimize = optimize,
+    });
     lz4.linkLibC();
     // lz4 is broken with -fsanitize=pointer-overflow which is added automatically by Zig with -fsanitize=undefined.
     // See here what this flag does: https://clang.llvm.org/docs/UndefinedBehaviorSanitizer.html
-    lz4.addCSourceFile("src/lz4.c", &[_][]const u8{ "-std=c99", "-fno-sanitize=pointer-overflow" });
-    lz4.setTarget(target);
-    lz4.setBuildMode(mode);
-    lz4.addIncludeDir("src");
+    lz4.addCSourceFile(.{
+        .file = b.path("src/lz4.c"),
+        .flags = &[_][]const u8{ "-std=c99", "-fno-sanitize=pointer-overflow" },
+    });
+    lz4.addIncludePath(b.path("src"));
 
-    var lz4_tests = b.addTest("src/lz4.zig");
+    var lz4_tests = b.addTest(.{
+        .name = "lz4_tests",
+        .root_source_file = b.path("src/lz4.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
     lz4_tests.linkLibrary(lz4);
-    lz4_tests.setTarget(target);
-    lz4_tests.setBuildMode(mode);
-    lz4_tests.addIncludeDir("src");
+    lz4_tests.addIncludePath(b.path("src"));
 
     const lz4_test_step = b.step("lz4-test", "Run the lz4 tests");
     lz4_test_step.dependOn(&lz4_tests.step);
 
     // Snappy
     if (with_snappy) {
-        var snappy_tests = b.addTest("src/snappy.zig");
-        linkSnappy(snappy_tests);
-        snappy_tests.setTarget(target);
-        snappy_tests.setBuildMode(mode);
+        var snappy_tests = b.addTest(.{
+            .name = "snappy_tests",
+            .root_source_file = b.path("src/snappy.zig"),
+            .target = target,
+            .optimize = optimize,
+        });
+        snappy_tests.linkLibC();
+        snappy_tests.linkSystemLibrary("snappy");
 
         const snappy_test_step = b.step("snappy-test", "Run the snappy tests");
         snappy_test_step.dependOn(&snappy_tests.step);
     }
 
+    //
     // Build library
     //
-    const lib = b.addStaticLibrary("zig-cassandra", "src/lib.zig");
+
+    const lib = b.addStaticLibrary(.{
+        .name = "zig-cassandra",
+        .root_source_file = b.path("src/lib.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
     lib.linkLibrary(lz4);
-    lib.setTarget(target);
-    lib.setBuildMode(mode);
-    lib.addIncludeDir("src");
-    maybeLinkSnappy(lib, with_snappy);
+    lib.addIncludePath(b.path("src"));
 
-    lib.install();
+    if (with_snappy) {
+        lib.linkLibC();
+        lib.linkSystemLibrary("snappy");
+    }
 
+    const lib_options = b.addOptions();
+    lib_options.addOption(bool, "with_snappy", true);
+    lib.root_module.addImport("build_options", lib_options.createModule());
+
+    b.installArtifact(lib);
+
+    //
     // Add the main tests for the library.
     //
 
-    var main_tests = b.addTest("src/lib.zig");
+    var main_tests = b.addTest(.{
+        .name = "main",
+        .target = target,
+        .optimize = optimize,
+        .root_source_file = b.path("src/lib.zig"),
+    });
     main_tests.linkLibrary(lz4);
-    main_tests.setTarget(target);
-    main_tests.setBuildMode(mode);
-    main_tests.addIncludeDir("src");
-    maybeLinkSnappy(main_tests, with_snappy);
-    main_tests.addBuildOption(?[]const u8, "with_cassandra", with_cassandra);
+    main_tests.addIncludePath(b.path("src"));
+
+    if (with_snappy) {
+        main_tests.linkLibC();
+        main_tests.linkSystemLibrary("snappy");
+    }
+
+    const main_tests_options = b.addOptions();
+    main_tests.root_module.addImport("build_options", main_tests_options.createModule());
+    main_tests_options.addOption(?[]const u8, "with_cassandra", with_cassandra);
 
     const test_step = b.step("test", "Run library tests");
     test_step.dependOn(&main_tests.step);
 
     // Add the example
     //
-    const example = b.addExecutable("example", "src/example.zig");
+    const example = b.addExecutable(.{
+        .name = "example",
+        .root_source_file = b.path("src/example.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
     example.linkLibrary(lz4);
-    example.setTarget(target);
-    example.setBuildMode(mode);
-    example.install();
-    example.addIncludeDir("src");
-    maybeLinkSnappy(example, with_snappy);
+    example.addIncludePath(b.path("src"));
+
+    if (with_snappy) {
+        example.linkLibC();
+        example.linkSystemLibrary("snappy");
+    }
+
+    const example_run = b.step("example", "Run the example");
+    const example_install = b.addInstallArtifact(example, .{});
+    example_run.dependOn(&example_install.step);
 }
