@@ -8,7 +8,7 @@ pub fn build(b: *std.Build) !void {
     // Define options
 
     const with_snappy = b.option(bool, "with_snappy", "Enable Snappy compression") orelse false;
-    const with_cassandra = b.option([]const u8, "with_cassandra", "Run tests which need a Cassandra node running to work.") orelse null;
+    const with_cassandra = b.option(bool, "with_cassandra", "Run tests which need a Cassandra node running to work.") orelse false;
 
     // LZ4
     //
@@ -100,10 +100,13 @@ pub fn build(b: *std.Build) !void {
 
     const main_tests_options = b.addOptions();
     main_tests.root_module.addImport("build_options", main_tests_options.createModule());
-    main_tests_options.addOption(?[]const u8, "with_cassandra", with_cassandra);
+    main_tests_options.addOption(bool, "with_cassandra", with_cassandra);
+    main_tests_options.addOption(bool, "with_snappy", with_snappy);
+
+    const run_main_tests = b.addRunArtifact(main_tests);
 
     const test_step = b.step("test", "Run library tests");
-    test_step.dependOn(&main_tests.step);
+    test_step.dependOn(&run_main_tests.step);
 
     // Add the example
     //

@@ -64,7 +64,7 @@ fn doQuery(allocator: *mem.Allocator, client: *cql.Client) !void {
         // If there's no paging state we know we're done.
         if (iter.metadata.paging_state) |paging_state| {
             paging_state_allocator.reset();
-            options.paging_state = try mem.dupe(&paging_state_allocator.allocator, u8, paging_state);
+            options.paging_state = try paging_state_allocator.allocator().dupe(u8, paging_state);
         } else {
             break;
         }
@@ -76,7 +76,7 @@ fn doQuery(allocator: *mem.Allocator, client: *cql.Client) !void {
 fn doPrepare(allocator: *mem.Allocator, client: *cql.Client) ![]const u8 {
     // We want query diagonistics in case of failure.
     var diags = cql.Client.QueryOptions.Diagnostics{};
-    var options = cql.Client.QueryOptions{
+    const options = cql.Client.QueryOptions{
         .diags = &diags,
     };
 
@@ -107,7 +107,7 @@ fn doExecute(allocator: *mem.Allocator, client: *cql.Client, query_id: []const u
 
     // We want query diagonistics in case of failure.
     var diags = cql.Client.QueryOptions.Diagnostics{};
-    var options = cql.Client.QueryOptions{
+    const options = cql.Client.QueryOptions{
         .diags = &diags,
     };
 
@@ -144,7 +144,7 @@ fn doPrepareOnceThenExec(allocator: *mem.Allocator, client: *cql.Client, n: usiz
 fn doInsert(allocator: *mem.Allocator, client: *cql.Client, n: usize) !void {
     // We want query diagonistics in case of failure.
     var diags = cql.Client.QueryOptions.Diagnostics{};
-    var options = cql.Client.QueryOptions{
+    const options = cql.Client.QueryOptions{
         .diags = &diags,
     };
 
@@ -174,7 +174,7 @@ fn doInsert(allocator: *mem.Allocator, client: *cql.Client, n: usize) !void {
         fba.reset();
 
         const args = casstest.Args.AgeToIDs{
-            .age = @intCast(u32, i) * @as(u32, 10),
+            .age = @as(u32, @intCast(i)) * @as(u32, 10),
             .name = if (i % 2 == 0)
                 @as([]const u8, try std.fmt.allocPrint(&fba.allocator, "Vincent {}", .{i}))
             else
@@ -208,9 +208,9 @@ fn iterate(allocator: *mem.Allocator, iter: *cql.Iterator) !usize {
     const IDs = struct {
         slice: []u8,
 
-        pub fn format(self: @This(), comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
+        pub fn format(self: @This(), comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
             try writer.writeByte('[');
-            for (self.slice) |item, i| {
+            for (self.slice, 0..) |item, i| {
                 if (i > 0) try writer.writeAll(", ");
                 try std.fmt.format(writer, "{d}", .{item});
             }
@@ -228,7 +228,7 @@ fn iterate(allocator: *mem.Allocator, iter: *cql.Iterator) !usize {
 
         // We want iteration diagnostics in case of failures.
         var iter_diags = cql.Iterator.ScanOptions.Diagnostics{};
-        var iter_options = cql.Iterator.ScanOptions{
+        const iter_options = cql.Iterator.ScanOptions{
             .diags = &iter_diags,
         };
 
@@ -330,7 +330,7 @@ pub fn main() anyerror!void {
     }
 
     // Define the seed node we will connect to. We use localhost:9042.
-    var address = net.Address.initIp4([_]u8{ 127, 0, 0, 1 }, 9042);
+    const address = net.Address.initIp4([_]u8{ 127, 0, 0, 1 }, 9042);
 
     // Connect to the seed node
     //

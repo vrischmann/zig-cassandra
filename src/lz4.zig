@@ -1,41 +1,43 @@
 const std = @import("std");
-const assert = std.debug.assert;
 const mem = std.mem;
+const testing = std.testing;
+
+const assert = std.debug.assert;
 
 const c = @cImport(@cInclude("lz4.h"));
-const testing = @import("testing.zig");
+const testutils = @import("testutils.zig");
 
 const length_size = 4;
 
-pub fn compress(allocator: *mem.Allocator, data: []const u8) ![]const u8 {
-    const max_dst_size = c.LZ4_compressBound(@intCast(c_int, data.len));
+pub fn compress(allocator: mem.Allocator, data: []const u8) ![]const u8 {
+    const max_dst_size = c.LZ4_compressBound(@intCast(data.len));
 
-    var buf = try allocator.alloc(u8, @intCast(usize, max_dst_size) + length_size);
+    var buf = try allocator.alloc(u8, @as(usize, @intCast(max_dst_size)) + length_size);
     errdefer allocator.free(buf);
 
     // Encode the uncompressed length before the compressed byted.
-    mem.writeIntBig(u32, buf[0..length_size], @intCast(u32, data.len));
+    mem.writeInt(u32, buf[0..length_size], @intCast(data.len), .big);
 
-    var compressed_bytes = buf[length_size..buf.len];
+    const compressed_bytes = buf[length_size..buf.len];
 
     const compressed_data_size = c.LZ4_compress_default(
-        @ptrCast([*c]const u8, data),
-        @ptrCast([*c]u8, compressed_bytes),
-        @intCast(c_int, data.len),
+        @as([*c]const u8, @ptrCast(data)),
+        @as([*c]u8, @ptrCast(compressed_bytes)),
+        @intCast(data.len),
         max_dst_size,
     );
     if (compressed_data_size <= 0) {
         return error.CompressionFailed;
     }
 
-    buf = try allocator.realloc(buf, @intCast(usize, compressed_data_size) + length_size);
+    buf = try allocator.realloc(buf, @as(usize, @intCast(compressed_data_size)) + length_size);
 
     return buf;
 }
 
-pub fn decompress(allocator: *mem.Allocator, data: []const u8) ![]const u8 {
+pub fn decompress(allocator: mem.Allocator, data: []const u8) ![]const u8 {
     // The uncompressed length is encoded as 4 bytes before the compressed byted.
-    var max_decompressed_size = mem.readIntBig(u32, data[0..length_size]);
+    const max_decompressed_size = mem.readInt(u32, data[0..length_size], .big);
 
     // The rest are the compressed bytes.
     const compressed_data = data[length_size..];
@@ -44,10 +46,10 @@ pub fn decompress(allocator: *mem.Allocator, data: []const u8) ![]const u8 {
     errdefer allocator.free(buf);
 
     const decompressed_size = c.LZ4_decompress_safe(
-        @ptrCast([*c]const u8, compressed_data),
-        @ptrCast([*c]u8, buf),
-        @intCast(c_int, compressed_data.len),
-        @intCast(c_int, buf.len),
+        @as([*c]const u8, @ptrCast(compressed_data)),
+        @as([*c]u8, @ptrCast(buf)),
+        @intCast(compressed_data.len),
+        @intCast(buf.len),
     );
     if (decompressed_size < 0) {
         return error.DecompressionFailed;
@@ -55,7 +57,7 @@ pub fn decompress(allocator: *mem.Allocator, data: []const u8) ![]const u8 {
 
     assert(max_decompressed_size == decompressed_size);
 
-    return buf[0..@intCast(usize, decompressed_size)];
+    return buf[0..@intCast(decompressed_size)];
 }
 
 test "lz4: compress and decompress" {

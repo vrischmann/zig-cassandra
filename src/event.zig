@@ -1,11 +1,13 @@
 const std = @import("std");
 const mem = std.mem;
+const testing = std.testing;
 const net = std.net;
 
-const PrimitiveReader = @import("primitive/reader.zig").PrimitiveReader;
-const PrimitiveWriter = @import("primitive/writer.zig").PrimitiveWriter;
+const message = @import("message.zig");
+const PrimitiveReader = message.PrimitiveReader;
+const PrimitiveWriter = message.PrimitiveWriter;
 
-const testing = @import("testing.zig");
+const testutils = @import("testutils.zig");
 
 pub const TopologyChangeType = enum {
     NEW_NODE,
@@ -62,7 +64,7 @@ pub const SchemaChange = struct {
     target: SchemaChangeTarget,
     options: SchemaChangeOptions,
 
-    pub fn read(allocator: *mem.Allocator, pr: *PrimitiveReader) !Self {
+    pub fn read(allocator: mem.Allocator, pr: *PrimitiveReader) !Self {
         var change = Self{
             .type = undefined,
             .target = undefined,
@@ -106,17 +108,17 @@ pub const Event = union(EventType) {
 };
 
 test "schema change options" {
-    var arena = testing.arenaAllocator();
+    var arena = testutils.arenaAllocator();
     defer arena.deinit();
 
     var options = SchemaChangeOptions.init();
 
-    options.keyspace = try mem.dupe(&arena.allocator, u8, "foobar");
-    options.object_name = try mem.dupe(&arena.allocator, u8, "barbaz");
-    var arguments = try arena.allocator.alloc([]const u8, 4);
+    options.keyspace = try arena.allocator().dupe(u8, "foobar");
+    options.object_name = try arena.allocator().dupe(u8, "barbaz");
+    var arguments = try arena.allocator().alloc([]const u8, 4);
     var i: usize = 0;
     while (i < arguments.len) : (i += 1) {
-        arguments[i] = try mem.dupe(&arena.allocator, u8, "hello");
+        arguments[i] = try arena.allocator().dupe(u8, "hello");
     }
     options.arguments = arguments;
 }

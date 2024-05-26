@@ -3,12 +3,13 @@ const big = std.math.big;
 const heap = std.heap;
 const io = std.io;
 const mem = std.mem;
-
-usingnamespace @import("primitive_types.zig");
+const testing = std.testing;
 
 const bigint = @import("bigint.zig");
 
-const PrimitiveReader = @import("primitive/reader.zig").PrimitiveReader;
+const message = @import("message.zig");
+const PrimitiveReader = message.PrimitiveReader;
+const OptionID = message.OptionID;
 
 const RowData = @import("frame.zig").RowData;
 const ColumnData = @import("frame.zig").ColumnData;
@@ -17,7 +18,7 @@ const GlobalTableSpec = @import("metadata.zig").GlobalTableSpec;
 const RowsMetadata = @import("metadata.zig").RowsMetadata;
 const ColumnSpec = @import("metadata.zig").ColumnSpec;
 
-const testing = @import("testing.zig");
+const testutils = @import("testutils.zig");
 
 pub const RawBytes = struct {
     data: []const u8,
@@ -68,7 +69,7 @@ pub const Iterator = struct {
 
     const Diags = ScanOptions.Diagnostics;
 
-    pub fn scan(self: *Self, allocator: *mem.Allocator, options: ScanOptions, args: anytype) !bool {
+    pub fn scan(self: *Self, allocator: mem.Allocator, options: ScanOptions, args: anytype) !bool {
         var dummy_diags = Diags{};
         var diags = options.diags orelse &dummy_diags;
 
@@ -90,13 +91,17 @@ pub const Iterator = struct {
             return error.IncompatibleMetadata;
         }
 
-        inline for (@typeInfo(child).Struct.fields) |struct_field, _i| {
-            const i = @as(usize, _i);
-
+        inline for (@typeInfo(child).Struct.fields, 0..) |struct_field, i| {
             const column_spec = self.metadata.column_specs[i];
             const column_data = self.rows[self.pos].slice[i];
 
-            @field(args, struct_field.name) = try self.readType(allocator, diags, column_spec, column_data.slice, struct_field.field_type);
+            @field(args, struct_field.name) = try self.readType(
+                allocator,
+                diags,
+                column_spec,
+                column_data.slice,
+                struct_field.type,
+            );
         }
 
         self.pos += 1;
@@ -104,7 +109,7 @@ pub const Iterator = struct {
         return true;
     }
 
-    fn readType(self: *Self, allocator: *mem.Allocator, diags: *Diags, column_spec: ColumnSpec, column_data: []const u8, comptime Type: type) !Type {
+    fn readType(self: *Self, allocator: mem.Allocator, diags: *Diags, column_spec: ColumnSpec, column_data: []const u8, comptime Type: type) !Type {
         const type_info = @typeInfo(Type);
 
         // TODO(vincent): if the struct is packed we could maybe read stuff directly
@@ -130,10 +135,8 @@ pub const Iterator = struct {
     }
 
     fn readFloatFromSlice(comptime Type: type, slice: []const u8) Type {
-        var r: Type = 0.0;
-
         // Compute the number of bytes needed for the float type we're trying to read.
-        comptime const len = @divExact(@typeInfo(Type).Float.bits, 8);
+        const len = comptime @divExact(@typeInfo(Type).Float.bits, 8);
 
         std.debug.assert(slice.len <= len);
 
@@ -142,18 +145,17 @@ pub const Iterator = struct {
         var buf = [_]u8{0} ** len;
 
         const padding = len - slice.len;
-        mem.copy(u8, buf[padding..buf.len], slice);
+        mem.copyForwards(u8, buf[padding..buf.len], slice);
 
-        var bytes = @ptrCast(*const [len]u8, &buf);
+        const bytes: *const [len]u8 = @ptrCast(&buf);
+        const ptr: *align(1) const Type = @ptrCast(bytes);
 
-        return @ptrCast(*align(1) const Type, bytes).*;
+        return ptr.*;
     }
 
     fn readIntFromSlice(comptime Type: type, slice: []const u8) Type {
-        var r: Type = 0;
-
         // Compute the number of bytes needed for the integer type we're trying to read.
-        comptime const len = @divExact(@typeInfo(Type).Int.bits, 8);
+        const len = comptime @divExact(@typeInfo(Type).Int.bits, 8);
 
         std.debug.assert(slice.len <= len);
 
@@ -178,15 +180,15 @@ pub const Iterator = struct {
         var buf = [_]u8{0} ** len;
 
         const padding = len - slice.len;
-        mem.copy(u8, buf[padding..buf.len], slice);
+        mem.copyForwards(u8, buf[padding..buf.len], slice);
 
-        var bytes = @ptrCast(*const [len]u8, &buf);
+        const bytes: *const [len]u8 = @ptrCast(&buf);
 
-        return mem.readIntBig(Type, bytes);
+        return mem.readInt(Type, bytes, .big);
     }
 
     fn readInt(self: *Self, diags: *Diags, column_spec: ColumnSpec, column_data: []const u8, comptime Type: type) !Type {
-        var r: Type = 0;
+        const r: Type = 0;
 
         const option = column_spec.option;
 
@@ -270,8 +272,8 @@ pub const Iterator = struct {
         return r;
     }
 
-    fn readFloat(self: *Self, diags: *Diags, column_spec: ColumnSpec, column_data: []const u8, comptime Type: type) !Type {
-        var r: Type = 0.0;
+    fn readFloat(_: *Self, diags: *Diags, column_spec: ColumnSpec, column_data: []const u8, comptime Type: type) !Type {
+        const r: Type = 0.0;
 
         const option = column_spec.option;
 
@@ -290,7 +292,7 @@ pub const Iterator = struct {
                 switch (option) {
                     .Float => {
                         const f_32 = readFloatFromSlice(f32, column_data);
-                        return @floatCast(Type, f_32);
+                        return @floatCast(f_32);
                     },
                     .Double => return readFloatFromSlice(f64, column_data),
                     else => {
@@ -304,11 +306,11 @@ pub const Iterator = struct {
                 switch (option) {
                     .Float => {
                         const f_32 = readFloatFromSlice(f32, column_data);
-                        return @floatCast(Type, f_32);
+                        return @floatCast(f_32);
                     },
                     .Double => {
                         const f_64 = readFloatFromSlice(f64, column_data);
-                        return @floatCast(Type, f_64);
+                        return @floatCast(f_64);
                     },
                     else => {
                         diags.incompatible_metadata.incompatible_types.cql_type_name = @tagName(option);
@@ -323,7 +325,7 @@ pub const Iterator = struct {
         return r;
     }
 
-    fn readSlice(self: *Self, allocator: *mem.Allocator, diags: *Diags, column_spec: ColumnSpec, column_data: []const u8, comptime Type: type) !Type {
+    fn readSlice(self: *Self, allocator: mem.Allocator, diags: *Diags, column_spec: ColumnSpec, column_data: []const u8, comptime Type: type) !Type {
         const type_info = @typeInfo(Type);
         const ChildType = std.meta.Elem(Type);
         if (@typeInfo(ChildType) == .Array) {
@@ -354,12 +356,13 @@ pub const Iterator = struct {
 
         switch (ChildType) {
             u8, i8, u16, i16, u32, i32, i64, u64 => {
-                const NonConstType = @Type(std.builtin.TypeInfo{
+                const NonConstType = @Type(std.builtin.Type{
                     .Pointer = .{
                         .size = .Slice,
                         .is_const = false,
                         .is_volatile = type_info.Pointer.is_volatile,
                         .alignment = type_info.Pointer.alignment,
+                        .address_space = type_info.Pointer.address_space,
                         .child = ChildType,
                         .is_allowzero = type_info.Pointer.is_allowzero,
                         .sentinel = type_info.Pointer.sentinel,
@@ -376,7 +379,7 @@ pub const Iterator = struct {
 
                         const child_option = column_spec.listset_element_type_option.?;
 
-                        var child_column_spec = switch (child_option) {
+                        const child_column_spec = switch (child_option) {
                             .Custom => ColumnSpec{
                                 .custom_class_name = column_spec.custom_class_name.?,
                                 .option = child_option,
@@ -414,7 +417,7 @@ pub const Iterator = struct {
         }
     }
 
-    fn readStruct(self: *Self, allocator: *mem.Allocator, diags: *Diags, column_spec: ColumnSpec, column_data: []const u8, comptime Type: type) !Type {
+    fn readStruct(_: *Self, allocator: mem.Allocator, _: *Diags, column_spec: ColumnSpec, column_data: []const u8, comptime Type: type) !Type {
         if (Type == big.int.Const) {
             var m = try bigint.fromBytes(allocator, column_data);
             return m.toConst();
@@ -426,7 +429,7 @@ pub const Iterator = struct {
             };
         }
 
-        if (comptime std.meta.trait.hasFn("scan")(Type)) {
+        if (comptime std.meta.hasFn(Type, "scan")) {
             var res: Type = undefined;
 
             try res.scan(allocator, column_spec, column_data);
@@ -437,9 +440,7 @@ pub const Iterator = struct {
         @compileError("type " ++ @typeName(Type) ++ " is invalid");
     }
 
-    fn readArray(self: *Self, diags: *Diags, column_spec: ColumnSpec, column_data: []const u8, comptime Type: type) !Type {
-        const ChildType = std.meta.Elem(Type);
-
+    fn readArray(_: *Self, diags: *Diags, column_spec: ColumnSpec, column_data: []const u8, comptime Type: type) !Type {
         var array: Type = undefined;
 
         const option = column_spec.option;
@@ -449,7 +450,7 @@ pub const Iterator = struct {
         // Maybe we can also allow reading strings and adding zeroes to tne end ?
 
         switch (option) {
-            .UUID, .Timeuuid => mem.copy(u8, &array, column_data[0..array.len]),
+            .UUID, .Timeuuid => mem.copyForwards(u8, &array, column_data[0..array.len]),
             else => {
                 diags.incompatible_metadata.incompatible_types.cql_type_name = @tagName(option);
                 diags.incompatible_metadata.incompatible_types.native_type_name = @typeName(Type);
@@ -481,7 +482,7 @@ fn columnSpec(id: OptionID) ColumnSpec {
     };
 }
 
-fn testIteratorScan(allocator: *mem.Allocator, column_specs: []ColumnSpec, data: []const []const u8, diags: ?*Iterator.ScanOptions.Diagnostics, row: anytype) !void {
+fn testIteratorScan(allocator: mem.Allocator, column_specs: []const ColumnSpec, data: []const []const u8, diags: ?*Iterator.ScanOptions.Diagnostics, row: anytype) !void {
     const metadata = RowsMetadata{
         .paging_state = null,
         .new_metadata_id = null,
@@ -499,18 +500,18 @@ fn testIteratorScan(allocator: *mem.Allocator, column_specs: []ColumnSpec, data:
     }
 
     const row_data = &[_]RowData{
-        RowData{ .slice = column_data.toOwnedSlice() },
+        RowData{ .slice = try column_data.toOwnedSlice() },
     };
 
     var iterator = Iterator.init(metadata, row_data);
-    var options = Iterator.ScanOptions{
+    const options = Iterator.ScanOptions{
         .diags = diags,
     };
     try testing.expect(try iterator.scan(allocator, options, row));
 }
 
 test "iterator scan: incompatible metadata" {
-    var arena = testing.arenaAllocator();
+    var arena = testutils.arenaAllocator();
     defer arena.deinit();
 
     var diags = Iterator.ScanOptions.Diagnostics{};
@@ -525,7 +526,7 @@ test "iterator scan: incompatible metadata" {
         const column_specs = &[_]ColumnSpec{columnSpec(.Tinyint)};
         const test_data = &[_][]const u8{ "\x20", "\x20" };
 
-        var err = testIteratorScan(&arena.allocator, column_specs, test_data, &diags, &row);
+        const err = testIteratorScan(arena.allocator(), column_specs, test_data, &diags, &row);
         try testing.expectError(error.IncompatibleMetadata, err);
         try testing.expectEqual(@as(usize, 1), diags.incompatible_metadata.metadata_columns);
         try testing.expectEqual(@as(usize, 2), diags.incompatible_metadata.struct_fields);
@@ -543,7 +544,7 @@ test "iterator scan: incompatible metadata" {
         const column_specs = &[_]ColumnSpec{columnSpec(.Int)};
         const test_data = &[_][]const u8{"\x01"};
 
-        var err = testIteratorScan(&arena.allocator, column_specs, test_data, &diags, &row);
+        const err = testIteratorScan(arena.allocator(), column_specs, test_data, &diags, &row);
         try testing.expectError(error.IncompatibleMetadata, err);
         try testing.expectEqual(@as(usize, 0), diags.incompatible_metadata.metadata_columns);
         try testing.expectEqual(@as(usize, 0), diags.incompatible_metadata.struct_fields);
@@ -553,7 +554,7 @@ test "iterator scan: incompatible metadata" {
 }
 
 test "iterator scan: u8/i8" {
-    var arena = testing.arenaAllocator();
+    var arena = testutils.arenaAllocator();
     defer arena.deinit();
 
     const Row = struct {
@@ -568,14 +569,14 @@ test "iterator scan: u8/i8" {
     };
     const test_data = &[_][]const u8{ "\x20", "\x20" };
 
-    try testIteratorScan(&arena.allocator, column_specs, test_data, null, &row);
+    try testIteratorScan(arena.allocator(), column_specs, test_data, null, &row);
 
     try testing.expectEqual(@as(u8, 0x20), row.u_8);
     try testing.expectEqual(@as(i8, 0x20), row.i_8);
 }
 
 test "iterator scan: u16/i16" {
-    var arena = testing.arenaAllocator();
+    var arena = testutils.arenaAllocator();
     defer arena.deinit();
 
     const Row = struct {
@@ -591,7 +592,7 @@ test "iterator scan: u16/i16" {
         };
         const test_data = &[_][]const u8{ "\x20", "\x20" };
 
-        try testIteratorScan(&arena.allocator, column_specs, test_data, null, &row);
+        try testIteratorScan(arena.allocator(), column_specs, test_data, null, &row);
 
         try testing.expectEqual(@as(u16, 0x20), row.u_16);
         try testing.expectEqual(@as(i16, 0x20), row.i_16);
@@ -604,7 +605,7 @@ test "iterator scan: u16/i16" {
         };
         const test_data = &[_][]const u8{ "\x21\x20", "\x22\x20" };
 
-        try testIteratorScan(&arena.allocator, column_specs, test_data, null, &row);
+        try testIteratorScan(arena.allocator(), column_specs, test_data, null, &row);
 
         try testing.expectEqual(@as(u16, 0x2120), row.u_16);
         try testing.expectEqual(@as(i16, 0x2220), row.i_16);
@@ -612,7 +613,7 @@ test "iterator scan: u16/i16" {
 }
 
 test "iterator scan: u32/i32" {
-    var arena = testing.arenaAllocator();
+    var arena = testutils.arenaAllocator();
     defer arena.deinit();
 
     const Row = struct {
@@ -628,7 +629,7 @@ test "iterator scan: u32/i32" {
         };
         const test_data = &[_][]const u8{ "\x20", "\x20" };
 
-        try testIteratorScan(&arena.allocator, column_specs, test_data, null, &row);
+        try testIteratorScan(arena.allocator(), column_specs, test_data, null, &row);
 
         try testing.expectEqual(@as(u32, 0x20), row.u_32);
         try testing.expectEqual(@as(i32, 0x20), row.i_32);
@@ -641,7 +642,7 @@ test "iterator scan: u32/i32" {
         };
         const test_data = &[_][]const u8{ "\x21\x20", "\x22\x20" };
 
-        try testIteratorScan(&arena.allocator, column_specs, test_data, null, &row);
+        try testIteratorScan(arena.allocator(), column_specs, test_data, null, &row);
 
         try testing.expectEqual(@as(u32, 0x2120), row.u_32);
         try testing.expectEqual(@as(i32, 0x2220), row.i_32);
@@ -654,7 +655,7 @@ test "iterator scan: u32/i32" {
         };
         const test_data = &[_][]const u8{ "\x21\x22\x23\x24", "\x25\x26\x27\x28" };
 
-        try testIteratorScan(&arena.allocator, column_specs, test_data, null, &row);
+        try testIteratorScan(arena.allocator(), column_specs, test_data, null, &row);
 
         try testing.expectEqual(@as(u32, 0x21222324), row.u_32);
         try testing.expectEqual(@as(i32, 0x25262728), row.i_32);
@@ -662,7 +663,7 @@ test "iterator scan: u32/i32" {
 }
 
 test "iterator scan: u64/i64" {
-    var arena = testing.arenaAllocator();
+    var arena = testutils.arenaAllocator();
     defer arena.deinit();
 
     const Row = struct {
@@ -678,7 +679,7 @@ test "iterator scan: u64/i64" {
         };
         const test_data = &[_][]const u8{ "\x20", "\x20" };
 
-        try testIteratorScan(&arena.allocator, column_specs, test_data, null, &row);
+        try testIteratorScan(arena.allocator(), column_specs, test_data, null, &row);
 
         try testing.expectEqual(@as(u64, 0x20), row.u_64);
         try testing.expectEqual(@as(i64, 0x20), row.i_64);
@@ -691,7 +692,7 @@ test "iterator scan: u64/i64" {
         };
         const test_data = &[_][]const u8{ "\x22\x20", "\x23\x20" };
 
-        try testIteratorScan(&arena.allocator, column_specs, test_data, null, &row);
+        try testIteratorScan(arena.allocator(), column_specs, test_data, null, &row);
 
         try testing.expectEqual(@as(u64, 0x2220), row.u_64);
         try testing.expectEqual(@as(i64, 0x2320), row.i_64);
@@ -704,7 +705,7 @@ test "iterator scan: u64/i64" {
         };
         const test_data = &[_][]const u8{ "\x24\x22\x28\x21", "\x22\x29\x23\x22" };
 
-        try testIteratorScan(&arena.allocator, column_specs, test_data, null, &row);
+        try testIteratorScan(arena.allocator(), column_specs, test_data, null, &row);
 
         try testing.expectEqual(@as(u64, 0x24222821), row.u_64);
         try testing.expectEqual(@as(i64, 0x22292322), row.i_64);
@@ -717,7 +718,7 @@ test "iterator scan: u64/i64" {
         };
         const test_data = &[_][]const u8{ "\x21\x22\x23\x24\x25\x26\x27\x28", "\x31\x32\x33\x34\x35\x36\x37\x38" };
 
-        try testIteratorScan(&arena.allocator, column_specs, test_data, null, &row);
+        try testIteratorScan(arena.allocator(), column_specs, test_data, null, &row);
 
         try testing.expectEqual(@as(u64, 0x2122232425262728), row.u_64);
         try testing.expectEqual(@as(i64, 0x3132333435363738), row.i_64);
@@ -725,7 +726,7 @@ test "iterator scan: u64/i64" {
 }
 
 test "iterator scan: u128/i128" {
-    var arena = testing.arenaAllocator();
+    var arena = testutils.arenaAllocator();
     defer arena.deinit();
 
     const Row = struct {
@@ -741,7 +742,7 @@ test "iterator scan: u128/i128" {
         };
         const test_data = &[_][]const u8{ "\x20", "\x20" };
 
-        try testIteratorScan(&arena.allocator, column_specs, test_data, null, &row);
+        try testIteratorScan(arena.allocator(), column_specs, test_data, null, &row);
 
         try testing.expectEqual(@as(u128, 0x20), row.u_128);
         try testing.expectEqual(@as(i128, 0x20), row.i_128);
@@ -754,7 +755,7 @@ test "iterator scan: u128/i128" {
         };
         const test_data = &[_][]const u8{ "\x22\x20", "\x23\x20" };
 
-        try testIteratorScan(&arena.allocator, column_specs, test_data, null, &row);
+        try testIteratorScan(arena.allocator(), column_specs, test_data, null, &row);
 
         try testing.expectEqual(@as(u128, 0x2220), row.u_128);
         try testing.expectEqual(@as(i128, 0x2320), row.i_128);
@@ -767,7 +768,7 @@ test "iterator scan: u128/i128" {
         };
         const test_data = &[_][]const u8{ "\x24\x22\x28\x21", "\x22\x29\x23\x22" };
 
-        try testIteratorScan(&arena.allocator, column_specs, test_data, null, &row);
+        try testIteratorScan(arena.allocator(), column_specs, test_data, null, &row);
 
         try testing.expectEqual(@as(u128, 0x24222821), row.u_128);
         try testing.expectEqual(@as(i128, 0x22292322), row.i_128);
@@ -780,7 +781,7 @@ test "iterator scan: u128/i128" {
         };
         const test_data = &[_][]const u8{ "\x21\x22\x23\x24\x25\x26\x27\x28", "\x31\x32\x33\x34\x35\x36\x37\x38" };
 
-        try testIteratorScan(&arena.allocator, column_specs, test_data, null, &row);
+        try testIteratorScan(arena.allocator(), column_specs, test_data, null, &row);
 
         try testing.expectEqual(@as(u128, 0x2122232425262728), row.u_128);
         try testing.expectEqual(@as(i128, 0x3132333435363738), row.i_128);
@@ -788,7 +789,7 @@ test "iterator scan: u128/i128" {
 }
 
 test "iterator scan: f32" {
-    var arena = testing.arenaAllocator();
+    var arena = testutils.arenaAllocator();
     defer arena.deinit();
 
     const Row = struct {
@@ -799,13 +800,13 @@ test "iterator scan: f32" {
     const column_specs = &[_]ColumnSpec{columnSpec(.Float)};
     const test_data = &[_][]const u8{"\x85\xeb\x01\x40"};
 
-    try testIteratorScan(&arena.allocator, column_specs, test_data, null, &row);
+    try testIteratorScan(arena.allocator(), column_specs, test_data, null, &row);
 
     try testing.expectEqual(@as(f32, 2.03), row.f_32);
 }
 
 test "iterator scan: f64" {
-    var arena = testing.arenaAllocator();
+    var arena = testutils.arenaAllocator();
     defer arena.deinit();
 
     const Row = struct {
@@ -817,7 +818,7 @@ test "iterator scan: f64" {
         const column_specs = &[_]ColumnSpec{columnSpec(.Float)};
         const test_data = &[_][]const u8{"\x85\xeb\x01\x40"};
 
-        try testIteratorScan(&arena.allocator, column_specs, test_data, null, &row);
+        try testIteratorScan(arena.allocator(), column_specs, test_data, null, &row);
 
         try testing.expectApproxEqAbs(@as(f64, 2.03), row.f_64, 0.000001);
     }
@@ -826,14 +827,14 @@ test "iterator scan: f64" {
         const column_specs = &[_]ColumnSpec{columnSpec(.Double)};
         const test_data = &[_][]const u8{"\x05\x51\xf7\x01\x40\x12\xe6\x40"};
 
-        try testIteratorScan(&arena.allocator, column_specs, test_data, null, &row);
+        try testIteratorScan(arena.allocator(), column_specs, test_data, null, &row);
 
         try testing.expectApproxEqAbs(@as(f64, 45202.00024), row.f_64, 0.000001);
     }
 }
 
 test "iterator scan: f128" {
-    var arena = testing.arenaAllocator();
+    var arena = testutils.arenaAllocator();
     defer arena.deinit();
 
     const Row = struct {
@@ -845,7 +846,7 @@ test "iterator scan: f128" {
         const column_specs = &[_]ColumnSpec{columnSpec(.Float)};
         const test_data = &[_][]const u8{"\x85\xeb\x01\x40"};
 
-        try testIteratorScan(&arena.allocator, column_specs, test_data, null, &row);
+        try testIteratorScan(arena.allocator(), column_specs, test_data, null, &row);
 
         try testing.expectApproxEqAbs(@as(f128, 2.03), row.f_128, 0.000001);
     }
@@ -854,14 +855,14 @@ test "iterator scan: f128" {
         const column_specs = &[_]ColumnSpec{columnSpec(.Double)};
         const test_data = &[_][]const u8{"\x05\x51\xf7\x01\x40\x12\xe6\x40"};
 
-        try testIteratorScan(&arena.allocator, column_specs, test_data, null, &row);
+        try testIteratorScan(arena.allocator(), column_specs, test_data, null, &row);
 
         try testing.expectApproxEqAbs(@as(f128, 45202.00024), row.f_128, 0.000001);
     }
 }
 
 test "iterator scan: blobs, uuids, timeuuids" {
-    var arena = testing.arenaAllocator();
+    var arena = testutils.arenaAllocator();
     defer arena.deinit();
 
     const Row = struct {
@@ -882,7 +883,7 @@ test "iterator scan: blobs, uuids, timeuuids" {
         "\xe9\x13\x93\x2e\x7a\xb7\x11\xea\xbf\x1b\x10\xc3\x7b\x6e\x96\xcc",
     };
 
-    try testIteratorScan(&arena.allocator, column_specs, test_data, null, &row);
+    try testIteratorScan(arena.allocator(), column_specs, test_data, null, &row);
 
     try testing.expectEqualStrings("Vincent", row.blob);
     try testing.expectEqualSlices(u8, "\x02\x9a\x93\xa9\xc3\x27\x4c\x79\xbe\x32\x71\x8e\x22\xb5\x02\x4c", &row.uuid);
@@ -890,7 +891,7 @@ test "iterator scan: blobs, uuids, timeuuids" {
 }
 
 test "iterator scan: ascii/varchar" {
-    var arena = testing.arenaAllocator();
+    var arena = testutils.arenaAllocator();
     defer arena.deinit();
 
     const Row = struct {
@@ -908,14 +909,14 @@ test "iterator scan: ascii/varchar" {
         "Varchar vincent",
     };
 
-    try testIteratorScan(&arena.allocator, column_specs, test_data, null, &row);
+    try testIteratorScan(arena.allocator(), column_specs, test_data, null, &row);
 
     try testing.expectEqualStrings("Ascii vincent", row.ascii);
     try testing.expectEqualStrings("Varchar vincent", row.varchar);
 }
 
 test "iterator scan: set/list" {
-    var arena = testing.arenaAllocator();
+    var arena = testutils.arenaAllocator();
     defer arena.deinit();
 
     const Row = struct {
@@ -943,7 +944,7 @@ test "iterator scan: set/list" {
         // "\x00\x00\x00\x02\x00\x00\x00\x10\x14\x2d\x6b\x2d\x2c\xe6\x45\x80\x95\x53\x15\x87\xa9\x6d\xec\x94\x00\x00\x00\x10\x8a\xa8\xc1\x37\xd0\x53\x41\x12\xbf\xee\x5f\x96\x28\x7e\xe5\x1a",
     };
 
-    try testIteratorScan(&arena.allocator, column_specs, test_data, null, &row);
+    try testIteratorScan(arena.allocator(), column_specs, test_data, null, &row);
 
     try testing.expectEqual(@as(usize, 2), row.set.len);
     try testing.expectEqual(@as(u32, 0x21222324), row.set[0]);
@@ -963,7 +964,7 @@ test "iterator scan: set/list" {
 }
 
 test "iterator scan: set of tinyint" {
-    var arena = testing.arenaAllocator();
+    var arena = testutils.arenaAllocator();
     defer arena.deinit();
 
     const Row = struct {
@@ -979,7 +980,7 @@ test "iterator scan: set of tinyint" {
         "\x00\x00\x00\x02\x00\x00\x00\x01\x20\x00\x00\x00\x01\x21",
     };
 
-    try testIteratorScan(&arena.allocator, column_specs, test_data, null, &row);
+    try testIteratorScan(arena.allocator(), column_specs, test_data, null, &row);
 
     try testing.expectEqual(@as(usize, 2), row.set.len);
     try testing.expectEqual(@as(u8, 0x20), row.set[0]);
@@ -987,7 +988,7 @@ test "iterator scan: set of tinyint" {
 }
 
 test "iterator scan: set of tinyint into RawBytes" {
-    var arena = testing.arenaAllocator();
+    var arena = testutils.arenaAllocator();
     defer arena.deinit();
 
     const Row = struct {
@@ -1000,10 +1001,10 @@ test "iterator scan: set of tinyint into RawBytes" {
 
     var spec1 = columnSpec(.List);
     spec1.listset_element_type_option = .Timestamp;
-    var spec2 = columnSpec(.Int);
+    const spec2 = columnSpec(.Int);
     var spec3 = columnSpec(.Set);
     spec3.listset_element_type_option = .Tinyint;
-    var spec4 = columnSpec(.Varchar);
+    const spec4 = columnSpec(.Varchar);
 
     const column_specs = &[_]ColumnSpec{ spec1, spec2, spec3, spec4 };
     const test_data = &[_][]const u8{
@@ -1013,7 +1014,7 @@ test "iterator scan: set of tinyint into RawBytes" {
         "foobar",
     };
 
-    try testIteratorScan(&arena.allocator, column_specs, test_data, null, &row);
+    try testIteratorScan(arena.allocator(), column_specs, test_data, null, &row);
 
     try testing.expectEqual(@as(u32, 0x10111213), row.age);
     try testing.expectEqualSlices(u8, test_data[2], row.set.data);
@@ -1024,24 +1025,24 @@ test "iterator scan: set of tinyint into RawBytes" {
 }
 
 test "iterator scan: into user provided scanner" {
-    var arena = testing.arenaAllocator();
+    var arena = testutils.arenaAllocator();
     defer arena.deinit();
 
     const MyTimestampList = struct {
         data: []u64,
 
-        pub fn scan(self: *@This(), allocator: *mem.Allocator, column_spec: ColumnSpec, data: []const u8) !void {
+        pub fn scan(self: *@This(), allocator: mem.Allocator, _: ColumnSpec, data: []const u8) !void {
             var fbs = io.fixedBufferStream(data);
             var in = fbs.reader();
 
-            const n = @as(usize, try in.readIntBig(u32));
+            const n = @as(usize, try in.readInt(u32, .big));
 
             self.data = try allocator.alloc(u64, n);
 
             var i: usize = 0;
             while (i < n) : (i += 1) {
-                _ = try in.readIntBig(u32); // void the bytes length
-                self.data[i] = try in.readIntBig(u64);
+                _ = try in.readInt(u32, .big); // void the bytes length
+                self.data[i] = try in.readInt(u64, .big);
             }
         }
     };
@@ -1054,7 +1055,7 @@ test "iterator scan: into user provided scanner" {
 
     var spec1 = columnSpec(.List);
     spec1.listset_element_type_option = .Timestamp;
-    var spec2 = columnSpec(.Int);
+    const spec2 = columnSpec(.Int);
 
     const column_specs = &[_]ColumnSpec{ spec1, spec2 };
     const test_data = &[_][]const u8{
@@ -1062,7 +1063,7 @@ test "iterator scan: into user provided scanner" {
         "\x10\x11\x12\x13",
     };
 
-    try testIteratorScan(&arena.allocator, column_specs, test_data, null, &row);
+    try testIteratorScan(arena.allocator(), column_specs, test_data, null, &row);
 
     try testing.expectEqual(@as(usize, 2), row.list_timestamp.data.len);
     try testing.expectEqual(@as(u64, 0xbcbcbcbcbcbcbcbc), row.list_timestamp.data[0]);

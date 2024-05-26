@@ -1,13 +1,15 @@
 const std = @import("std");
 const big = std.math.big;
 const mem = std.mem;
+const testing = std.testing;
 
-usingnamespace @import("primitive_types.zig");
-usingnamespace @import("iterator.zig");
-usingnamespace @import("connection.zig");
-usingnamespace @import("client.zig");
+const message = @import("message.zig");
+const CompressionAlgorithm = message.CompressionAlgorithm;
+const ProtocolVersion = message.ProtocolVersion;
 
-const testing = @import("testing.zig");
+const Client = @import("client.zig").Client;
+const Connection = @import("connection.zig").Connection;
+const Iterator = @import("iterator.zig").Iterator;
 
 // This files provides helpers to test the client with a real cassandra node.
 
@@ -89,7 +91,7 @@ pub const Harness = struct {
 
         // Create the client.
 
-        var address = std.net.Address.initIp4([_]u8{ 127, 0, 0, 1 }, 9042);
+        const address = std.net.Address.initIp4([_]u8{ 127, 0, 0, 1 }, 9042);
 
         var init_options = Connection.InitOptions{};
         init_options.protocol_version = protocol_version orelse ProtocolVersion{ .version = @as(u8, 4) };
@@ -162,7 +164,7 @@ pub const Harness = struct {
                         options,
                         query_id,
                         Args.AgeToIDs{
-                            .age = @intCast(u32, i),
+                            .age = @intCast(i),
                             .ids = [_]u8{ 0, 2, 4, 8 },
                             .name = if (i % 2 == 0) @as([]const u8, name) else null,
                             .balance = balance.toConst(),
@@ -199,7 +201,7 @@ pub const Harness = struct {
                         query_id,
                         Args.User{
                             .id = 2000,
-                            .secondary_id = @intCast(u32, i + 25),
+                            .secondary_id = @intCast(i + 25),
                         },
                     ) catch |err| switch (err) {
                         error.QueryExecutionFailed => {
@@ -224,7 +226,7 @@ pub const Harness = struct {
         defer arena.deinit();
 
         var diags = Client.QueryOptions.Diagnostics{};
-        var options = Client.QueryOptions{
+        const options = Client.QueryOptions{
             .diags = &diags,
         };
 
@@ -245,7 +247,7 @@ pub const Harness = struct {
 
             // We want iteration diagnostics in case of failures.
             var iter_diags = Iterator.ScanOptions.Diagnostics{};
-            var scan_options = Iterator.ScanOptions{
+            const scan_options = Iterator.ScanOptions{
                 .diags = &iter_diags,
             };
 

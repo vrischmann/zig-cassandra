@@ -4,10 +4,19 @@ const meta = std.meta;
 const net = std.net;
 const ArrayList = std.ArrayList;
 
-usingnamespace @import("frame.zig");
-usingnamespace @import("primitive_types.zig");
+const message = @import("message.zig");
+const CompressionAlgorithm = message.CompressionAlgorithm;
+const Consistency = message.Consistency;
+const NotSet = message.NotSet;
+const OptionID = message.OptionID;
+const ProtocolVersion = message.ProtocolVersion;
+const Value = message.Value;
+const NamedValue = message.NamedValue;
+const Values = message.Values;
+const PrimitiveWriter = message.PrimitiveWriter;
+const PrimitiveReader = message.PrimitiveReader;
 
-const sm = @import("string_map.zig");
+const string_map = @import("string_map.zig");
 
 pub const QueryParameters = struct {
     const Self = @This();
@@ -71,7 +80,7 @@ pub const QueryParameters = struct {
         if (protocol_version.is(5)) {
             _ = try pw.writeInt(u32, flags);
         } else {
-            _ = try pw.writeInt(u8, @intCast(u8, flags));
+            _ = try pw.writeInt(u8, @intCast(flags));
         }
 
         // Write the remaining body
@@ -79,13 +88,13 @@ pub const QueryParameters = struct {
         if (self.values) |values| {
             switch (values) {
                 .Normal => |normal_values| {
-                    _ = try pw.writeInt(u16, @intCast(u16, normal_values.len));
+                    _ = try pw.writeInt(u16, @intCast(normal_values.len));
                     for (normal_values) |value| {
                         _ = try pw.writeValue(value);
                     }
                 },
                 .Named => |named_values| {
-                    _ = try pw.writeInt(u16, @intCast(u16, named_values.len));
+                    _ = try pw.writeInt(u16, @intCast(named_values.len));
                     for (named_values) |v| {
                         _ = try pw.writeString(v.name);
                         _ = try pw.writeValue(v.value);
@@ -121,7 +130,7 @@ pub const QueryParameters = struct {
         }
     }
 
-    pub fn read(allocator: *mem.Allocator, protocol_version: ProtocolVersion, pr: *PrimitiveReader) !QueryParameters {
+    pub fn read(allocator: mem.Allocator, protocol_version: ProtocolVersion, pr: *PrimitiveReader) !QueryParameters {
         var params = QueryParameters{
             .consistency_level = undefined,
             .values = null,
@@ -162,7 +171,7 @@ pub const QueryParameters = struct {
                     _ = try list.append(nm);
                 }
 
-                params.values = Values{ .Named = list.toOwnedSlice() };
+                params.values = Values{ .Named = try list.toOwnedSlice() };
             } else {
                 var list = std.ArrayList(Value).init(allocator);
                 errdefer list.deinit();
@@ -173,7 +182,7 @@ pub const QueryParameters = struct {
                     _ = try list.append(value);
                 }
 
-                params.values = Values{ .Normal = list.toOwnedSlice() };
+                params.values = Values{ .Normal = try list.toOwnedSlice() };
             }
         }
         if (flags & FlagSkipMetadata == FlagSkipMetadata) {

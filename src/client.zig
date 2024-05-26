@@ -7,10 +7,9 @@ const io = std.io;
 const log = std.log;
 const mem = std.mem;
 const net = std.net;
+const testing = std.testing;
 
 const Connection = @import("connection.zig").Connection;
-
-const PrimitiveWriter = @import("primitive/writer.zig").PrimitiveWriter;
 
 const PreparedMetadata = @import("metadata.zig").PreparedMetadata;
 const RowsMetadata = @import("metadata.zig").RowsMetadata;
@@ -18,16 +17,31 @@ const ColumnSpec = @import("metadata.zig").ColumnSpec;
 
 const bigint = @import("bigint.zig");
 
-usingnamespace @import("primitive_types.zig");
-usingnamespace @import("iterator.zig");
-usingnamespace @import("query_parameters.zig");
-usingnamespace @import("error.zig");
+const message = @import("message.zig");
+const CompressionAlgorithm = message.CompressionAlgorithm;
+const Consistency = message.Consistency;
+const NotSet = message.NotSet;
+const OptionID = message.OptionID;
+const ProtocolVersion = message.ProtocolVersion;
+const Value = message.Value;
+const Values = message.Values;
+const PrimitiveWriter = message.PrimitiveWriter;
 
-usingnamespace @import("frames/query.zig");
-usingnamespace @import("frames/prepare.zig");
-usingnamespace @import("frames/execute.zig");
+const AlreadyExistsError = message.AlreadyExistsError;
+const FunctionFailureError = message.FunctionFailureError;
+const ReadError = message.ReadError;
+const UnavailableReplicasError = message.UnavailableReplicasError;
+const UnpreparedError = message.UnpreparedError;
+const WriteError = message.WriteError;
 
-const testing = @import("testing.zig");
+const Iterator = @import("iterator.zig").Iterator;
+const QueryParameters = @import("query_parameters.zig");
+
+const ExecuteFrame = @import("frame.zig").ExecuteFrame;
+const PrepareFrame = @import("frame.zig").PrepareFrame;
+const QueryFrame = @import("frame.zig").QueryFrame;
+
+const testutils = @import("testutils.zig");
 const casstest = @import("casstest.zig");
 
 pub const Client = struct {
@@ -80,10 +94,10 @@ pub const Client = struct {
                     argument: ?OptionID = null,
                 };
 
-                pub fn format(value: Execute, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
+                pub fn format(value: Execute, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
                     var buf: [1024]u8 = undefined;
                     var fbs = io.fixedBufferStream(&buf);
-                    var fbw = fbs.writer();
+                    const fbw = fbs.writer();
 
                     if (value.not_enough_args) |v| {
                         if (v) {
@@ -114,14 +128,14 @@ pub const Client = struct {
     /// Maps a prepared statement id to the types of the arguments needed when executing it.
     const PreparedStatementsMetadata = std.HashMap([]const u8, PreparedStatementMetadataValue, std.hash_map.hashString, std.hash_map.eqlString, std.hash_map.DefaultMaxLoadPercentage);
 
-    allocator: *mem.Allocator,
+    allocator: mem.Allocator,
     connection: *Connection,
     options: InitOptions,
 
     /// TODO(vincent): need to implement some sort of TLL or size limit for this.
     prepared_statements_metadata: PreparedStatementsMetadata,
 
-    pub fn initWithConnection(allocator: *mem.Allocator, connection: *Connection, options: InitOptions) Self {
+    pub fn initWithConnection(allocator: mem.Allocator, connection: *Connection, options: InitOptions) Self {
         var self: Self = undefined;
         self.allocator = allocator;
         self.connection = connection;
@@ -132,9 +146,9 @@ pub const Client = struct {
         return self;
     }
 
-    pub fn deinit(self: *Self) void {}
+    pub fn deinit(_: *Self) void {}
 
-    pub fn prepare(self: *Self, allocator: *mem.Allocator, options: QueryOptions, comptime query_string: []const u8, args: anytype) ![]const u8 {
+    pub fn prepare(self: *Self, allocator: mem.Allocator, options: QueryOptions, comptime query_string: []const u8, args: anytype) ![]const u8 {
         var dummy_diags = QueryOptions.Diagnostics{};
         var diags = options.diags orelse &dummy_diags;
 
@@ -156,7 +170,7 @@ pub const Client = struct {
 
         // Write PREPARE, expect RESULT
         {
-            var prepare_frame = PrepareFrame{
+            const prepare_frame = PrepareFrame{
                 .query = query_string,
                 .keyspace = null,
             };
@@ -167,7 +181,7 @@ pub const Client = struct {
             });
         }
 
-        var read_frame = try self.connection.readFrame(allocator, Connection.ReadFrameOptions{
+        const read_frame = try self.connection.readFrame(allocator, Connection.ReadFrameOptions{
             .frame_allocator = self.allocator,
         });
         switch (read_frame) {
@@ -205,7 +219,7 @@ pub const Client = struct {
 
     // TODO(vincent): maybe add not comptime equivalent ?
 
-    pub fn query(self: *Self, allocator: *mem.Allocator, options: QueryOptions, comptime query_string: []const u8, args: anytype) !?Iterator {
+    pub fn query(self: *Self, allocator: mem.Allocator, options: QueryOptions, comptime query_string: []const u8, args: anytype) !?Iterator {
         var dummy_diags = QueryOptions.Diagnostics{};
         var diags = options.diags orelse &dummy_diags;
 
@@ -242,7 +256,7 @@ pub const Client = struct {
 
         // Write QUERY
         {
-            var query_frame = QueryFrame{
+            const query_frame = QueryFrame{
                 .query = query_string,
                 .query_parameters = query_parameters,
             };
@@ -270,7 +284,7 @@ pub const Client = struct {
         };
     }
 
-    pub fn execute(self: *Self, allocator: *mem.Allocator, options: QueryOptions, query_id: []const u8, args: anytype) !?Iterator {
+    pub fn execute(self: *Self, allocator: mem.Allocator, options: QueryOptions, query_id: []const u8, args: anytype) !?Iterator {
         var dummy_diags = QueryOptions.Diagnostics{};
         var diags = options.diags orelse &dummy_diags;
 
@@ -299,7 +313,7 @@ pub const Client = struct {
                 return error.InvalidPreparedStatementExecuteArgs;
             }
 
-            for (prepared) |column_spec, i| {
+            for (prepared, 0..) |column_spec, i| {
                 if (computed[i]) |option| {
                     if (column_spec.option != option) {
                         diags.execute.first_incompatible_arg = .{
@@ -331,7 +345,7 @@ pub const Client = struct {
 
         // Write EXECUTE
         {
-            var execute_frame = ExecuteFrame{
+            const execute_frame = ExecuteFrame{
                 .query_id = query_id,
                 .result_metadata_id = ps_result_metadata_id,
                 .query_parameters = query_parameters,
@@ -377,7 +391,7 @@ fn testWithCassandra(harness: *casstest.Harness) !void {
 
     {
         const Callback = struct {
-            pub fn do(h: *casstest.Harness, i: usize, row: *casstest.Row.AgeToIDs) !bool {
+            pub fn do(h: *casstest.Harness, _: usize, row: *casstest.Row.AgeToIDs) !bool {
                 try testing.expectEqual(row.age, 0);
                 try testing.expectEqualSlices(u8, &[_]u8{ 0, 2, 4, 8 }, row.ids);
                 try testing.expectEqualStrings("Vincent 0", row.name);
@@ -390,7 +404,7 @@ fn testWithCassandra(harness: *casstest.Harness) !void {
             casstest.Row.AgeToIDs,
             "SELECT age, name, ids, balance FROM foobar.age_to_ids WHERE age = ?",
             .{
-                @intCast(u32, 0),
+                @as(u32, @intCast(0)),
             },
             Callback.do,
         );
@@ -399,7 +413,7 @@ fn testWithCassandra(harness: *casstest.Harness) !void {
 
     {
         const Callback = struct {
-            pub fn do(h: *casstest.Harness, i: usize, row: *casstest.Row.AgeToIDs) !bool {
+            pub fn do(h: *casstest.Harness, _: usize, row: *casstest.Row.AgeToIDs) !bool {
                 try testing.expectEqual(@as(u32, 1), row.age);
                 try testing.expectEqualSlices(u8, &[_]u8{ 0, 2, 4, 8 }, row.ids);
                 try testing.expectEqualStrings("", row.name);
@@ -412,7 +426,7 @@ fn testWithCassandra(harness: *casstest.Harness) !void {
             casstest.Row.AgeToIDs,
             "SELECT age, name, ids, balance FROM foobar.age_to_ids WHERE age = ?",
             .{
-                @intCast(u32, 1),
+                @as(u32, @intCast(1)),
             },
             Callback.do,
         );
@@ -423,7 +437,7 @@ fn testWithCassandra(harness: *casstest.Harness) !void {
 
     {
         const Callback = struct {
-            pub fn do(h: *casstest.Harness, i: usize, row: *casstest.Row.User) !bool {
+            pub fn do(_: *casstest.Harness, i: usize, row: *casstest.Row.User) !bool {
                 try testing.expectEqual(@as(u64, 2000), row.id);
                 try testing.expectEqual(i + 25, row.secondary_id);
                 return true;
@@ -441,7 +455,7 @@ fn testWithCassandra(harness: *casstest.Harness) !void {
 }
 
 test "client: insert then query" {
-    if (build_options.with_cassandra == null) return error.SkipZigTest;
+    if (!build_options.with_cassandra) return error.SkipZigTest;
 
     const testParameters = struct {
         const Self = @This();
@@ -471,9 +485,9 @@ test "client: insert then query" {
         }
     };
 
-    var params = try testParameters.init(build_options.with_cassandra.?);
+    const params = try testParameters.init(build_options.with_cassandra.?);
 
-    var arena = testing.arenaAllocator();
+    var arena = testutils.arenaAllocator();
     defer arena.deinit();
 
     var harness: casstest.Harness = undefined;
@@ -521,20 +535,20 @@ test "option id array list" {
 /// TODO(vincent): it's not clear to the caller that data in `args` must outlive `values` because we don't duplicating memory
 /// unless absolutely necessary in the case of arrays.
 /// Think of a way to communicate that.
-fn computeValues(allocator: *mem.Allocator, values: ?*std.ArrayList(Value), options: ?*OptionIDArrayList, args: anytype) !void {
+fn computeValues(allocator: mem.Allocator, values: ?*std.ArrayList(Value), options: ?*OptionIDArrayList, args: anytype) !void {
     if (@typeInfo(@TypeOf(args)) != .Struct) {
         @compileError("Expected tuple or struct argument, found " ++ @typeName(args) ++ " of type " ++ @tagName(@typeInfo(args)));
     }
 
     var dummy_vals = try std.ArrayList(Value).initCapacity(allocator, 16);
     defer dummy_vals.deinit();
-    var vals = values orelse &dummy_vals;
+    const vals = values orelse &dummy_vals;
 
     var dummy_opts = OptionIDArrayList{};
-    var opts = options orelse &dummy_opts;
+    const opts = options orelse &dummy_opts;
 
-    inline for (@typeInfo(@TypeOf(args)).Struct.fields) |struct_field, i| {
-        const Type = struct_field.field_type;
+    inline for (@typeInfo(@TypeOf(args)).Struct.fields) |struct_field| {
+        const Type = struct_field.type;
 
         const arg = @field(args, struct_field.name);
 
@@ -555,14 +569,14 @@ fn resolveOption(comptime Type: type) OptionID {
     const type_info = @typeInfo(Type);
     switch (type_info) {
         .Bool => return .Boolean,
-        .Int => |info| switch (Type) {
+        .Int => |_| switch (Type) {
             i8, u8 => return .Tinyint,
             i16, u16 => return .Smallint,
             i32, u32 => return .Int,
             i64, u64 => return .Bigint,
             else => @compileError("field type " ++ @typeName(Type) ++ " is not compatible with CQL"),
         },
-        .Float => |info| switch (Type) {
+        .Float => |_| switch (Type) {
             f32 => return .Float,
             f64 => return .Double,
             else => @compileError("field type " ++ @typeName(Type) ++ " is not compatible with CQL"),
@@ -580,7 +594,7 @@ fn resolveOption(comptime Type: type) OptionID {
     }
 }
 
-fn computeSingleValue(allocator: *mem.Allocator, values: *std.ArrayList(Value), options: *OptionIDArrayList, comptime Type: type, arg: Type) !void {
+fn computeSingleValue(allocator: mem.Allocator, values: *std.ArrayList(Value), options: *OptionIDArrayList, comptime Type: type, arg: Type) !void {
     const type_info = @typeInfo(Type);
 
     var value: Value = undefined;
@@ -588,7 +602,7 @@ fn computeSingleValue(allocator: *mem.Allocator, values: *std.ArrayList(Value), 
     // Special case [16]u8 since we consider it a UUID.
     if (Type == [16]u8) {
         try options.append(.UUID);
-        value = Value{ .Set = try mem.dupe(allocator, u8, &arg) };
+        value = Value{ .Set = try allocator.dupe(u8, &arg) };
         try values.append(value);
 
         return;
@@ -637,10 +651,10 @@ fn computeSingleValue(allocator: *mem.Allocator, values: *std.ArrayList(Value), 
         .Int => |info| {
             try options.append(resolveOption(Type));
 
-            var buf = try allocator.alloc(u8, info.bits / 8);
+            const buf = try allocator.alloc(u8, info.bits / 8);
             errdefer allocator.free(buf);
 
-            mem.writeIntBig(Type, @ptrCast(*[info.bits / 8]u8, buf), arg);
+            mem.writeInt(Type, @ptrCast(buf), arg, .big);
 
             value = Value{ .Set = buf };
             try values.append(value);
@@ -648,10 +662,11 @@ fn computeSingleValue(allocator: *mem.Allocator, values: *std.ArrayList(Value), 
         .Float => |info| {
             try options.append(resolveOption(Type));
 
-            var buf = try allocator.alloc(u8, info.bits / 8);
+            const buf = try allocator.alloc(u8, info.bits / 8);
             errdefer allocator.free(buf);
 
-            @ptrCast(*align(1) Type, buf).* = arg;
+            const arg_ptr: *align(1) Type = @ptrCast(buf);
+            arg_ptr.* = arg;
 
             value = Value{ .Set = buf };
             try values.append(value);
@@ -669,12 +684,12 @@ fn computeSingleValue(allocator: *mem.Allocator, values: *std.ArrayList(Value), 
                 }
 
                 try options.append(null);
-                value = Value{ .Set = try serializeValues(allocator, inner_values.toOwnedSlice()) };
+                value = Value{ .Set = try serializeValues(allocator, try inner_values.toOwnedSlice()) };
                 try values.append(value);
             },
             else => @compileError("invalid pointer size " ++ @tagName(pointer.size)),
         },
-        .Array => |array| {
+        .Array => |_| {
 
             // Otherwise it's a list or a set, encode a new list of values.
             var inner_values = std.ArrayList(Value).init(allocator);
@@ -683,7 +698,7 @@ fn computeSingleValue(allocator: *mem.Allocator, values: *std.ArrayList(Value), 
             }
 
             try options.append(null);
-            value = Value{ .Set = try serializeValues(allocator, inner_values.toOwnedSlice()) };
+            value = Value{ .Set = try serializeValues(allocator, try inner_values.toOwnedSlice()) };
             try values.append(value);
         },
         .Optional => |optional| {
@@ -699,11 +714,11 @@ fn computeSingleValue(allocator: *mem.Allocator, values: *std.ArrayList(Value), 
     }
 }
 
-fn serializeValues(allocator: *mem.Allocator, values: []const Value) ![]const u8 {
+fn serializeValues(allocator: mem.Allocator, values: []const Value) ![]const u8 {
     var pw: PrimitiveWriter = undefined;
     try pw.reset(allocator);
 
-    try pw.writeInt(u32, @intCast(u32, values.len));
+    try pw.writeInt(u32, @intCast(values.len));
 
     for (values) |value| {
         switch (value) {
@@ -718,22 +733,22 @@ fn serializeValues(allocator: *mem.Allocator, values: []const Value) ![]const u8
 }
 
 test "serialize values" {
-    var arenaAllocator = testing.arenaAllocator();
-    defer arenaAllocator.deinit();
+    var arena = testutils.arenaAllocator();
+    defer arena.deinit();
 
-    var v1 = Value{ .Set = "foobar" };
-    var v2 = Value{ .Set = "barbaz" };
+    const v1 = Value{ .Set = "foobar" };
+    const v2 = Value{ .Set = "barbaz" };
 
-    var data = try serializeValues(&arenaAllocator.allocator, &[_]Value{ v1, v2 });
+    var data = try serializeValues(arena.allocator(), &[_]Value{ v1, v2 });
     try testing.expectEqual(@as(usize, 24), data.len);
     try testing.expectEqualSlices(u8, "\x00\x00\x00\x02", data[0..4]);
     try testing.expectEqualStrings("\x00\x00\x00\x06foobar\x00\x00\x00\x06barbaz", data[4..]);
 }
 
 test "compute values: ints" {
-    var arenaAllocator = testing.arenaAllocator();
-    defer arenaAllocator.deinit();
-    var allocator = &arenaAllocator.allocator;
+    var arena = testutils.arenaAllocator();
+    defer arena.deinit();
+    const allocator = arena.allocator();
 
     var values = std.ArrayList(Value).init(allocator);
     var options = OptionIDArrayList{};
@@ -752,8 +767,8 @@ test "compute values: ints" {
         .u_bigint_ptr = &my_u64,
     });
 
-    var v = values.items;
-    var o = options.getItems();
+    const v = values.items;
+    const o = options.getItems();
 
     try testing.expectEqual(@as(usize, 9), v.len);
     try testing.expectEqual(@as(usize, 9), o.len);
@@ -783,9 +798,9 @@ test "compute values: ints" {
 }
 
 test "compute values: floats" {
-    var arenaAllocator = testing.arenaAllocator();
-    defer arenaAllocator.deinit();
-    var allocator = &arenaAllocator.allocator;
+    var arena = testutils.arenaAllocator();
+    defer arena.deinit();
+    const allocator = arena.allocator();
 
     var values = std.ArrayList(Value).init(allocator);
     var options = OptionIDArrayList{};
@@ -798,8 +813,8 @@ test "compute values: floats" {
         .f64_ptr = &my_f64,
     });
 
-    var v = values.items;
-    var o = options.getItems();
+    const v = values.items;
+    const o = options.getItems();
 
     try testing.expectEqual(@as(usize, 3), v.len);
     try testing.expectEqual(@as(usize, 3), o.len);
@@ -813,19 +828,19 @@ test "compute values: floats" {
 }
 
 test "compute values: strings" {
-    var arenaAllocator = testing.arenaAllocator();
-    defer arenaAllocator.deinit();
-    var allocator = &arenaAllocator.allocator;
+    var arena = testutils.arenaAllocator();
+    defer arena.deinit();
+    const allocator = arena.allocator();
 
     var values = std.ArrayList(Value).init(allocator);
     var options = OptionIDArrayList{};
 
     _ = try computeValues(allocator, &values, &options, .{
-        .string = @as([]const u8, try mem.dupe(allocator, u8, "foobar")),
+        .string = @as([]const u8, try allocator.dupe(u8, "foobar")),
     });
 
-    var v = values.items;
-    var o = options.getItems();
+    const v = values.items;
+    const o = options.getItems();
 
     try testing.expectEqual(@as(usize, 1), v.len);
     try testing.expectEqual(@as(usize, 1), o.len);
@@ -835,9 +850,9 @@ test "compute values: strings" {
 }
 
 test "compute values: bool" {
-    var arenaAllocator = testing.arenaAllocator();
-    defer arenaAllocator.deinit();
-    var allocator = &arenaAllocator.allocator;
+    var arena = testutils.arenaAllocator();
+    defer arena.deinit();
+    const allocator = arena.allocator();
 
     var values = std.ArrayList(Value).init(allocator);
     var options = OptionIDArrayList{};
@@ -847,8 +862,8 @@ test "compute values: bool" {
         .bool2 = false,
     });
 
-    var v = values.items;
-    var o = options.getItems();
+    const v = values.items;
+    const o = options.getItems();
 
     try testing.expectEqual(@as(usize, 2), v.len);
     try testing.expectEqual(@as(usize, 2), o.len);
@@ -860,9 +875,9 @@ test "compute values: bool" {
 }
 
 test "compute values: set/list" {
-    var arenaAllocator = testing.arenaAllocator();
-    defer arenaAllocator.deinit();
-    var allocator = &arenaAllocator.allocator;
+    var arena = testutils.arenaAllocator();
+    defer arena.deinit();
+    const allocator = arena.allocator();
 
     var values = std.ArrayList(Value).init(allocator);
     var options = OptionIDArrayList{};
@@ -872,8 +887,8 @@ test "compute values: set/list" {
         .string2 = @as([]const u16, &[_]u16{ 0x01, 0x2050 }),
     });
 
-    var v = values.items;
-    var o = options.getItems();
+    const v = values.items;
+    const o = options.getItems();
 
     try testing.expectEqual(@as(usize, 2), v.len);
     try testing.expectEqual(@as(usize, 2), o.len);
@@ -886,9 +901,9 @@ test "compute values: set/list" {
 }
 
 test "compute values: uuid" {
-    var arenaAllocator = testing.arenaAllocator();
-    defer arenaAllocator.deinit();
-    var allocator = &arenaAllocator.allocator;
+    var arena = testutils.arenaAllocator();
+    defer arena.deinit();
+    const allocator = arena.allocator();
 
     var values = std.ArrayList(Value).init(allocator);
     var options = OptionIDArrayList{};
@@ -902,8 +917,8 @@ test "compute values: uuid" {
         },
     });
 
-    var v = values.items;
-    var o = options.getItems();
+    const v = values.items;
+    const o = options.getItems();
 
     try testing.expectEqual(@as(usize, 1), v.len);
     try testing.expectEqual(@as(usize, 1), o.len);
@@ -913,9 +928,9 @@ test "compute values: uuid" {
 }
 
 test "compute values: not set and null" {
-    var arenaAllocator = testing.arenaAllocator();
-    defer arenaAllocator.deinit();
-    var allocator = &arenaAllocator.allocator;
+    var arena = testutils.arenaAllocator();
+    defer arena.deinit();
+    const allocator = arena.allocator();
 
     var values = std.ArrayList(Value).init(allocator);
     var options = OptionIDArrayList{};
@@ -930,8 +945,8 @@ test "compute values: not set and null" {
         .nullable = null,
     });
 
-    var v = values.items;
-    var o = options.getItems();
+    const v = values.items;
+    const o = options.getItems();
 
     try testing.expectEqual(@as(usize, 2), v.len);
     try testing.expectEqual(@as(usize, 2), o.len);
@@ -943,7 +958,7 @@ test "compute values: not set and null" {
     try testing.expectEqual(OptionID.Bigint, o[1].?);
 }
 
-fn areOptionIDsEqual(prepared: []const ColumnSpec, computed: []const ?OptionID) bool {}
+fn areOptionIDsEqual(_: []const ColumnSpec, _: []const ?OptionID) bool {}
 
 fn countBindMarkers(query_string: []const u8) usize {
     var pos: usize = 0;
@@ -963,7 +978,7 @@ test "count bind markers" {
     try testing.expectEqual(@as(usize, 3), count);
 }
 
-test "" {
+test {
     _ = @import("bigint.zig");
 
     if (build_options.with_snappy) {

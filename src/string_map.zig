@@ -1,6 +1,8 @@
 const std = @import("std");
+const mem = std.mem;
+const testing = std.testing;
 
-const testing = @import("testing.zig");
+const testutils = @import("testutils.zig");
 
 pub const Map = struct {
     const Self = @This();
@@ -9,35 +11,33 @@ pub const Map = struct {
     const MapEntry = MapType.Entry;
     const Iterator = MapType.Iterator;
 
-    allocator: *std.mem.Allocator,
+    allocator: mem.Allocator,
     map: MapType,
 
-    pub fn init(allocator: *std.mem.Allocator) Self {
+    pub fn init(allocator: mem.Allocator) Self {
         return Self{
             .allocator = allocator,
             .map = MapType.init(allocator),
         };
     }
 
-    pub fn put(self: *Self, key: []const u8, value: []const u8) !?MapEntry {
-        if (self.map.getEntry(key)) |kv| {
-            self.allocator.free(kv.value);
-            kv.value = value;
-            return kv.*;
-        } else {
-            return try self.map.fetchPut(key, value);
+    pub fn put(self: *Self, key: []const u8, value: []const u8) !void {
+        const result = try self.map.getOrPut(key);
+        if (result.found_existing) {
+            self.allocator.free(result.value_ptr.*);
         }
+        result.value_ptr.* = value;
     }
 
-    pub fn count(self: Self) usize {
+    pub fn count(self: *const Self) usize {
         return self.map.count();
     }
 
-    pub fn iterator(self: Self) Iterator {
+    pub fn iterator(self: *const Self) Iterator {
         return self.map.iterator();
     }
 
-    pub fn getEntry(self: Self, key: []const u8) ?*MapEntry {
+    pub fn getEntry(self: *const Self, key: []const u8) ?MapEntry {
         return self.map.getEntry(key);
     }
 };
@@ -67,8 +67,8 @@ pub const Multimap = struct {
         pub fn next(it: *Iterator) ?KV {
             if (it.map_it.next()) |entry| {
                 return KV{
-                    .key = entry.key,
-                    .value = entry.value,
+                    .key = entry.key_ptr.*,
+                    .value = entry.value_ptr.*,
                 };
             }
 
@@ -76,7 +76,7 @@ pub const Multimap = struct {
         }
     };
 
-    pub fn init(allocator: *std.mem.Allocator) Self {
+    pub fn init(allocator: mem.Allocator) Self {
         return Self{
             .map = std.StringHashMap(EntryList).init(allocator),
         };
@@ -86,19 +86,19 @@ pub const Multimap = struct {
         _ = try self.map.put(key, values);
     }
 
-    pub fn get(self: Self, key: []const u8) ?[]const []const u8 {
+    pub fn get(self: *const Self, key: []const u8) ?[]const []const u8 {
         if (self.map.getEntry(key)) |entry| {
-            return entry.value;
+            return entry.value_ptr.*;
         } else {
             return null;
         }
     }
 
-    pub fn count(self: Self) usize {
+    pub fn count(self: *const Self) usize {
         return self.map.count();
     }
 
-    pub fn iterator(self: Self) Iterator {
+    pub fn iterator(self: *const Self) Iterator {
         return Iterator{
             .map_it = self.map.iterator(),
         };
@@ -106,21 +106,19 @@ pub const Multimap = struct {
 };
 
 test "map" {
-    var arena = testing.arenaAllocator();
+    var arena = testutils.arenaAllocator();
     defer arena.deinit();
-    const allocator = &arena.allocator;
+    const allocator = arena.allocator();
 
     var m = Map.init(allocator);
 
     {
-        const dupe = std.mem.dupe;
+        const k1 = try allocator.dupe(u8, "foo");
+        const k2 = try allocator.dupe(u8, "bar");
 
-        const k1 = try dupe(allocator, u8, "foo");
-        const k2 = try dupe(allocator, u8, "bar");
-
-        const v1 = try dupe(allocator, u8, "bar");
-        const v2 = try dupe(allocator, u8, "heo");
-        const v3 = try dupe(allocator, u8, "baz");
+        const v1 = try allocator.dupe(u8, "bar");
+        const v2 = try allocator.dupe(u8, "heo");
+        const v3 = try allocator.dupe(u8, "baz");
 
         _ = try m.put(k1, v1);
         _ = try m.put(k1, v2);
@@ -129,28 +127,26 @@ test "map" {
 
     try testing.expectEqual(@as(usize, 2), m.count());
 
-    try testing.expectEqualStrings("heo", m.getEntry("foo").?.value);
-    try testing.expectEqualStrings("baz", m.getEntry("bar").?.value);
+    try testing.expectEqualStrings("heo", m.getEntry("foo").?.value_ptr.*);
+    try testing.expectEqualStrings("baz", m.getEntry("bar").?.value_ptr.*);
 }
 
 test "multimap" {
-    var arena = testing.arenaAllocator();
+    var arena = testutils.arenaAllocator();
     defer arena.deinit();
-    const allocator = &arena.allocator;
+    const allocator = arena.allocator();
 
     var m = Multimap.init(allocator);
 
-    const dupe = std.mem.dupe;
-
     {
-        const k1 = try dupe(allocator, u8, "foo");
+        const k1 = try allocator.dupe(u8, "foo");
         const v1 = &[_][]const u8{ "bar", "baz" };
         _ = try m.put(k1, v1);
     }
 
     {
-        const k2 = try dupe(allocator, u8, "fou");
-        const v2 = &[_][]const u8{ "bar", "baz" };
+        const k2 = try allocator.dupe(u8, "fou");
+        const v2 = &[_][]const u8{ "fb", "ha" };
         _ = try m.put(k2, v2);
     }
 
@@ -161,8 +157,13 @@ test "multimap" {
         try testing.expect(std.mem.eql(u8, "foo", entry.key) or std.mem.eql(u8, "fou", entry.key));
 
         const slice = entry.value;
-        try testing.expectEqualStrings("bar", slice[0]);
-        try testing.expectEqualStrings("baz", slice[1]);
+        if (std.mem.eql(u8, "foo", entry.key)) {
+            try testing.expectEqualStrings("bar", slice[0]);
+            try testing.expectEqualStrings("baz", slice[1]);
+        } else if (std.mem.eql(u8, "fou", entry.key)) {
+            try testing.expectEqualStrings("fb", slice[0]);
+            try testing.expectEqualStrings("ha", slice[1]);
+        }
     }
 
     const slice = m.get("foo").?;
@@ -170,6 +171,6 @@ test "multimap" {
     try testing.expectEqualStrings("baz", slice[1]);
 
     const slice2 = m.get("fou").?;
-    try testing.expectEqualStrings("bar", slice[0]);
-    try testing.expectEqualStrings("baz", slice[1]);
+    try testing.expectEqualStrings("fb", slice2[0]);
+    try testing.expectEqualStrings("ha", slice2[1]);
 }

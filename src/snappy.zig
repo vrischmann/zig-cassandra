@@ -1,9 +1,8 @@
 const std = @import("std");
-const cast = std.meta.cast;
 const mem = std.mem;
+const testing = std.testing;
 
 const c = @cImport(@cInclude("snappy-c.h"));
-const testing = @import("testing.zig");
 
 pub fn compress(allocator: *mem.Allocator, data: []const u8) ![]const u8 {
     var max_dst_size = c.snappy_max_compressed_length(data.len);
@@ -12,9 +11,9 @@ pub fn compress(allocator: *mem.Allocator, data: []const u8) ![]const u8 {
     errdefer allocator.free(buf);
 
     const status = c.snappy_compress(
-        cast([*c]const u8, data),
+        std.meta.cast([*c]const u8, data),
         data.len,
-        cast([*c]u8, buf),
+        std.meta.cast([*c]u8, buf),
         &max_dst_size,
     );
     if (status != .SNAPPY_OK) {
@@ -30,7 +29,7 @@ pub fn decompress(allocator: *mem.Allocator, data: []const u8) ![]const u8 {
     var max_decompressed_size: usize = 0;
 
     var status = c.snappy_uncompressed_length(
-        cast([*c]const u8, data),
+        std.meta.cast([*c]const u8, data),
         data.len,
         &max_decompressed_size,
     );
@@ -42,10 +41,10 @@ pub fn decompress(allocator: *mem.Allocator, data: []const u8) ![]const u8 {
     errdefer allocator.free(buf);
 
     status = c.snappy_uncompress(
-        cast([*c]const u8, data),
+        std.meta.cast([*c]const u8, data),
         data.len,
-        cast([*c]u8, buf),
-        @alignCast(8, &max_decompressed_size),
+        std.meta.cast([*c]u8, buf),
+        @as(*align(8) usize, @alignCast(&max_decompressed_size)),
     );
     if (status != .SNAPPY_OK) {
         return error.DecompressionFailed;

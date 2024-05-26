@@ -1,15 +1,8 @@
 const std = @import("std");
 const io = std.io;
+const mem = std.mem;
 
-pub const allocator = std.testing.allocator;
-pub const expect = std.testing.expect;
-pub const expectApproxEqAbs = std.testing.expectApproxEqAbs;
-pub const expectError = std.testing.expectError;
-pub const expectEqual = std.testing.expectEqual;
-pub const expectEqualSlices = std.testing.expectEqualSlices;
-pub const expectEqualStrings = std.testing.expectEqualStrings;
-
-const PrimitiveWriter = @import("primitive/writer.zig").PrimitiveWriter;
+const PrimitiveWriter = @import("message.zig").PrimitiveWriter;
 const FrameHeader = @import("frame.zig").FrameHeader;
 const RawFrame = @import("frame.zig").RawFrame;
 const RawFrameReader = @import("frame.zig").RawFrameReader;
@@ -28,7 +21,7 @@ pub fn printHRBytes(comptime fmt: []const u8, exp: []const u8, args: anytype) vo
             column = 0;
         }
 
-        if (std.ascii.isAlNum(c) or c == '_') {
+        if (std.ascii.isAlphanumeric(c) or c == '_') {
             buffer.append(c) catch unreachable;
         } else {
             buffer.appendSlice("\\x") catch unreachable;
@@ -50,28 +43,34 @@ pub fn arenaAllocator() std.heap.ArenaAllocator {
 
 /// Reads a raw frame from the provided buffer.
 /// Only intended to be used for tests.
-pub fn readRawFrame(_allocator: *std.mem.Allocator, data: []const u8) !RawFrame {
+pub fn readRawFrame(_allocator: mem.Allocator, data: []const u8) !RawFrame {
     var source = io.StreamSource{ .const_buffer = io.fixedBufferStream(data) };
-    var reader = source.reader();
+    const reader = source.reader();
 
     var fr = RawFrameReader(@TypeOf(reader)).init(reader);
 
     return fr.read(_allocator);
 }
 
-pub fn expectSameRawFrame(frame: anytype, header: FrameHeader, exp: []const u8) !void {
+pub fn expectSameRawFrame(comptime T: type, frame: T, header: FrameHeader, exp: []const u8) !void {
     var arena = arenaAllocator();
     defer arena.deinit();
+    const allocator = arena.allocator();
 
     // Write frame body
     var pw: PrimitiveWriter = undefined;
-    try pw.reset(&arena.allocator);
+    try pw.reset(allocator);
 
-    const function = @typeInfo(@TypeOf(frame.write)).BoundFn;
-    if (function.args.len == 2) {
-        try frame.write(&pw);
-    } else if (function.args.len == 3) {
-        try frame.write(header.version, &pw);
+    const write_fn = @typeInfo(@TypeOf(T.write));
+    switch (write_fn) {
+        .Fn => |info| {
+            if (info.params.len == 2) {
+                try frame.write(&pw);
+            } else if (info.params.len == 3) {
+                try frame.write(header.version, &pw);
+            }
+        },
+        else => unreachable,
     }
 
     // Write raw frame
@@ -83,7 +82,7 @@ pub fn expectSameRawFrame(frame: anytype, header: FrameHeader, exp: []const u8) 
 
     var buf2: [1024]u8 = undefined;
     var source = io.StreamSource{ .buffer = io.fixedBufferStream(&buf2) };
-    var writer = source.writer();
+    const writer = source.writer();
     var fw = RawFrameWriter(@TypeOf(writer)).init(writer);
 
     try fw.write(raw_frame);

@@ -12,28 +12,32 @@ const RawFrame = @import("frame.zig").RawFrame;
 const RawFrameReader = @import("frame.zig").RawFrameReader;
 const RawFrameWriter = @import("frame.zig").RawFrameWriter;
 
-const PrimitiveReader = @import("primitive/reader.zig").PrimitiveReader;
-const PrimitiveWriter = @import("primitive/writer.zig").PrimitiveWriter;
-
-usingnamespace @import("primitive_types.zig");
-
 const lz4 = @import("lz4.zig");
-const snappy = comptime if (build_options.with_snappy) @import("snappy.zig");
+const snappy = if (build_options.with_snappy) @import("snappy.zig");
 
-// Ordered by Opcode
-usingnamespace @import("frames/error.zig");
-usingnamespace @import("frames/startup.zig");
-usingnamespace @import("frames/ready.zig");
-usingnamespace @import("frames/auth.zig");
-usingnamespace @import("frames/options.zig");
-usingnamespace @import("frames/supported.zig");
-usingnamespace @import("frames/query.zig");
-usingnamespace @import("frames/result.zig");
-usingnamespace @import("frames/prepare.zig");
-usingnamespace @import("frames/execute.zig");
-usingnamespace @import("frames/register.zig");
-usingnamespace @import("frames/event.zig");
-usingnamespace @import("frames/batch.zig");
+const message = @import("message.zig");
+const Opcode = message.Opcode;
+const ProtocolVersion = message.ProtocolVersion;
+const CompressionAlgorithm = message.CompressionAlgorithm;
+const CQLVersion = message.CQLVersion;
+const PrimitiveReader = message.PrimitiveReader;
+const PrimitiveWriter = message.PrimitiveWriter;
+
+const frame = @import("frame.zig");
+const ErrorFrame = frame.ErrorFrame;
+const StartupFrame = frame.StartupFrame;
+const ReadyFrame = frame.ReadyFrame;
+const AuthenticateFrame = frame.AuthenticateFrame;
+const SupportedFrame = frame.SupportedFrame;
+const QueryFrame = frame.QueryFrame;
+const ResultFrame = frame.ResultFrame;
+const PrepareFrame = frame.PrepareFrame;
+const ExecuteFrame = frame.ExecuteFrame;
+const EventFrame = frame.EventFrame;
+const BatchFrame = frame.BatchFrame;
+const AuthChallengeFrame = frame.AuthChallengeFrame;
+const AuthResponseFrame = frame.AuthResponseFrame;
+const AuthSuccessFrame = frame.AuthSuccessFrame;
 
 pub const Frame = union(Opcode) {
     Error: ErrorFrame,
@@ -130,7 +134,7 @@ pub const Connection = struct {
         self.primitive_reader = PrimitiveReader.init();
 
         var dummy_diags = InitOptions.Diagnostics{};
-        var diags = options.diags orelse &dummy_diags;
+        const diags = options.diags orelse &dummy_diags;
 
         try self.handshake(diags);
     }
@@ -169,7 +173,7 @@ pub const Connection = struct {
         try self.writeFrame(&fba.allocator, .{ .opcode = .Options });
         fba.reset();
         switch (try self.readFrame(&fba.allocator, null)) {
-            .Supported => |frame| self.negotiated_state.cql_version = frame.cql_versions[0],
+            .Supported => |fr| self.negotiated_state.cql_version = fr.cql_versions[0],
             .Error => |err| {
                 diags.message = err.message;
                 return error.HandshakeFailed;
@@ -192,8 +196,8 @@ pub const Connection = struct {
         });
         switch (try self.readFrame(&fba.allocator, null)) {
             .Ready => return,
-            .Authenticate => |frame| {
-                try self.authenticate(&fba.allocator, diags, frame.authenticator);
+            .Authenticate => |fr| {
+                try self.authenticate(&fba.allocator, diags, fr.authenticator);
             },
             .Error => |err| {
                 diags.message = err.message;
@@ -203,7 +207,7 @@ pub const Connection = struct {
         }
     }
 
-    fn authenticate(self: *Self, allocator: *mem.Allocator, diags: *InitOptions.Diagnostics, authenticator: []const u8) !void {
+    fn authenticate(self: *Self, allocator: *mem.Allocator, diags: *InitOptions.Diagnostics, _: []const u8) !void {
         // TODO(vincent): handle authenticator classes
         // TODO(vincent): handle auth challenges
         if (self.options.username == null) {
@@ -217,11 +221,11 @@ pub const Connection = struct {
         {
             var buf: [512]u8 = undefined;
             const token = try std.fmt.bufPrint(&buf, "\x00{s}\x00{s}", .{ self.options.username.?, self.options.password.? });
-            var frame = AuthResponseFrame{ .token = token };
+            const fr = AuthResponseFrame{ .token = token };
 
             try self.writeFrame(allocator, .{
                 .opcode = .AuthResponse,
-                .body = frame,
+                .body = fr,
             });
         }
 
@@ -253,7 +257,7 @@ pub const Connection = struct {
     /// Additionally this method takes care of compression if enabled.
     ///
     /// This method is not thread safe.
-    pub fn writeFrame(self: *Self, allocator: *mem.Allocator, frame: anytype) !void {
+    pub fn writeFrame(self: *Self, allocator: *mem.Allocator, fr: anytype) !void {
         // Lock the writer if necessary
         var heldWriteLock: std.event.Lock.Held = undefined;
         if (std.io.is_async) {
@@ -272,7 +276,7 @@ pub const Connection = struct {
                 .version = self.options.protocol_version,
                 .flags = 0,
                 .stream = 0,
-                .opcode = frame.opcode,
+                .opcode = fr.opcode,
                 .body_len = 0,
             },
             .body = &[_]u8{},
@@ -282,23 +286,23 @@ pub const Connection = struct {
             raw_frame.header.flags |= FrameFlags.UseBeta;
         }
 
-        const FrameType = @TypeOf(frame);
+        const FrameType = @TypeOf(fr);
 
         if (@hasField(FrameType, "body")) {
             // Encode body
-            const TypeOfWriteFn = @TypeOf(frame.body.write);
+            const TypeOfWriteFn = @TypeOf(fr.body.write);
             const typeInfo = @typeInfo(TypeOfWriteFn);
             if (typeInfo.BoundFn.args.len == 3) {
-                try frame.body.write(self.options.protocol_version, &self.primitive_writer);
+                try fr.body.write(self.options.protocol_version, &self.primitive_writer);
             } else {
-                try frame.body.write(&self.primitive_writer);
+                try fr.body.write(&self.primitive_writer);
             }
 
             // This is the actual bytes of the encoded body.
             const written = self.primitive_writer.getWritten();
 
             // Default to using the uncompressed body.
-            raw_frame.header.body_len = @intCast(u32, written.len);
+            raw_frame.header.body_len = @intCast(written.len);
             raw_frame.body = written;
 
             // Compress the body if we can use it.
@@ -309,7 +313,7 @@ pub const Connection = struct {
                             const compressed_data = try lz4.compress(allocator, written);
 
                             raw_frame.header.flags |= FrameFlags.Compression;
-                            raw_frame.header.body_len = @intCast(u32, compressed_data.len);
+                            raw_frame.header.body_len = @intCast(compressed_data.len);
                             raw_frame.body = compressed_data;
                         },
                         .Snappy => {
@@ -318,7 +322,7 @@ pub const Connection = struct {
                             const compressed_data = try snappy.compress(allocator, written);
 
                             raw_frame.header.flags |= FrameFlags.Compression;
-                            raw_frame.header.body_len = @intCast(u32, compressed_data.len);
+                            raw_frame.header.body_len = @intCast(compressed_data.len);
                             raw_frame.body = compressed_data;
                         },
                     }
@@ -340,7 +344,7 @@ pub const Connection = struct {
 
         self.primitive_reader.reset(raw_frame.body);
 
-        var frame_allocator = if (options) |opts| opts.frame_allocator else allocator;
+        const frame_allocator = if (options) |opts| opts.frame_allocator else allocator;
 
         return switch (raw_frame.header.opcode) {
             .Error => Frame{ .Error = try ErrorFrame.read(frame_allocator, &self.primitive_reader) },
