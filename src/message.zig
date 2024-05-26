@@ -232,6 +232,8 @@ pub const ProtocolVersion = packed struct {
             return ProtocolVersion{ .version = 4 };
         } else if (mem.startsWith(u8, s, "5/")) {
             return ProtocolVersion{ .version = 5 };
+        } else if (mem.startsWith(u8, s, "6/")) {
+            return ProtocolVersion{ .version = 6 };
         } else {
             return error.InvalidProtocolVersion;
         }
@@ -244,6 +246,8 @@ pub const ProtocolVersion = packed struct {
             return "4/v4";
         } else if (self.is(5)) {
             return "5/v5-beta";
+        } else if (self.is(6)) {
+            return "6/v6-beta";
         } else {
             return error.InvalidProtocolVersion;
         }
