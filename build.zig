@@ -57,28 +57,22 @@ pub fn build(b: *std.Build) !void {
     }
 
     //
-    // Build library
+    // Create the public 'cassandra' module
     //
 
-    const lib = b.addStaticLibrary(.{
-        .name = "zig-cassandra",
+    const module_options = b.addOptions();
+    module_options.addOption(bool, "with_snappy", with_snappy);
+
+    const module = b.addModule("cassandra", .{
         .root_source_file = b.path("src/lib.zig"),
-        .target = target,
-        .optimize = optimize,
+        .link_libc = true,
     });
-    lib.linkLibrary(lz4);
-    lib.addIncludePath(b.path("src"));
-
+    module.addIncludePath(b.path("src"));
+    module.linkLibrary(lz4);
     if (with_snappy) {
-        lib.linkLibC();
-        lib.linkSystemLibrary("snappy");
+        module.linkSystemLibrary("snappy", .{});
     }
-
-    const lib_options = b.addOptions();
-    lib_options.addOption(bool, "with_snappy", true);
-    lib.root_module.addImport("build_options", lib_options.createModule());
-
-    b.installArtifact(lib);
+    module.addImport("build_options", module_options.createModule());
 
     //
     // Add the main tests for the library.
@@ -108,16 +102,20 @@ pub fn build(b: *std.Build) !void {
     const test_step = b.step("test", "Run library tests");
     test_step.dependOn(&run_main_tests.step);
 
+    //
     // Add the example
     //
+
     const example = b.addExecutable(.{
         .name = "example",
-        .root_source_file = b.path("src/example.zig"),
+        .root_source_file = b.path("examples/main.zig"),
         .target = target,
         .optimize = optimize,
     });
     example.linkLibrary(lz4);
     example.addIncludePath(b.path("src"));
+    example.root_module.addImport("cassandra", module);
+    example.root_module.addImport("build_options", module_options.createModule());
 
     if (with_snappy) {
         example.linkLibC();

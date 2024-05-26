@@ -5,8 +5,8 @@ const mem = std.mem;
 const net = std.net;
 const big = std.math.big;
 
-const cql = @import("lib.zig");
-const casstest = @import("casstest.zig");
+const cassandra = @import("cassandra");
+const casstest = @import("../src/casstest.zig");
 
 /// Runs a single SELECT reading all data from the age_to_ids table.
 ///
@@ -14,9 +14,9 @@ const casstest = @import("casstest.zig");
 ///  * executing a query without preparation
 ///  * iterating over the result iterator
 ///  * using the paging state and page size
-fn doQuery(allocator: *mem.Allocator, client: *cql.Client) !void {
+fn doQuery(allocator: mem.Allocator, client: *cassandra.Client) !void {
     // We want query diagonistics in case of failure.
-    var diags = cql.Client.QueryOptions.Diagnostics{};
+    var diags = cassandra.Client.QueryOptions.Diagnostics{};
     errdefer {
         log.warn("diags: {}", .{diags});
     }
@@ -25,7 +25,7 @@ fn doQuery(allocator: *mem.Allocator, client: *cql.Client) !void {
     var paging_state_allocator = std.heap.FixedBufferAllocator.init(&paging_state_buffer);
 
     // Read max 48 rows per query.
-    var options = cql.Client.QueryOptions{
+    var options = cassandra.Client.QueryOptions{
         .page_size = 48,
         .paging_state = null,
         .diags = &diags,
@@ -40,7 +40,7 @@ fn doQuery(allocator: *mem.Allocator, client: *cql.Client) !void {
         var arena = std.heap.ArenaAllocator.init(allocator);
         defer arena.deinit();
 
-        _ = try client.query(&arena.allocator, options, "USE foobar", .{});
+        _ = try client.query(arena.allocator(), options, "USE foobar", .{});
     }
 
     // Execute queries as long as there's more data available.
@@ -51,13 +51,13 @@ fn doQuery(allocator: *mem.Allocator, client: *cql.Client) !void {
         defer arena.deinit();
 
         var iter = (try client.query(
-            &arena.allocator,
+            arena.allocator(),
             options,
             "SELECT age, name, ids, balance FROM age_to_ids",
             .{},
         )).?;
 
-        const count = try iterate(&arena.allocator, &iter);
+        const count = try iterate(arena.allocator(), &iter);
         total += count;
 
         // If there's more data Caassandra will respond with a valid paging state.
@@ -73,10 +73,10 @@ fn doQuery(allocator: *mem.Allocator, client: *cql.Client) !void {
     log.info("read {} rows", .{total});
 }
 
-fn doPrepare(allocator: *mem.Allocator, client: *cql.Client) ![]const u8 {
+fn doPrepare(allocator: mem.Allocator, client: *cassandra.Client) ![]const u8 {
     // We want query diagonistics in case of failure.
-    var diags = cql.Client.QueryOptions.Diagnostics{};
-    const options = cql.Client.QueryOptions{
+    var diags = cassandra.Client.QueryOptions.Diagnostics{};
+    const options = cassandra.Client.QueryOptions{
         .diags = &diags,
     };
 
@@ -100,14 +100,14 @@ fn doPrepare(allocator: *mem.Allocator, client: *cql.Client) ![]const u8 {
     return query_id;
 }
 
-fn doExecute(allocator: *mem.Allocator, client: *cql.Client, query_id: []const u8) !void {
+fn doExecute(allocator: mem.Allocator, client: *cassandra.Client, query_id: []const u8) !void {
     var result_arena = std.heap.ArenaAllocator.init(allocator);
     defer result_arena.deinit();
-    const result_allocator = &result_arena.allocator;
+    const result_allocator = result_arena.allocator();
 
     // We want query diagonistics in case of failure.
-    var diags = cql.Client.QueryOptions.Diagnostics{};
-    const options = cql.Client.QueryOptions{
+    var diags = cassandra.Client.QueryOptions.Diagnostics{};
+    const options = cassandra.Client.QueryOptions{
         .diags = &diags,
     };
 
@@ -124,7 +124,7 @@ fn doExecute(allocator: *mem.Allocator, client: *cql.Client, query_id: []const u
     _ = try iterate(allocator, &iter);
 }
 
-fn doPrepareThenExec(allocator: *mem.Allocator, client: *cql.Client, n: usize) !void {
+fn doPrepareThenExec(allocator: mem.Allocator, client: *cassandra.Client, n: usize) !void {
     var i: usize = 0;
     while (i < n) : (i += 1) {
         const query_id = try doPrepare(allocator, client);
@@ -132,7 +132,7 @@ fn doPrepareThenExec(allocator: *mem.Allocator, client: *cql.Client, n: usize) !
     }
 }
 
-fn doPrepareOnceThenExec(allocator: *mem.Allocator, client: *cql.Client, n: usize) !void {
+fn doPrepareOnceThenExec(allocator: mem.Allocator, client: *cassandra.Client, n: usize) !void {
     const query_id = try doPrepare(allocator, client);
 
     var i: usize = 0;
@@ -141,10 +141,10 @@ fn doPrepareOnceThenExec(allocator: *mem.Allocator, client: *cql.Client, n: usiz
     }
 }
 
-fn doInsert(allocator: *mem.Allocator, client: *cql.Client, n: usize) !void {
+fn doInsert(allocator: mem.Allocator, client: *cassandra.Client, n: usize) !void {
     // We want query diagonistics in case of failure.
-    var diags = cql.Client.QueryOptions.Diagnostics{};
-    const options = cql.Client.QueryOptions{
+    var diags = cassandra.Client.QueryOptions.Diagnostics{};
+    const options = cassandra.Client.QueryOptions{
         .diags = &diags,
     };
 
@@ -176,19 +176,14 @@ fn doInsert(allocator: *mem.Allocator, client: *cql.Client, n: usize) !void {
         const args = casstest.Args.AgeToIDs{
             .age = @as(u32, @intCast(i)) * @as(u32, 10),
             .name = if (i % 2 == 0)
-                @as([]const u8, try std.fmt.allocPrint(&fba.allocator, "Vincent {}", .{i}))
+                @as([]const u8, try std.fmt.allocPrint(fba.allocator(), "Vincent {}", .{i}))
             else
                 null,
             .ids = [_]u8{ 0, 2, 4, 8 },
             .balance = if (i % 2 == 0) positive_varint.toConst() else negative_varint.toConst(),
         };
 
-        _ = client.execute(
-            &fba.allocator,
-            options,
-            query_id,
-            args,
-        ) catch |err| switch (err) {
+        _ = client.execute(fba.allocator(), options, query_id, args) catch |err| switch (err) {
             error.QueryExecutionFailed => {
                 log.warn("error message: {s}\n", .{diags.message});
             },
@@ -201,7 +196,7 @@ fn doInsert(allocator: *mem.Allocator, client: *cql.Client, n: usize) !void {
 }
 
 /// Iterate over every row in the iterator provided.
-fn iterate(allocator: *mem.Allocator, iter: *cql.Iterator) !usize {
+fn iterate(allocator: mem.Allocator, iter: *cassandra.Iterator) !usize {
     var row: casstest.Row.AgeToIDs = undefined;
 
     // Just for formatting here
@@ -227,21 +222,21 @@ fn iterate(allocator: *mem.Allocator, iter: *cql.Iterator) !usize {
         defer row_arena.deinit();
 
         // We want iteration diagnostics in case of failures.
-        var iter_diags = cql.Iterator.ScanOptions.Diagnostics{};
-        const iter_options = cql.Iterator.ScanOptions{
+        var iter_diags = cassandra.Iterator.ScanOptions.Diagnostics{};
+        const iter_options = cassandra.Iterator.ScanOptions{
             .diags = &iter_diags,
         };
 
-        const scanned = iter.scan(&row_arena.allocator, iter_options, &row) catch |err| switch (err) {
+        const scanned = iter.scan(row_arena.allocator(), iter_options, &row) catch |err| switch (err) {
             error.IncompatibleMetadata => blk: {
                 const im = iter_diags.incompatible_metadata;
                 const it = im.incompatible_types;
                 if (it.cql_type_name != null and it.native_type_name != null) {
-                    std.debug.panic("metadata incompatible. CQL type {s} can't be scanned into native type {s}\n", .{
+                    std.debug.panic("metadata incompatible. CQL type {?s} can't be scanned into native type {?s}\n", .{
                         it.cql_type_name, it.native_type_name,
                     });
                 } else {
-                    std.debug.panic("metadata incompatible. columns in result: {} fields in struct: {}\n", .{
+                    std.debug.panic("metadata incompatible. columns in result: {d} fields in struct: {d}\n", .{
                         im.metadata_columns, im.struct_fields,
                     });
                 }
@@ -295,7 +290,7 @@ fn parseArg(comptime T: type, arg: []const u8) !T {
 
 fn findArg(comptime T: type, args: []const []const u8, key: []const u8, default: T) !T {
     for (args) |arg| {
-        var it = mem.tokenize(arg, "=");
+        var it = mem.tokenize(u8, arg, "=");
         const k = it.next().?;
         const v = it.next() orelse return default;
 
@@ -316,7 +311,7 @@ pub const log_level: log.Level = .debug;
 
 pub fn main() anyerror!void {
     var gpa = heap.GeneralPurposeAllocator(.{}){};
-    const allocator = &gpa.allocator;
+    const allocator = gpa.allocator();
 
     const stderr = std.io.getStdErr().writer();
 
@@ -337,22 +332,22 @@ pub fn main() anyerror!void {
     // The struct InitOptions can be used to control some aspects of the CQL client,
     // such as the protocol version, if compression is enabled, etc.
 
-    var init_options = cql.Connection.InitOptions{};
-    init_options.protocol_version = cql.ProtocolVersion{ .version = try findArg(u8, args, "protocol_version", 4) };
+    var init_options = cassandra.Connection.InitOptions{};
+    init_options.protocol_version = cassandra.ProtocolVersion{ .version = try findArg(u8, args, "protocol_version", 4) };
     init_options.compression = blk: {
         const tmp = try findArg(?[]const u8, args, "compression", null);
         if (tmp == null) break :blk null;
-        break :blk try cql.CompressionAlgorithm.fromString(tmp.?);
+        break :blk try cassandra.CompressionAlgorithm.fromString(tmp.?);
     };
     init_options.username = "cassandra";
     init_options.password = "cassandra";
 
     // Additionally a Diagnostics struct can be provided.
     // If initialization fails for some reason, this struct will be populated.
-    var init_diags = cql.Connection.InitOptions.Diagnostics{};
+    var init_diags = cassandra.Connection.InitOptions.Diagnostics{};
     init_options.diags = &init_diags;
 
-    var connection: cql.Connection = undefined;
+    var connection: cassandra.Connection = undefined;
     connection.initIp4(allocator, address, init_options) catch |err| switch (err) {
         error.NoUsername, error.NoPassword => {
             std.debug.panic("the server requires authentication, please set the username and password", .{});
@@ -367,7 +362,7 @@ pub fn main() anyerror!void {
     };
     defer connection.close();
 
-    var client = cql.Client.initWithConnection(allocator, &connection, .{});
+    var client = cassandra.Client.initWithConnection(allocator, &connection, .{});
     defer client.deinit();
 
     // Try to create the keyspace and table.
@@ -375,12 +370,12 @@ pub fn main() anyerror!void {
         var arena = std.heap.ArenaAllocator.init(allocator);
         defer arena.deinit();
 
-        var options = cql.Client.QueryOptions{};
-        var diags = cql.Client.QueryOptions.Diagnostics{};
+        var options = cassandra.Client.QueryOptions{};
+        var diags = cassandra.Client.QueryOptions.Diagnostics{};
         options.diags = &diags;
 
         inline for (casstest.DDL) |query| {
-            _ = try client.query(&arena.allocator, options, query, .{});
+            _ = try client.query(arena.allocator(), options, query, .{});
         }
     }
 

@@ -35,7 +35,7 @@ const UnpreparedError = message.UnpreparedError;
 const WriteError = message.WriteError;
 
 const Iterator = @import("iterator.zig").Iterator;
-const QueryParameters = @import("query_parameters.zig");
+const QueryParameters = @import("query_parameters.zig").QueryParameters;
 
 const ExecuteFrame = @import("frame.zig").ExecuteFrame;
 const PrepareFrame = @import("frame.zig").PrepareFrame;
@@ -90,7 +90,7 @@ pub const Client = struct {
                 first_incompatible_arg: ?ExecuteIncompatibleArg = null,
                 const ExecuteIncompatibleArg = struct {
                     position: usize = 0,
-                    prepared: ColumnSpec = .{},
+                    prepared: ColumnSpec,
                     argument: ?OptionID = null,
                 };
 
@@ -105,7 +105,7 @@ pub const Client = struct {
                         }
                     }
                     if (value.first_incompatible_arg) |v| {
-                        try std.fmt.format(fbw, "first incompatible arg: {{position: {}, prepared: (name: {s}, type: {}), argument: {}}}", .{
+                        try std.fmt.format(fbw, "first incompatible arg: {{position: {d}, prepared: (name: {s}, type: {?}), argument: {any}}}", .{
                             v.position,
                             v.prepared.name,
                             v.prepared.option,
@@ -126,7 +126,7 @@ pub const Client = struct {
     };
 
     /// Maps a prepared statement id to the types of the arguments needed when executing it.
-    const PreparedStatementsMetadata = std.HashMap([]const u8, PreparedStatementMetadataValue, std.hash_map.hashString, std.hash_map.eqlString, std.hash_map.DefaultMaxLoadPercentage);
+    const PreparedStatementsMetadata = std.StringHashMap(PreparedStatementMetadataValue);
 
     allocator: mem.Allocator,
     connection: *Connection,
@@ -170,15 +170,19 @@ pub const Client = struct {
 
         // Write PREPARE, expect RESULT
         {
-            const prepare_frame = PrepareFrame{
-                .query = query_string,
-                .keyspace = null,
-            };
-
-            try self.connection.writeFrame(allocator, .{
-                .opcode = .Prepare,
-                .body = prepare_frame,
-            });
+            try self.connection.writeFrame(
+                allocator,
+                .Prepare,
+                PrepareFrame,
+                PrepareFrame{
+                    .query = query_string,
+                    .keyspace = null,
+                },
+                .{
+                    .protocol_version = self.connection.options.protocol_version,
+                    .compression = self.connection.options.compression,
+                },
+            );
         }
 
         const read_frame = try self.connection.readFrame(allocator, Connection.ReadFrameOptions{
@@ -193,17 +197,18 @@ pub const Client = struct {
 
                     const gop = try self.prepared_statements_metadata.getOrPut(id);
                     if (gop.found_existing) {
-                        if (gop.entry.value.result_metadata_id) |result_metadata_id| {
+                        if (gop.value_ptr.result_metadata_id) |result_metadata_id| {
                             self.allocator.free(result_metadata_id);
                         }
-                        gop.entry.value.metadata.deinit(self.allocator);
-                        gop.entry.value.rows_metadata.deinit(self.allocator);
+                        gop.value_ptr.metadata.deinit(self.allocator);
+                        gop.value_ptr.rows_metadata.deinit(self.allocator);
                     }
 
-                    gop.entry.value = undefined;
-                    gop.entry.value.result_metadata_id = prepared.result_metadata_id;
-                    gop.entry.value.metadata = prepared.metadata;
-                    gop.entry.value.rows_metadata = prepared.rows_metadata;
+                    gop.value_ptr.* = .{
+                        .result_metadata_id = prepared.result_metadata_id,
+                        .metadata = prepared.metadata,
+                        .rows_metadata = prepared.rows_metadata,
+                    };
 
                     return id;
                 },
@@ -252,18 +257,23 @@ pub const Client = struct {
             .keyspace = null,
             .now_in_seconds = null,
         };
-        query_parameters.values = Values{ .Normal = values.toOwnedSlice() };
+        query_parameters.values = Values{ .Normal = try values.toOwnedSlice() };
 
         // Write QUERY
         {
-            const query_frame = QueryFrame{
-                .query = query_string,
-                .query_parameters = query_parameters,
-            };
-            try self.connection.writeFrame(allocator, .{
-                .opcode = .Query,
-                .body = query_frame,
-            });
+            try self.connection.writeFrame(
+                allocator,
+                .Query,
+                QueryFrame,
+                QueryFrame{
+                    .query = query_string,
+                    .query_parameters = query_parameters,
+                },
+                .{
+                    .protocol_version = self.connection.options.protocol_version,
+                    .compression = self.connection.options.compression,
+                },
+            );
         }
 
         // Read either RESULT or ERROR
@@ -341,19 +351,24 @@ pub const Client = struct {
             .keyspace = null,
             .now_in_seconds = null,
         };
-        query_parameters.values = Values{ .Normal = values.toOwnedSlice() };
+        query_parameters.values = Values{ .Normal = try values.toOwnedSlice() };
 
         // Write EXECUTE
         {
-            const execute_frame = ExecuteFrame{
-                .query_id = query_id,
-                .result_metadata_id = ps_result_metadata_id,
-                .query_parameters = query_parameters,
-            };
-            try self.connection.writeFrame(allocator, .{
-                .opcode = .Execute,
-                .body = execute_frame,
-            });
+            try self.connection.writeFrame(
+                allocator,
+                .Execute,
+                ExecuteFrame,
+                ExecuteFrame{
+                    .query_id = query_id,
+                    .result_metadata_id = ps_result_metadata_id,
+                    .query_parameters = query_parameters,
+                },
+                .{
+                    .protocol_version = self.connection.options.protocol_version,
+                    .compression = self.connection.options.compression,
+                },
+            );
         }
 
         // Read either RESULT or ERROR

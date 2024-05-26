@@ -188,7 +188,7 @@ pub const CQLVersion = struct {
     }
 
     pub fn print(self: @This(), buf: []u8) ![]u8 {
-        return std.fmt.bufPrint(buf, "{}.{}.{}", .{
+        return std.fmt.bufPrint(buf, "{d}.{d}.{d}", .{
             self.major,
             self.minor,
             self.patch,

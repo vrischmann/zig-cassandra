@@ -94,16 +94,13 @@ pub const Connection = struct {
         cql_version: CQLVersion,
     };
 
-    allocator: *mem.Allocator,
+    allocator: mem.Allocator,
     options: InitOptions,
 
     socket: std.net.Stream,
 
     buffered_reader: BufferedReaderType,
     buffered_writer: BufferedWriterType,
-
-    read_lock: if (std.io.is_async) std.event.Lock else void,
-    write_lock: if (std.io.is_async) std.event.Lock else void,
 
     /// Helpers types needed to decode the CQL protocol.
     raw_frame_reader: RawFrameReaderType,
@@ -114,7 +111,7 @@ pub const Connection = struct {
     // Negotiated with the server
     negotiated_state: NegotiatedState,
 
-    pub fn initIp4(self: *Self, allocator: *mem.Allocator, seed_address: net.Address, options: InitOptions) !void {
+    pub fn initIp4(self: *Self, allocator: mem.Allocator, seed_address: net.Address, options: InitOptions) !void {
         self.allocator = allocator;
         self.options = options;
 
@@ -123,11 +120,6 @@ pub const Connection = struct {
 
         self.buffered_reader = BufferedReaderType{ .unbuffered_reader = self.socket.reader() };
         self.buffered_writer = BufferedWriterType{ .unbuffered_writer = self.socket.writer() };
-
-        if (std.io.is_async) {
-            self.read_lock = std.event.Lock{};
-            self.write_lock = std.event.Lock{};
-        }
 
         self.raw_frame_reader = RawFrameReaderType.init(self.buffered_reader.reader());
         self.raw_frame_writer = RawFrameWriterType.init(self.buffered_writer.writer());
@@ -170,9 +162,19 @@ pub const Connection = struct {
 
         // Write OPTIONS, expect SUPPORTED
 
-        try self.writeFrame(&fba.allocator, .{ .opcode = .Options });
+        try self.writeFrame(
+            fba.allocator(),
+            .Options,
+            frame.OptionsFrame,
+            .{},
+            .{
+                .protocol_version = self.options.protocol_version,
+                .compression = null,
+            },
+        );
+
         fba.reset();
-        switch (try self.readFrame(&fba.allocator, null)) {
+        switch (try self.readFrame(fba.allocator(), null)) {
             .Supported => |fr| self.negotiated_state.cql_version = fr.cql_versions[0],
             .Error => |err| {
                 diags.message = err.message;
@@ -181,23 +183,26 @@ pub const Connection = struct {
             else => return error.InvalidServerResponse,
         }
 
-        fba.reset();
-
         // Write STARTUP, expect either READY or AUTHENTICATE
 
-        const startup_frame = StartupFrame{
-            .cql_version = self.negotiated_state.cql_version,
-            .compression = self.options.compression,
-        };
-        try self.writeFrame(&fba.allocator, .{
-            .opcode = .Startup,
-            .no_compression = true,
-            .body = startup_frame,
-        });
-        switch (try self.readFrame(&fba.allocator, null)) {
+        fba.reset();
+        try self.writeFrame(
+            fba.allocator(),
+            .Startup,
+            frame.StartupFrame,
+            frame.StartupFrame{
+                .cql_version = self.negotiated_state.cql_version,
+                .compression = self.options.compression,
+            },
+            .{
+                .protocol_version = self.options.protocol_version,
+                .compression = self.options.compression,
+            },
+        );
+        switch (try self.readFrame(fba.allocator(), null)) {
             .Ready => return,
             .Authenticate => |fr| {
-                try self.authenticate(&fba.allocator, diags, fr.authenticator);
+                try self.authenticate(fba.allocator(), diags, fr.authenticator);
             },
             .Error => |err| {
                 diags.message = err.message;
@@ -207,7 +212,7 @@ pub const Connection = struct {
         }
     }
 
-    fn authenticate(self: *Self, allocator: *mem.Allocator, diags: *InitOptions.Diagnostics, _: []const u8) !void {
+    fn authenticate(self: *Self, allocator: mem.Allocator, diags: *InitOptions.Diagnostics, _: []const u8) !void {
         // TODO(vincent): handle authenticator classes
         // TODO(vincent): handle auth challenges
         if (self.options.username == null) {
@@ -221,12 +226,19 @@ pub const Connection = struct {
         {
             var buf: [512]u8 = undefined;
             const token = try std.fmt.bufPrint(&buf, "\x00{s}\x00{s}", .{ self.options.username.?, self.options.password.? });
-            const fr = AuthResponseFrame{ .token = token };
 
-            try self.writeFrame(allocator, .{
-                .opcode = .AuthResponse,
-                .body = fr,
-            });
+            try self.writeFrame(
+                allocator,
+                .AuthResponse,
+                frame.AuthResponseFrame,
+                frame.AuthResponseFrame{
+                    .token = token,
+                },
+                .{
+                    .protocol_version = self.options.protocol_version,
+                    .compression = self.options.compression,
+                },
+            );
         }
 
         // Read either AUTH_CHALLENGE, AUTH_SUCCESS or ERROR
@@ -240,6 +252,11 @@ pub const Connection = struct {
             else => return error.InvalidServerResponse,
         }
     }
+
+    const WriteFrameOptions = struct {
+        protocol_version: ProtocolVersion,
+        compression: ?CompressionAlgorithm,
+    };
 
     /// writeFrame writes a single frame to the TCP connection.
     ///
@@ -257,45 +274,39 @@ pub const Connection = struct {
     /// Additionally this method takes care of compression if enabled.
     ///
     /// This method is not thread safe.
-    pub fn writeFrame(self: *Self, allocator: *mem.Allocator, fr: anytype) !void {
-        // Lock the writer if necessary
-        var heldWriteLock: std.event.Lock.Held = undefined;
-        if (std.io.is_async) {
-            heldWriteLock = self.write_lock.acquire();
-        }
-        defer if (std.io.is_async) heldWriteLock.release();
-
+    pub fn writeFrame(self: *Self, allocator: mem.Allocator, opcode: Opcode, comptime FrameType: type, fr: FrameType, options: WriteFrameOptions) !void {
         // Reset primitive writer
         // TODO(vincent): for async we probably should do something else for the primitive writer.
         try self.primitive_writer.reset(allocator);
-        defer self.primitive_writer.deinit(allocator);
+        defer self.primitive_writer.deinit();
 
         // Prepare the raw frame
         var raw_frame = RawFrame{
             .header = FrameHeader{
-                .version = self.options.protocol_version,
+                .version = options.protocol_version,
                 .flags = 0,
                 .stream = 0,
-                .opcode = fr.opcode,
+                .opcode = opcode,
                 .body_len = 0,
             },
             .body = &[_]u8{},
         };
 
-        if (self.options.protocol_version.is(5)) {
+        if (options.protocol_version.is(5)) {
             raw_frame.header.flags |= FrameFlags.UseBeta;
         }
 
-        const FrameType = @TypeOf(fr);
-
-        if (@hasField(FrameType, "body")) {
+        if (std.meta.hasMethod(FrameType, "write")) {
             // Encode body
-            const TypeOfWriteFn = @TypeOf(fr.body.write);
-            const typeInfo = @typeInfo(TypeOfWriteFn);
-            if (typeInfo.BoundFn.args.len == 3) {
-                try fr.body.write(self.options.protocol_version, &self.primitive_writer);
-            } else {
-                try fr.body.write(&self.primitive_writer);
+            switch (@typeInfo(@TypeOf(FrameType.write))) {
+                .Fn => |info| {
+                    if (info.params.len == 3) {
+                        try fr.write(options.protocol_version, &self.primitive_writer);
+                    } else {
+                        try fr.write(&self.primitive_writer);
+                    }
+                },
+                else => unreachable,
             }
 
             // This is the actual bytes of the encoded body.
@@ -306,26 +317,24 @@ pub const Connection = struct {
             raw_frame.body = written;
 
             // Compress the body if we can use it.
-            if (!@hasField(FrameType, "no_compression")) {
-                if (self.options.compression) |compression| {
-                    switch (compression) {
-                        .LZ4 => {
-                            const compressed_data = try lz4.compress(allocator, written);
+            if (options.compression) |compression| {
+                switch (compression) {
+                    .LZ4 => {
+                        const compressed_data = try lz4.compress(allocator, written);
 
-                            raw_frame.header.flags |= FrameFlags.Compression;
-                            raw_frame.header.body_len = @intCast(compressed_data.len);
-                            raw_frame.body = compressed_data;
-                        },
-                        .Snappy => {
-                            comptime if (!build_options.with_snappy) return error.InvalidCompressedFrame;
+                        raw_frame.header.flags |= FrameFlags.Compression;
+                        raw_frame.header.body_len = @intCast(compressed_data.len);
+                        raw_frame.body = compressed_data;
+                    },
+                    .Snappy => {
+                        comptime if (!build_options.with_snappy) return error.InvalidCompressedFrame;
 
-                            const compressed_data = try snappy.compress(allocator, written);
+                        const compressed_data = try snappy.compress(allocator, written);
 
-                            raw_frame.header.flags |= FrameFlags.Compression;
-                            raw_frame.header.body_len = @intCast(compressed_data.len);
-                            raw_frame.body = compressed_data;
-                        },
-                    }
+                        raw_frame.header.flags |= FrameFlags.Compression;
+                        raw_frame.header.body_len = @intCast(compressed_data.len);
+                        raw_frame.body = compressed_data;
+                    },
                 }
             }
         }
@@ -335,10 +344,10 @@ pub const Connection = struct {
     }
 
     pub const ReadFrameOptions = struct {
-        frame_allocator: *mem.Allocator,
+        frame_allocator: mem.Allocator,
     };
 
-    pub fn readFrame(self: *Self, allocator: *mem.Allocator, options: ?ReadFrameOptions) !Frame {
+    pub fn readFrame(self: *Self, allocator: mem.Allocator, options: ?ReadFrameOptions) !Frame {
         const raw_frame = try self.readRawFrame(allocator);
         defer raw_frame.deinit(allocator);
 
@@ -362,7 +371,7 @@ pub const Connection = struct {
         };
     }
 
-    fn readRawFrame(self: *Self, allocator: *mem.Allocator) !RawFrame {
+    fn readRawFrame(self: *Self, allocator: mem.Allocator) !RawFrame {
         var raw_frame = try self.raw_frame_reader.read(allocator);
 
         if (raw_frame.header.flags & FrameFlags.Compression == FrameFlags.Compression) {
@@ -374,7 +383,9 @@ pub const Connection = struct {
                     raw_frame.body = decompressed_data;
                 },
                 .Snappy => {
-                    comptime if (!build_options.with_snappy) return error.InvalidCompressedFrame;
+                    if (!build_options.with_snappy) {
+                        return error.InvalidCompressedFrame;
+                    }
 
                     const decompressed_data = try snappy.decompress(allocator, raw_frame.body);
                     raw_frame.body = decompressed_data;
