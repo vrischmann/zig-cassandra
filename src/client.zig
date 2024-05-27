@@ -35,7 +35,7 @@ const UnpreparedError = message.UnpreparedError;
 const WriteError = message.WriteError;
 
 const Iterator = @import("iterator.zig").Iterator;
-const QueryParameters = @import("query_parameters.zig").QueryParameters;
+const QueryParameters = @import("QueryParameters.zig");
 
 const ExecuteFrame = @import("frame.zig").ExecuteFrame;
 const PrepareFrame = @import("frame.zig").PrepareFrame;

@@ -30,7 +30,7 @@ const UnpreparedError = message.UnpreparedError;
 
 const event = @import("event.zig");
 const metadata = @import("metadata.zig");
-const query_parameters = @import("query_parameters.zig");
+const QueryParameters = @import("QueryParameters.zig");
 
 const testutils = @import("testutils.zig");
 
@@ -535,7 +535,7 @@ pub const ExecuteFrame = struct {
 
     query_id: []const u8,
     result_metadata_id: ?[]const u8,
-    query_parameters: query_parameters.QueryParameters,
+    query_parameters: QueryParameters,
 
     pub fn write(self: Self, protocol_version: ProtocolVersion, pw: *PrimitiveWriter) !void {
         _ = try pw.writeShortBytes(self.query_id);
@@ -558,7 +558,7 @@ pub const ExecuteFrame = struct {
         if (protocol_version.is(5)) {
             frame.result_metadata_id = try pr.readShortBytes(allocator);
         }
-        frame.query_parameters = try query_parameters.QueryParameters.read(allocator, protocol_version, pr);
+        frame.query_parameters = try QueryParameters.read(allocator, protocol_version, pr);
 
         return frame;
     }
@@ -1269,7 +1269,7 @@ pub const QueryFrame = struct {
     const Self = @This();
 
     query: []const u8,
-    query_parameters: query_parameters.QueryParameters,
+    query_parameters: QueryParameters,
 
     pub fn write(self: Self, protocol_version: ProtocolVersion, pw: *PrimitiveWriter) !void {
         _ = try pw.writeLongString(self.query);
@@ -1279,7 +1279,7 @@ pub const QueryFrame = struct {
     pub fn read(allocator: mem.Allocator, protocol_version: ProtocolVersion, pr: *PrimitiveReader) !Self {
         return Self{
             .query = try pr.readLongString(allocator),
-            .query_parameters = try query_parameters.QueryParameters.read(allocator, protocol_version, pr),
+            .query_parameters = try QueryParameters.read(allocator, protocol_version, pr),
         };
     }
 };
