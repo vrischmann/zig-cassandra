@@ -15,8 +15,6 @@ const Values = message.Values;
 const MessageWriter = message.MessageWriter;
 const MessageReader = message.MessageReader;
 
-const string_map = @import("string_map.zig");
-
 const Self = @This();
 
 consistency_level: Consistency,

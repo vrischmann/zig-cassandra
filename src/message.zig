@@ -7,8 +7,6 @@ const os = std.os;
 const posix = std.posix;
 const testing = std.testing;
 
-const string_map = @import("string_map.zig");
-
 const testutils = @import("testutils.zig");
 
 // TODO(vincent): test all error codes
@@ -408,6 +406,177 @@ test "compression algorith: fromString" {
     try testing.expectError(error.InvalidCompressionAlgorithm, CompressionAlgorithm.fromString("foobar"));
 }
 
+pub const Map = struct {
+    const Self = @This();
+
+    const MapType = std.StringHashMap([]const u8);
+    const MapEntry = MapType.Entry;
+    const Iterator = MapType.Iterator;
+
+    allocator: mem.Allocator,
+    map: MapType,
+
+    pub fn init(allocator: mem.Allocator) Self {
+        return Self{
+            .allocator = allocator,
+            .map = MapType.init(allocator),
+        };
+    }
+
+    pub fn put(self: *Self, key: []const u8, value: []const u8) !void {
+        const result = try self.map.getOrPut(key);
+        if (result.found_existing) {
+            self.allocator.free(result.value_ptr.*);
+        }
+        result.value_ptr.* = value;
+    }
+
+    pub fn count(self: *const Self) usize {
+        return self.map.count();
+    }
+
+    pub fn iterator(self: *const Self) Iterator {
+        return self.map.iterator();
+    }
+
+    pub fn getEntry(self: *const Self, key: []const u8) ?MapEntry {
+        return self.map.getEntry(key);
+    }
+};
+
+pub const Entry = struct {
+    key: []const u8,
+    value: []const u8,
+};
+
+const EntryList = []const []const u8;
+
+pub const Multimap = struct {
+    const Self = @This();
+
+    const MapType = std.StringHashMap(EntryList);
+
+    map: MapType,
+
+    const KV = struct {
+        key: []const u8,
+        value: EntryList,
+    };
+
+    const Iterator = struct {
+        map_it: MapType.Iterator,
+
+        pub fn next(it: *Iterator) ?KV {
+            if (it.map_it.next()) |entry| {
+                return KV{
+                    .key = entry.key_ptr.*,
+                    .value = entry.value_ptr.*,
+                };
+            }
+
+            return null;
+        }
+    };
+
+    pub fn init(allocator: mem.Allocator) Self {
+        return Self{
+            .map = std.StringHashMap(EntryList).init(allocator),
+        };
+    }
+
+    pub fn put(self: *Self, key: []const u8, values: []const []const u8) !void {
+        _ = try self.map.put(key, values);
+    }
+
+    pub fn get(self: *const Self, key: []const u8) ?[]const []const u8 {
+        if (self.map.getEntry(key)) |entry| {
+            return entry.value_ptr.*;
+        } else {
+            return null;
+        }
+    }
+
+    pub fn count(self: *const Self) usize {
+        return self.map.count();
+    }
+
+    pub fn iterator(self: *const Self) Iterator {
+        return Iterator{
+            .map_it = self.map.iterator(),
+        };
+    }
+};
+
+test "map" {
+    var arena = testutils.arenaAllocator();
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var m = Map.init(allocator);
+
+    {
+        const k1 = try allocator.dupe(u8, "foo");
+        const k2 = try allocator.dupe(u8, "bar");
+
+        const v1 = try allocator.dupe(u8, "bar");
+        const v2 = try allocator.dupe(u8, "heo");
+        const v3 = try allocator.dupe(u8, "baz");
+
+        _ = try m.put(k1, v1);
+        _ = try m.put(k1, v2);
+        _ = try m.put(k2, v3);
+    }
+
+    try testing.expectEqual(@as(usize, 2), m.count());
+
+    try testing.expectEqualStrings("heo", m.getEntry("foo").?.value_ptr.*);
+    try testing.expectEqualStrings("baz", m.getEntry("bar").?.value_ptr.*);
+}
+
+test "multimap" {
+    var arena = testutils.arenaAllocator();
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var m = Multimap.init(allocator);
+
+    {
+        const k1 = try allocator.dupe(u8, "foo");
+        const v1 = &[_][]const u8{ "bar", "baz" };
+        _ = try m.put(k1, v1);
+    }
+
+    {
+        const k2 = try allocator.dupe(u8, "fou");
+        const v2 = &[_][]const u8{ "fb", "ha" };
+        _ = try m.put(k2, v2);
+    }
+
+    try testing.expectEqual(@as(usize, 2), m.count());
+
+    var it = m.iterator();
+    while (it.next()) |entry| {
+        try testing.expect(std.mem.eql(u8, "foo", entry.key) or std.mem.eql(u8, "fou", entry.key));
+
+        const slice = entry.value;
+        if (std.mem.eql(u8, "foo", entry.key)) {
+            try testing.expectEqualStrings("bar", slice[0]);
+            try testing.expectEqualStrings("baz", slice[1]);
+        } else if (std.mem.eql(u8, "fou", entry.key)) {
+            try testing.expectEqualStrings("fb", slice[0]);
+            try testing.expectEqualStrings("ha", slice[1]);
+        }
+    }
+
+    const slice = m.get("foo").?;
+    try testing.expectEqualStrings("bar", slice[0]);
+    try testing.expectEqualStrings("baz", slice[1]);
+
+    const slice2 = m.get("fou").?;
+    try testing.expectEqualStrings("fb", slice2[0]);
+    try testing.expectEqualStrings("ha", slice2[1]);
+}
+
 pub const MessageReader = struct {
     const Self = @This();
 
@@ -613,10 +782,10 @@ pub const MessageReader = struct {
         return @enumFromInt(n);
     }
 
-    pub fn readStringMap(self: *Self, allocator: mem.Allocator) !string_map.Map {
+    pub fn readStringMap(self: *Self, allocator: mem.Allocator) !Map {
         const n = try self.readInt(u16);
 
-        var map = string_map.Map.init(allocator);
+        var map = Map.init(allocator);
 
         var i: usize = 0;
         while (i < n) : (i += 1) {
@@ -629,10 +798,10 @@ pub const MessageReader = struct {
         return map;
     }
 
-    pub fn readStringMultimap(self: *Self, allocator: mem.Allocator) !string_map.Multimap {
+    pub fn readStringMultimap(self: *Self, allocator: mem.Allocator) !Multimap {
         const n = try self.readInt(u16);
 
-        var map = string_map.Multimap.init(allocator);
+        var map = Multimap.init(allocator);
 
         var i: usize = 0;
         while (i < n) : (i += 1) {
