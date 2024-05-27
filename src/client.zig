@@ -730,8 +730,7 @@ fn computeSingleValue(allocator: mem.Allocator, values: *std.ArrayList(Value), o
 }
 
 fn serializeValues(allocator: mem.Allocator, values: []const Value) ![]const u8 {
-    var pw: PrimitiveWriter = undefined;
-    try pw.reset(allocator);
+    var pw = try PrimitiveWriter.init(allocator);
 
     try pw.writeInt(u32, @intCast(values.len));
 

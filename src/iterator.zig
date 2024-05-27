@@ -389,7 +389,7 @@ pub const Iterator = struct {
                             },
                         };
 
-                        var pr = PrimitiveReader.init();
+                        var pr: PrimitiveReader = undefined;
                         pr.reset(column_data);
                         const n = try pr.readInt(u32);
 

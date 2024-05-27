@@ -414,15 +414,8 @@ pub const PrimitiveReader = struct {
     buffer: io.FixedBufferStream([]const u8),
     reader: io.FixedBufferStream([]const u8).Reader,
 
-    pub fn init() Self {
-        return Self{
-            .buffer = undefined,
-            .reader = undefined,
-        };
-    }
-
-    pub fn reset(self: *Self, rbuf: []const u8) void {
-        self.buffer = io.fixedBufferStream(rbuf);
+    pub fn reset(self: *Self, buf: []const u8) void {
+        self.buffer = io.fixedBufferStream(buf);
         self.reader = self.buffer.reader();
     }
 
@@ -530,10 +523,50 @@ pub const PrimitiveReader = struct {
         }
     }
 
-    pub fn readVarint(_: *Self, comptime IntType: type) !IntType {
+    pub fn readUnsignedVint(self: *Self, comptime IntType: type) !IntType {
+        switch (@typeInfo(IntType)) {
+            .Int => |info| {
+                comptime std.debug.assert(info.bits >= 32);
+            },
+            else => unreachable,
+        }
+
+        var shift: u6 = 0;
+        var count: usize = 0;
+        var res: IntType = 0;
+
+        while (true) {
+            const b = try self.reader.readByte();
+            const tmp = @as(IntType, @intCast(b)) & (~@as(IntType, 0x80));
+
+            // TODO(vincent): runtime check if the number will actually fit in the type T ?
+
+            res |= (tmp << shift);
+            count += 1;
+
+            if (b & 0x80 == 0) {
+                break;
+            }
+
+            shift += 7;
+        }
+
+        return res;
+    }
+
+    pub fn readVint(_: *Self, comptime IntType: type) !IntType {
+        switch (@typeInfo(IntType)) {
+            .Int => |info| {
+                comptime std.debug.assert(info.signedness == .signed);
+                comptime std.debug.assert(info.bits >= 32);
+            },
+            else => unreachable,
+        }
+
         // TODO(vincent): implement this for uvint and vint
         unreachable;
     }
+
     pub inline fn readInetaddr(self: *Self) !net.Address {
         return self.readInetGeneric(false);
     }
@@ -604,8 +637,7 @@ pub const PrimitiveReader = struct {
 };
 
 test "primitive reader: read int" {
-    var pr = PrimitiveReader.init();
-
+    var pr: PrimitiveReader = undefined;
     pr.reset("\x00\x20\x11\x00");
     try testing.expectEqual(@as(i32, 2101504), try pr.readInt(i32));
 
@@ -623,8 +655,7 @@ test "primitive reader: read strings and bytes" {
     var arena = testutils.arenaAllocator();
     defer arena.deinit();
 
-    var pr = PrimitiveReader.init();
-
+    var pr: PrimitiveReader = undefined;
     {
         // short string
         pr.reset("\x00\x06foobar");
@@ -664,10 +695,10 @@ test "primitive reader: read uuid" {
     var arena = testutils.arenaAllocator();
     defer arena.deinit();
 
-    var pr = PrimitiveReader.init();
-
     var uuid: [16]u8 = undefined;
     try std.posix.getrandom(&uuid);
+
+    var pr: PrimitiveReader = undefined;
     pr.reset(&uuid);
 
     try testing.expectEqualSlices(u8, &uuid, &(try pr.readUUID()));
@@ -677,8 +708,7 @@ test "primitive reader: read string list" {
     var arena = testutils.arenaAllocator();
     defer arena.deinit();
 
-    var pr = PrimitiveReader.init();
-
+    var pr: PrimitiveReader = undefined;
     pr.reset("\x00\x02\x00\x03foo\x00\x03bar");
 
     const result = try pr.readStringList(arena.allocator());
@@ -695,9 +725,8 @@ test "primitive reader: read value" {
     var arena = testutils.arenaAllocator();
     defer arena.deinit();
 
-    var pr = PrimitiveReader.init();
-
     // Normal value
+    var pr: PrimitiveReader = undefined;
     pr.reset("\x00\x00\x00\x02\x61\x62");
 
     const value = try pr.readValue(arena.allocator());
@@ -717,11 +746,25 @@ test "primitive reader: read value" {
     try testing.expect(value3 == .NotSet);
 }
 
+test "read unsigned vint" {
+    var arena = testutils.arenaAllocator();
+    defer arena.deinit();
+
+    var pw = try PrimitiveWriter.init(arena.allocator());
+    try pw.writeUnsignedVint(@as(u64, 282240));
+
+    var pr: PrimitiveReader = undefined;
+    pr.reset(pw.getWritten());
+    const n = try pr.readUnsignedVint(u64);
+
+    try testing.expect(n == @as(u64, 282240));
+}
+
 test "primitive reader: read inet and inetaddr" {
     var arena = testutils.arenaAllocator();
     defer arena.deinit();
 
-    var pr = PrimitiveReader.init();
+    var pr: PrimitiveReader = undefined;
 
     // IPv4
     pr.reset("\x04\x12\x34\x56\x78\x00\x00\x00\x22");
@@ -760,8 +803,6 @@ test "primitive reader: read consistency" {
     var arena = testutils.arenaAllocator();
     defer arena.deinit();
 
-    var pr = PrimitiveReader.init();
-
     const testCase = struct {
         exp: Consistency,
         b: []const u8,
@@ -782,7 +823,9 @@ test "primitive reader: read consistency" {
     };
 
     for (testCases) |tc| {
+        var pr: PrimitiveReader = undefined;
         pr.reset(tc.b);
+
         const result = try pr.readConsistency();
         try testing.expectEqual(tc.exp, result);
     }
@@ -792,10 +835,9 @@ test "primitive reader: read stringmap" {
     var arena = testutils.arenaAllocator();
     defer arena.deinit();
 
-    var pr = PrimitiveReader.init();
-
     // 2 elements string map
 
+    var pr: PrimitiveReader = undefined;
     pr.reset("\x00\x02\x00\x03foo\x00\x03baz\x00\x03bar\x00\x03baz");
 
     var result = try pr.readStringMap(arena.allocator());
@@ -812,10 +854,9 @@ test "primitive reader: read string multimap" {
     var arena = testutils.arenaAllocator();
     defer arena.deinit();
 
-    var pr = PrimitiveReader.init();
-
     // 1 key, 2 values multimap
 
+    var pr: PrimitiveReader = undefined;
     pr.reset("\x00\x01\x00\x03foo\x00\x02\x00\x03bar\x00\x03baz");
 
     var result = try pr.readStringMultimap(arena.allocator());
@@ -831,12 +872,21 @@ pub const PrimitiveWriter = struct {
 
     wbuf: std.ArrayList(u8),
 
+    pub fn init(allocator: mem.Allocator) !Self {
+        return Self{
+            .wbuf = try std.ArrayList(u8).initCapacity(
+                allocator,
+                1024,
+            ),
+        };
+    }
+
     pub fn deinit(self: *Self) void {
         self.wbuf.deinit();
     }
 
-    pub fn reset(self: *Self, allocator: mem.Allocator) !void {
-        self.wbuf = try std.ArrayList(u8).initCapacity(allocator, 1024);
+    pub fn reset(self: *Self) void {
+        self.wbuf.clearAndFree();
     }
 
     pub fn toOwnedSlice(self: *Self) ![]u8 {
@@ -919,6 +969,41 @@ pub const PrimitiveWriter = struct {
         };
     }
 
+    pub fn writeUnsignedVint(self: *Self, n: anytype) !void {
+        switch (@typeInfo(@TypeOf(n))) {
+            .Int => |info| {
+                comptime std.debug.assert(info.signedness == .unsigned);
+            },
+            else => unreachable,
+        }
+
+        //
+
+        var tmp = n;
+
+        var tmp_buf = [_]u8{0} ** 9;
+        var i: usize = 0;
+
+        // split into 7 bits chunks with the most significant bit set when there are more bytes to read.
+        //
+        // 0x80 == 128 == 0b1000_0000
+        // If the number is greater than or equal to that, it must be encoded as a chunk.
+
+        while (tmp >= 0x80) {
+            // a chunk is:
+            // * the least significant 7 bits
+            // * the most significant  bit set to 1
+            tmp_buf[i] = @as(u8, @truncate(tmp & 0x7F)) | 0x80;
+            tmp >>= 7;
+            i += 1;
+        }
+
+        // the remaining chunk that is less than 128. The most significant bit must not be set.
+        tmp_buf[i] = @truncate(tmp);
+
+        try self.wbuf.appendSlice(tmp_buf[0 .. i + 1]);
+    }
+
     pub inline fn writeInetaddr(self: *Self, inet: net.Address) !void {
         return self.writeInetGeneric(inet, false);
     }
@@ -976,8 +1061,7 @@ test "primitive writer: write int" {
     var arena = testutils.arenaAllocator();
     defer arena.deinit();
 
-    var pw: PrimitiveWriter = undefined;
-    try pw.reset(arena.allocator());
+    var pw = try PrimitiveWriter.init(arena.allocator());
 
     try pw.writeInt(i32, 2101504);
     try testing.expectEqualSlices(u8, "\x00\x20\x11\x00", pw.getWritten()[0..4]);
@@ -996,8 +1080,7 @@ test "primitive writer: write strings and bytes" {
     var arena = testutils.arenaAllocator();
     defer arena.deinit();
 
-    var pw: PrimitiveWriter = undefined;
-    try pw.reset(arena.allocator());
+    var pw = try PrimitiveWriter.init(arena.allocator());
 
     {
         // short string
@@ -1039,8 +1122,7 @@ test "primitive writer: write uuid" {
     var arena = testutils.arenaAllocator();
     defer arena.deinit();
 
-    var pw: PrimitiveWriter = undefined;
-    try pw.reset(arena.allocator());
+    var pw = try PrimitiveWriter.init(arena.allocator());
 
     var uuid: [16]u8 = undefined;
     try std.posix.getrandom(&uuid);
@@ -1053,8 +1135,7 @@ test "primitive writer: write string list" {
     var arena = testutils.arenaAllocator();
     defer arena.deinit();
 
-    var pw: PrimitiveWriter = undefined;
-    try pw.reset(arena.allocator());
+    var pw = try PrimitiveWriter.init(arena.allocator());
 
     const list = &[_][]const u8{ "foo", "bar" };
 
@@ -1066,8 +1147,7 @@ test "primitive writer: write value" {
     var arena = testutils.arenaAllocator();
     defer arena.deinit();
 
-    var pw: PrimitiveWriter = undefined;
-    try pw.reset(arena.allocator());
+    var pw = try PrimitiveWriter.init(arena.allocator());
 
     // Normal value
     _ = try pw.writeValue(Value{ .Set = "ab" });
@@ -1086,8 +1166,7 @@ test "primitive writer: write inet and inetaddr" {
     var arena = testutils.arenaAllocator();
     defer arena.deinit();
 
-    var pw: PrimitiveWriter = undefined;
-    try pw.reset(arena.allocator());
+    var pw = try PrimitiveWriter.init(arena.allocator());
 
     // IPv4
     _ = try pw.writeInet(net.Address.initIp4([_]u8{ 0x78, 0x56, 0x34, 0x12 }, 34));
@@ -1110,8 +1189,7 @@ test "primitive writer: write consistency" {
     var arena = testutils.arenaAllocator();
     defer arena.deinit();
 
-    var pw: PrimitiveWriter = undefined;
-    try pw.reset(arena.allocator());
+    var pw = try PrimitiveWriter.init(arena.allocator());
 
     const testCase = struct {
         consistency: Consistency,
@@ -1133,7 +1211,8 @@ test "primitive writer: write consistency" {
     };
 
     for (testCases) |tc| {
-        try pw.reset(arena.allocator());
+        pw.reset();
+
         _ = try pw.writeConsistency(tc.consistency);
         try testing.expectEqualSlices(u8, tc.exp, pw.getWritten()[0..2]);
     }

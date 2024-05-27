@@ -58,8 +58,7 @@ pub fn expectSameRawFrame(comptime T: type, frame: T, header: FrameHeader, exp: 
     const allocator = arena.allocator();
 
     // Write frame body
-    var pw: PrimitiveWriter = undefined;
-    try pw.reset(allocator);
+    var pw = try PrimitiveWriter.init(allocator);
 
     const write_fn = @typeInfo(@TypeOf(T.write));
     switch (write_fn) {

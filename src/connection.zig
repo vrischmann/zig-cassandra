@@ -125,7 +125,7 @@ pub const Connection = struct {
 
         self.raw_frame_reader = RawFrameReaderType.init(self.buffered_reader.reader());
         self.raw_frame_writer = RawFrameWriterType.init(self.buffered_writer.writer());
-        self.primitive_reader = PrimitiveReader.init();
+        PrimitiveReader.reset(&self.primitive_reader, "");
 
         var dummy_diags = InitOptions.Diagnostics{};
         const diags = options.diags orelse &dummy_diags;
