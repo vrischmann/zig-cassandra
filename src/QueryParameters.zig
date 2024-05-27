@@ -2,7 +2,6 @@ const std = @import("std");
 const mem = std.mem;
 const meta = std.meta;
 const net = std.net;
-const ArrayList = std.ArrayList;
 
 const message = @import("message.zig");
 const CompressionAlgorithm = message.CompressionAlgorithm;
