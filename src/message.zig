@@ -524,14 +524,16 @@ pub const PrimitiveReader = struct {
     }
 
     pub fn readUnsignedVint(self: *Self, comptime IntType: type) !IntType {
-        switch (@typeInfo(IntType)) {
-            .Int => |info| {
-                comptime std.debug.assert(info.bits >= 32);
+        const bits = switch (@typeInfo(IntType)) {
+            .Int => |info| blk: {
+                comptime std.debug.assert(info.bits >= 16);
+                break :blk info.bits;
             },
             else => unreachable,
-        }
+        };
 
-        var shift: u6 = 0;
+        var shift: meta.Int(.unsigned, std.math.log2(bits)) = 0;
+
         var count: usize = 0;
         var res: IntType = 0;
 
@@ -554,17 +556,31 @@ pub const PrimitiveReader = struct {
         return res;
     }
 
-    pub fn readVint(_: *Self, comptime IntType: type) !IntType {
-        switch (@typeInfo(IntType)) {
-            .Int => |info| {
+    pub fn readVint(self: *Self, comptime IntType: type) !IntType {
+        const bits = switch (@typeInfo(IntType)) {
+            .Int => |info| blk: {
                 comptime std.debug.assert(info.signedness == .signed);
-                comptime std.debug.assert(info.bits >= 32);
+                comptime std.debug.assert(info.bits >= 16);
+
+                break :blk info.bits;
             },
             else => unreachable,
-        }
+        };
 
-        // TODO(vincent): implement this for uvint and vint
-        unreachable;
+        const UnsignedType = meta.Int(.unsigned, bits);
+
+        const tmp = try self.readUnsignedVint(UnsignedType);
+
+        std.debug.print("read tmp: {}\n", .{tmp});
+
+        var n: IntType = 0;
+        n = @intCast(tmp >> 1);
+        std.debug.print("read n: {}\n", .{n});
+        n ^= -@as(IntType, @intCast(tmp & 1));
+
+        std.debug.print("n: {}\n", .{n});
+
+        return n;
     }
 
     pub inline fn readInetaddr(self: *Self) !net.Address {
@@ -746,18 +762,49 @@ test "primitive reader: read value" {
     try testing.expect(value3 == .NotSet);
 }
 
-test "read unsigned vint" {
+// test "read unsigned vint" {
+//     var arena = testutils.arenaAllocator();
+//     defer arena.deinit();
+//
+//     var pw = try PrimitiveWriter.init(arena.allocator());
+//     try pw.writeUnsignedVint(@as(u64, 282240));
+//     try pw.writeUnsignedVint(@as(u32, 140022));
+//     try pw.writeUnsignedVint(@as(u16, 24450));
+//
+//     var pr: PrimitiveReader = undefined;
+//     pr.reset(pw.getWritten());
+//
+//     const n1 = try pr.readUnsignedVint(u64);
+//     try testing.expect(n1 == @as(u64, 282240));
+//
+//     const n2 = try pr.readUnsignedVint(u32);
+//     try testing.expect(n2 == @as(u32, 140022));
+//
+//     const n3 = try pr.readUnsignedVint(u16);
+//     try testing.expect(n3 == @as(u16, 24450));
+// }
+
+test "read vint" {
     var arena = testutils.arenaAllocator();
     defer arena.deinit();
 
     var pw = try PrimitiveWriter.init(arena.allocator());
-    try pw.writeUnsignedVint(@as(u64, 282240));
+    try pw.writeVint(@as(i64, 282240));
+    // try pw.writeVint(@as(i64, -2400));
+    // try pw.writeVint(@as(i32, -38000));
+    // try pw.writeVint(@as(i32, 80000000));
 
     var pr: PrimitiveReader = undefined;
     pr.reset(pw.getWritten());
-    const n = try pr.readUnsignedVint(u64);
 
-    try testing.expect(n == @as(u64, 282240));
+    const n1 = try pr.readVint(i64);
+    try testing.expect(n1 == @as(i64, 282240));
+    // const n2 = try pr.readVint(i64);
+    // try testing.expect(n2 == @as(i64, -2400));
+    // const n3 = try pr.readVint(i32);
+    // try testing.expect(n3 == @as(i32, -38000));
+    // const n4 = try pr.readVint(i32);
+    // try testing.expect(n4 == @as(i32, 80000000));
 }
 
 test "primitive reader: read inet and inetaddr" {
@@ -990,6 +1037,8 @@ pub const PrimitiveWriter = struct {
         // If the number is greater than or equal to that, it must be encoded as a chunk.
 
         while (tmp >= 0x80) {
+            std.debug.print("tmp: {d}\n", .{tmp});
+
             // a chunk is:
             // * the least significant 7 bits
             // * the most significant  bit set to 1
@@ -1002,6 +1051,33 @@ pub const PrimitiveWriter = struct {
         tmp_buf[i] = @truncate(tmp);
 
         try self.wbuf.appendSlice(tmp_buf[0 .. i + 1]);
+    }
+
+    pub fn writeVint(self: *Self, n: anytype) !void {
+        const bits = switch (@typeInfo(@TypeOf(n))) {
+            .Int => |info| blk: {
+                comptime std.debug.assert(info.bits == 32 or info.bits == 64);
+                comptime std.debug.assert(info.signedness == .signed);
+
+                break :blk info.bits;
+            },
+            else => unreachable,
+        };
+
+        const UnsignedType = std.meta.Int(.unsigned, bits);
+
+        const tmp: UnsignedType = (@as(UnsignedType, @intCast(n)) >> (bits - 1)) ^ (@as(UnsignedType, @intCast(n << 1)));
+
+        std.debug.print(
+            "unsigned tmp: {d}, lhs: {d}, rhs: {d}\n",
+            .{
+                tmp,
+                @as(UnsignedType, @intCast(n)) >> (bits - 1),
+                ~(@as(UnsignedType, @intCast(n << 1))),
+            },
+        );
+
+        try self.writeUnsignedVint(tmp);
     }
 
     pub inline fn writeInetaddr(self: *Self, inet: net.Address) !void {
