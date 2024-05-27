@@ -534,7 +534,6 @@ pub const PrimitiveReader = struct {
 
         var shift: meta.Int(.unsigned, std.math.log2(bits)) = 0;
 
-        var count: usize = 0;
         var res: IntType = 0;
 
         while (true) {
@@ -544,7 +543,6 @@ pub const PrimitiveReader = struct {
             // TODO(vincent): runtime check if the number will actually fit in the type T ?
 
             res |= (tmp << shift);
-            count += 1;
 
             if (b & 0x80 == 0) {
                 break;
