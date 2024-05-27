@@ -6,40 +6,40 @@ const log = std.log;
 const mem = std.mem;
 const net = std.net;
 
-const FrameHeader = @import("frame.zig").FrameHeader;
-const FrameFlags = @import("frame.zig").FrameFlags;
-const RawFrame = @import("frame.zig").RawFrame;
-const RawFrameReader = @import("frame.zig").RawFrameReader;
-const RawFrameWriter = @import("frame.zig").RawFrameWriter;
-
-const lz4 = @import("lz4.zig");
-
-const enable_snappy = build_options.with_snappy;
-const snappy = if (enable_snappy) @import("snappy.zig");
-
-const message = @import("message.zig");
-const Opcode = message.Opcode;
-const ProtocolVersion = message.ProtocolVersion;
-const CompressionAlgorithm = message.CompressionAlgorithm;
-const CQLVersion = message.CQLVersion;
-const MessageReader = message.MessageReader;
-const MessageWriter = message.MessageWriter;
-
 const frame = @import("frame.zig");
-const ErrorFrame = frame.ErrorFrame;
-const StartupFrame = frame.StartupFrame;
-const ReadyFrame = frame.ReadyFrame;
-const AuthenticateFrame = frame.AuthenticateFrame;
-const SupportedFrame = frame.SupportedFrame;
-const QueryFrame = frame.QueryFrame;
-const ResultFrame = frame.ResultFrame;
-const PrepareFrame = frame.PrepareFrame;
-const ExecuteFrame = frame.ExecuteFrame;
-const EventFrame = frame.EventFrame;
-const BatchFrame = frame.BatchFrame;
+
+const FrameFlags = frame.FrameFlags;
+const FrameHeader = frame.FrameHeader;
+const RawFrame = frame.RawFrame;
+const RawFrameReader = frame.RawFrameReader;
+const RawFrameWriter = frame.RawFrameWriter;
+
 const AuthChallengeFrame = frame.AuthChallengeFrame;
 const AuthResponseFrame = frame.AuthResponseFrame;
 const AuthSuccessFrame = frame.AuthSuccessFrame;
+const AuthenticateFrame = frame.AuthenticateFrame;
+const BatchFrame = frame.BatchFrame;
+const ErrorFrame = frame.ErrorFrame;
+const EventFrame = frame.EventFrame;
+const ExecuteFrame = frame.ExecuteFrame;
+const PrepareFrame = frame.PrepareFrame;
+const QueryFrame = frame.QueryFrame;
+const ReadyFrame = frame.ReadyFrame;
+const ResultFrame = frame.ResultFrame;
+const StartupFrame = frame.StartupFrame;
+const SupportedFrame = frame.SupportedFrame;
+
+const message = @import("message.zig");
+const CQLVersion = message.CQLVersion;
+const CompressionAlgorithm = message.CompressionAlgorithm;
+const MessageReader = message.MessageReader;
+const MessageWriter = message.MessageWriter;
+const Opcode = message.Opcode;
+const ProtocolVersion = message.ProtocolVersion;
+
+const lz4 = @import("lz4.zig");
+const enable_snappy = build_options.with_snappy;
+const snappy = if (enable_snappy) @import("snappy.zig");
 
 pub const Frame = union(Opcode) {
     Error: ErrorFrame,

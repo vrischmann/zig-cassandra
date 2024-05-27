@@ -11,12 +11,12 @@ const message = @import("message.zig");
 const MessageReader = message.MessageReader;
 const OptionID = message.OptionID;
 
-const RowData = @import("frame.zig").RowData;
 const ColumnData = @import("frame.zig").ColumnData;
+const RowData = @import("frame.zig").RowData;
 
+const ColumnSpec = @import("metadata.zig").ColumnSpec;
 const GlobalTableSpec = @import("metadata.zig").GlobalTableSpec;
 const RowsMetadata = @import("metadata.zig").RowsMetadata;
-const ColumnSpec = @import("metadata.zig").ColumnSpec;
 
 const testutils = @import("testutils.zig");
 

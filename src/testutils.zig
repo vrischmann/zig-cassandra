@@ -3,10 +3,12 @@ const io = std.io;
 const mem = std.mem;
 
 const MessageWriter = @import("message.zig").MessageWriter;
-const FrameHeader = @import("frame.zig").FrameHeader;
-const RawFrame = @import("frame.zig").RawFrame;
-const RawFrameReader = @import("frame.zig").RawFrameReader;
-const RawFrameWriter = @import("frame.zig").RawFrameWriter;
+
+const frame = @import("frame.zig");
+const FrameHeader = frame.FrameHeader;
+const RawFrame = frame.RawFrame;
+const RawFrameReader = frame.RawFrameReader;
+const RawFrameWriter = frame.RawFrameWriter;
 
 pub fn printHRBytes(comptime fmt: []const u8, exp: []const u8, args: anytype) void {
     const hextable = "0123456789abcdef";
@@ -52,7 +54,7 @@ pub fn readRawFrame(_allocator: mem.Allocator, data: []const u8) !RawFrame {
     return fr.read(_allocator);
 }
 
-pub fn expectSameRawFrame(comptime T: type, frame: T, header: FrameHeader, exp: []const u8) !void {
+pub fn expectSameRawFrame(comptime T: type, fr: T, header: FrameHeader, exp: []const u8) !void {
     var arena = arenaAllocator();
     defer arena.deinit();
     const allocator = arena.allocator();
@@ -64,9 +66,9 @@ pub fn expectSameRawFrame(comptime T: type, frame: T, header: FrameHeader, exp: 
     switch (write_fn) {
         .Fn => |info| {
             if (info.params.len == 2) {
-                try frame.write(&mw);
+                try fr.write(&mw);
             } else if (info.params.len == 3) {
-                try frame.write(header.version, &mw);
+                try fr.write(header.version, &mw);
             }
         },
         else => unreachable,

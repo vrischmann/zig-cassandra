@@ -6,14 +6,14 @@ const net = std.net;
 const message = @import("message.zig");
 const CompressionAlgorithm = message.CompressionAlgorithm;
 const Consistency = message.Consistency;
+const MessageReader = message.MessageReader;
+const MessageWriter = message.MessageWriter;
+const NamedValue = message.NamedValue;
 const NotSet = message.NotSet;
 const OptionID = message.OptionID;
 const ProtocolVersion = message.ProtocolVersion;
 const Value = message.Value;
-const NamedValue = message.NamedValue;
 const Values = message.Values;
-const MessageWriter = message.MessageWriter;
-const MessageReader = message.MessageReader;
 
 const Self = @This();
 

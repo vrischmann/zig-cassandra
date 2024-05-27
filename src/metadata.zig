@@ -5,12 +5,12 @@ const testing = std.testing;
 const message = @import("message.zig");
 const CompressionAlgorithm = message.CompressionAlgorithm;
 const Consistency = message.Consistency;
+const MessageReader = message.MessageReader;
 const NotSet = message.NotSet;
 const OptionID = message.OptionID;
 const ProtocolVersion = message.ProtocolVersion;
 const Value = message.Value;
 const Values = message.Values;
-const MessageReader = message.MessageReader;
 
 pub const GlobalTableSpec = struct {
     keyspace: []const u8,
