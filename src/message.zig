@@ -571,11 +571,10 @@ pub const PrimitiveReader = struct {
 
         const tmp = try self.readUnsignedVint(UnsignedType);
 
-        std.debug.print("read tmp: {}\n", .{tmp});
+        const lhs: IntType = @intCast(tmp >> 1);
+        const rhs = -@as(IntType, @intCast(tmp & 1));
 
-        const n = @as(IntType, @intCast(tmp >> 1)) ^ -@as(IntType, @intCast(tmp & 1));
-
-        std.debug.print("n: {}\n", .{n});
+        const n = lhs ^ rhs;
 
         return n;
     }
@@ -759,27 +758,25 @@ test "primitive reader: read value" {
     try testing.expect(value3 == .NotSet);
 }
 
-// test "read unsigned vint" {
-//     var arena = testutils.arenaAllocator();
-//     defer arena.deinit();
-//
-//     var pw = try PrimitiveWriter.init(arena.allocator());
-//     try pw.riteUnsignedVint(@as(u64, 282240));
-//     try pw.writeUnsignedVint(@as(u32, 140022));
-//     try pw.writeUnsignedVint(@as(u16, 24450));
-//
-//     var pr: PrimitiveReader = undefined;
-//     pr.reset(pw.getWritten());
-//
-//     const n1 = try pr.readUnsignedVint(u64);
-//     try testing.expect(n1 == @as(u64, 282240));
-//
-//     const n2 = try pr.readUnsignedVint(u32);
-//     try testing.expect(n2 == @as(u32, 140022));
-//
-//     const n3 = try pr.readUnsignedVint(u16);
-//     try testing.expect(n3 == @as(u16, 24450));
-// }
+test "read unsigned vint" {
+    var arena = testutils.arenaAllocator();
+    defer arena.deinit();
+
+    var pw = try PrimitiveWriter.init(arena.allocator());
+    try pw.writeUnsignedVint(@as(u64, 282240));
+    try pw.writeUnsignedVint(@as(u32, 140022));
+    try pw.writeUnsignedVint(@as(u16, 24450));
+
+    var pr: PrimitiveReader = undefined;
+    pr.reset(pw.getWritten());
+
+    const n1 = try pr.readUnsignedVint(u64);
+    try testing.expect(n1 == @as(u64, 282240));
+    const n2 = try pr.readUnsignedVint(u32);
+    try testing.expect(n2 == @as(u32, 140022));
+    const n3 = try pr.readUnsignedVint(u16);
+    try testing.expect(n3 == @as(u16, 24450));
+}
 
 test "read vint" {
     var arena = testutils.arenaAllocator();
@@ -787,21 +784,21 @@ test "read vint" {
 
     var pw = try PrimitiveWriter.init(arena.allocator());
     try pw.writeVint(@as(i64, 282240));
-    // try pw.writeVint(@as(i64, -2400));
-    // try pw.writeVint(@as(i32, -38000));
-    // try pw.writeVint(@as(i32, 80000000));
+    try pw.writeVint(@as(i64, -2400));
+    try pw.writeVint(@as(i32, -38000));
+    try pw.writeVint(@as(i32, 80000000));
 
     var pr: PrimitiveReader = undefined;
     pr.reset(pw.getWritten());
 
     const n1 = try pr.readVint(i64);
     try testing.expect(n1 == @as(i64, 282240));
-    // const n2 = try pr.readVint(i64);
-    // try testing.expect(n2 == @as(i64, -2400));
-    // const n3 = try pr.readVint(i32);
-    // try testing.expect(n3 == @as(i32, -38000));
-    // const n4 = try pr.readVint(i32);
-    // try testing.expect(n4 == @as(i32, 80000000));
+    const n2 = try pr.readVint(i64);
+    try testing.expect(n2 == @as(i64, -2400));
+    const n3 = try pr.readVint(i32);
+    try testing.expect(n3 == @as(i32, -38000));
+    const n4 = try pr.readVint(i32);
+    try testing.expect(n4 == @as(i32, 80000000));
 }
 
 test "primitive reader: read inet and inetaddr" {
@@ -1034,8 +1031,6 @@ pub const PrimitiveWriter = struct {
         // If the number is greater than or equal to that, it must be encoded as a chunk.
 
         while (tmp >= 0x80) {
-            std.debug.print("tmp: {d}\n", .{tmp});
-
             // a chunk is:
             // * the least significant 7 bits
             // * the most significant  bit set to 1
@@ -1063,16 +1058,10 @@ pub const PrimitiveWriter = struct {
 
         const UnsignedType = std.meta.Int(.unsigned, bits);
 
-        const tmp: UnsignedType = (@as(UnsignedType, @intCast(n)) >> (bits - 1)) ^ (@as(UnsignedType, @intCast(n << 1)));
+        const lhs: UnsignedType = @bitCast(n >> (bits - 1));
+        const rhs: UnsignedType = @bitCast(n << 1);
 
-        std.debug.print(
-            "unsigned tmp: {d}, lhs: {d}, rhs: {d}\n",
-            .{
-                tmp,
-                @as(UnsignedType, @intCast(n)) >> (bits - 1),
-                ~(@as(UnsignedType, @intCast(n << 1))),
-            },
-        );
+        const tmp = lhs ^ rhs;
 
         try self.writeUnsignedVint(tmp);
     }
