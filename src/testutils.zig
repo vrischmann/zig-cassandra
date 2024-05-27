@@ -2,7 +2,7 @@ const std = @import("std");
 const io = std.io;
 const mem = std.mem;
 
-const PrimitiveWriter = @import("message.zig").PrimitiveWriter;
+const MessageWriter = @import("message.zig").MessageWriter;
 const FrameHeader = @import("frame.zig").FrameHeader;
 const RawFrame = @import("frame.zig").RawFrame;
 const RawFrameReader = @import("frame.zig").RawFrameReader;
@@ -58,15 +58,15 @@ pub fn expectSameRawFrame(comptime T: type, frame: T, header: FrameHeader, exp: 
     const allocator = arena.allocator();
 
     // Write frame body
-    var pw = try PrimitiveWriter.init(allocator);
+    var mw = try MessageWriter.init(allocator);
 
     const write_fn = @typeInfo(@TypeOf(T.write));
     switch (write_fn) {
         .Fn => |info| {
             if (info.params.len == 2) {
-                try frame.write(&pw);
+                try frame.write(&mw);
             } else if (info.params.len == 3) {
-                try frame.write(header.version, &pw);
+                try frame.write(header.version, &mw);
             }
         },
         else => unreachable,
@@ -76,7 +76,7 @@ pub fn expectSameRawFrame(comptime T: type, frame: T, header: FrameHeader, exp: 
 
     const raw_frame = RawFrame{
         .header = header,
-        .body = pw.getWritten(),
+        .body = mw.getWritten(),
     };
 
     var buf2: [1024]u8 = undefined;

@@ -13,7 +13,7 @@ const ProtocolVersion = message.ProtocolVersion;
 const Value = message.Value;
 const NamedValue = message.NamedValue;
 const Values = message.Values;
-const PrimitiveWriter = message.PrimitiveWriter;
+const MessageWriter = message.MessageWriter;
 const MessageReader = message.MessageReader;
 
 const string_map = @import("string_map.zig");
@@ -40,8 +40,8 @@ const FlagWithNamedValues: u32 = 0x0040;
 const FlagWithKeyspace: u32 = 0x0080;
 const FlagWithNowInSeconds: u32 = 0x100;
 
-pub fn write(self: Self, protocol_version: ProtocolVersion, pw: *PrimitiveWriter) !void {
-    _ = try pw.writeConsistency(self.consistency_level);
+pub fn write(self: Self, protocol_version: ProtocolVersion, mw: *MessageWriter) !void {
+    _ = try mw.writeConsistency(self.consistency_level);
 
     // Build the flags value
 
@@ -77,9 +77,9 @@ pub fn write(self: Self, protocol_version: ProtocolVersion, pw: *PrimitiveWriter
     }
 
     if (protocol_version.is(5)) {
-        _ = try pw.writeInt(u32, flags);
+        _ = try mw.writeInt(u32, flags);
     } else {
-        _ = try pw.writeInt(u8, @intCast(flags));
+        _ = try mw.writeInt(u8, @intCast(flags));
     }
 
     // Write the remaining body
@@ -87,32 +87,32 @@ pub fn write(self: Self, protocol_version: ProtocolVersion, pw: *PrimitiveWriter
     if (self.values) |values| {
         switch (values) {
             .Normal => |normal_values| {
-                _ = try pw.writeInt(u16, @intCast(normal_values.len));
+                _ = try mw.writeInt(u16, @intCast(normal_values.len));
                 for (normal_values) |value| {
-                    _ = try pw.writeValue(value);
+                    _ = try mw.writeValue(value);
                 }
             },
             .Named => |named_values| {
-                _ = try pw.writeInt(u16, @intCast(named_values.len));
+                _ = try mw.writeInt(u16, @intCast(named_values.len));
                 for (named_values) |v| {
-                    _ = try pw.writeString(v.name);
-                    _ = try pw.writeValue(v.value);
+                    _ = try mw.writeString(v.name);
+                    _ = try mw.writeValue(v.value);
                 }
             },
         }
     }
 
     if (self.page_size) |ps| {
-        _ = try pw.writeInt(u32, ps);
+        _ = try mw.writeInt(u32, ps);
     }
     if (self.paging_state) |ps| {
-        _ = try pw.writeBytes(ps);
+        _ = try mw.writeBytes(ps);
     }
     if (self.serial_consistency_level) |consistency| {
-        _ = try pw.writeConsistency(consistency);
+        _ = try mw.writeConsistency(consistency);
     }
     if (self.timestamp) |ts| {
-        _ = try pw.writeInt(u64, ts);
+        _ = try mw.writeInt(u64, ts);
     }
 
     if (!protocol_version.is(5)) {
@@ -122,10 +122,10 @@ pub fn write(self: Self, protocol_version: ProtocolVersion, pw: *PrimitiveWriter
     // The following flags are only valid with protocol v5
 
     if (self.keyspace) |ks| {
-        _ = try pw.writeString(ks);
+        _ = try mw.writeString(ks);
     }
     if (self.now_in_seconds) |s| {
-        _ = try pw.writeInt(u32, s);
+        _ = try mw.writeInt(u32, s);
     }
 }
 

@@ -23,7 +23,7 @@ const ProtocolVersion = message.ProtocolVersion;
 const CompressionAlgorithm = message.CompressionAlgorithm;
 const CQLVersion = message.CQLVersion;
 const MessageReader = message.MessageReader;
-const PrimitiveWriter = message.PrimitiveWriter;
+const MessageWriter = message.MessageWriter;
 
 const frame = @import("frame.zig");
 const ErrorFrame = frame.ErrorFrame;
@@ -108,7 +108,7 @@ pub const Connection = struct {
     raw_frame_reader: RawFrameReaderType,
     raw_frame_writer: RawFrameWriterType,
     message_reader: MessageReader,
-    primitive_writer: PrimitiveWriter,
+    primitive_writer: MessageWriter,
 
     // Negotiated with the server
     negotiated_state: NegotiatedState,
@@ -268,8 +268,8 @@ pub const Connection = struct {
     ///
     /// If the .body field is present, it must me a type implementing either of the following write function:
     ///
-    ///   fn write(protocol_version: ProtocolVersion, primitive_writer: *PrimitiveWriter) !void
-    ///   fn write(primitive_writer: *PrimitiveWriter) !void
+    ///   fn write(protocol_version: ProtocolVersion, w: *MessageWriter) !void
+    ///   fn write(w: *MessageWriter) !void
     ///
     /// Some frames don't care about the protocol version so this is why the second signature is supported.
     ///

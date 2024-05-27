@@ -25,7 +25,7 @@ const OptionID = message.OptionID;
 const ProtocolVersion = message.ProtocolVersion;
 const Value = message.Value;
 const Values = message.Values;
-const PrimitiveWriter = message.PrimitiveWriter;
+const MessageWriter = message.MessageWriter;
 
 const AlreadyExistsError = message.AlreadyExistsError;
 const FunctionFailureError = message.FunctionFailureError;
@@ -730,20 +730,20 @@ fn computeSingleValue(allocator: mem.Allocator, values: *std.ArrayList(Value), o
 }
 
 fn serializeValues(allocator: mem.Allocator, values: []const Value) ![]const u8 {
-    var pw = try PrimitiveWriter.init(allocator);
+    var mw = try MessageWriter.init(allocator);
 
-    try pw.writeInt(u32, @intCast(values.len));
+    try mw.writeInt(u32, @intCast(values.len));
 
     for (values) |value| {
         switch (value) {
             .Set => |v| {
-                try pw.writeBytes(v);
+                try mw.writeBytes(v);
             },
             else => {},
         }
     }
 
-    return pw.toOwnedSlice();
+    return mw.toOwnedSlice();
 }
 
 test "serialize values" {

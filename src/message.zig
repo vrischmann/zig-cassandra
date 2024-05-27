@@ -760,13 +760,13 @@ test "read unsigned vint" {
     var arena = testutils.arenaAllocator();
     defer arena.deinit();
 
-    var pw = try PrimitiveWriter.init(arena.allocator());
-    try pw.writeUnsignedVint(@as(u64, 282240));
-    try pw.writeUnsignedVint(@as(u32, 140022));
-    try pw.writeUnsignedVint(@as(u16, 24450));
+    var mw = try MessageWriter.init(arena.allocator());
+    try mw.writeUnsignedVint(@as(u64, 282240));
+    try mw.writeUnsignedVint(@as(u32, 140022));
+    try mw.writeUnsignedVint(@as(u16, 24450));
 
     var mr: MessageReader = undefined;
-    mr.reset(pw.getWritten());
+    mr.reset(mw.getWritten());
 
     const n1 = try mr.readUnsignedVint(u64);
     try testing.expect(n1 == @as(u64, 282240));
@@ -780,14 +780,14 @@ test "read vint" {
     var arena = testutils.arenaAllocator();
     defer arena.deinit();
 
-    var pw = try PrimitiveWriter.init(arena.allocator());
-    try pw.writeVint(@as(i64, 282240));
-    try pw.writeVint(@as(i64, -2400));
-    try pw.writeVint(@as(i32, -38000));
-    try pw.writeVint(@as(i32, 80000000));
+    var mw = try MessageWriter.init(arena.allocator());
+    try mw.writeVint(@as(i64, 282240));
+    try mw.writeVint(@as(i64, -2400));
+    try mw.writeVint(@as(i32, -38000));
+    try mw.writeVint(@as(i32, 80000000));
 
     var mr: MessageReader = undefined;
-    mr.reset(pw.getWritten());
+    mr.reset(mw.getWritten());
 
     const n1 = try mr.readVint(i64);
     try testing.expect(n1 == @as(i64, 282240));
@@ -906,7 +906,7 @@ test "message reader: read string multimap" {
     try testing.expectEqualStrings("baz", slice[1]);
 }
 
-pub const PrimitiveWriter = struct {
+pub const MessageWriter = struct {
     const Self = @This();
 
     wbuf: std.ArrayList(u8),
@@ -1121,60 +1121,60 @@ test "primitive writer: write int" {
     var arena = testutils.arenaAllocator();
     defer arena.deinit();
 
-    var pw = try PrimitiveWriter.init(arena.allocator());
+    var mw = try MessageWriter.init(arena.allocator());
 
-    try pw.writeInt(i32, 2101504);
-    try testing.expectEqualSlices(u8, "\x00\x20\x11\x00", pw.getWritten()[0..4]);
+    try mw.writeInt(i32, 2101504);
+    try testing.expectEqualSlices(u8, "\x00\x20\x11\x00", mw.getWritten()[0..4]);
 
-    try pw.writeInt(i64, 70368746279168);
-    try testing.expectEqualSlices(u8, "\x00\x00\x40\x00\x00\x20\x11\x00", pw.getWritten()[4..12]);
+    try mw.writeInt(i64, 70368746279168);
+    try testing.expectEqualSlices(u8, "\x00\x00\x40\x00\x00\x20\x11\x00", mw.getWritten()[4..12]);
 
-    try pw.writeInt(i16, 4352);
-    try testing.expectEqualSlices(u8, "\x11\x00", pw.getWritten()[12..14]);
+    try mw.writeInt(i16, 4352);
+    try testing.expectEqualSlices(u8, "\x11\x00", mw.getWritten()[12..14]);
 
-    try pw.writeByte(0xFF);
-    try testing.expectEqualSlices(u8, "\xff", pw.getWritten()[14..15]);
+    try mw.writeByte(0xFF);
+    try testing.expectEqualSlices(u8, "\xff", mw.getWritten()[14..15]);
 }
 
 test "primitive writer: write strings and bytes" {
     var arena = testutils.arenaAllocator();
     defer arena.deinit();
 
-    var pw = try PrimitiveWriter.init(arena.allocator());
+    var mw = try MessageWriter.init(arena.allocator());
 
     {
         // short string
-        _ = try pw.writeString("foobar");
-        try testing.expectEqualSlices(u8, "\x00\x06foobar", pw.getWritten()[0..8]);
+        _ = try mw.writeString("foobar");
+        try testing.expectEqualSlices(u8, "\x00\x06foobar", mw.getWritten()[0..8]);
 
         // long string
 
-        _ = try pw.writeLongString("foobar");
-        try testing.expectEqualSlices(u8, "\x00\x00\x00\x06foobar", pw.getWritten()[8..18]);
+        _ = try mw.writeLongString("foobar");
+        try testing.expectEqualSlices(u8, "\x00\x00\x00\x06foobar", mw.getWritten()[8..18]);
     }
 
     {
         // int32 + bytes
-        _ = try pw.writeBytes("123456789A");
-        try testing.expectEqualSlices(u8, "\x00\x00\x00\x0A123456789A", pw.getWritten()[18..32]);
+        _ = try mw.writeBytes("123456789A");
+        try testing.expectEqualSlices(u8, "\x00\x00\x00\x0A123456789A", mw.getWritten()[18..32]);
 
-        _ = try pw.writeBytes("");
-        try testing.expectEqualSlices(u8, "\x00\x00\x00\x00", pw.getWritten()[32..36]);
+        _ = try mw.writeBytes("");
+        try testing.expectEqualSlices(u8, "\x00\x00\x00\x00", mw.getWritten()[32..36]);
 
-        _ = try pw.writeBytes(null);
-        try testing.expectEqualSlices(u8, "\xff\xff\xff\xff", pw.getWritten()[36..40]);
+        _ = try mw.writeBytes(null);
+        try testing.expectEqualSlices(u8, "\xff\xff\xff\xff", mw.getWritten()[36..40]);
     }
 
     {
         // int16 + bytes
-        _ = try pw.writeShortBytes("123456789A");
-        try testing.expectEqualSlices(u8, "\x00\x0A123456789A", pw.getWritten()[40..52]);
+        _ = try mw.writeShortBytes("123456789A");
+        try testing.expectEqualSlices(u8, "\x00\x0A123456789A", mw.getWritten()[40..52]);
 
-        _ = try pw.writeShortBytes("");
-        try testing.expectEqualSlices(u8, "\x00\x00", pw.getWritten()[52..54]);
+        _ = try mw.writeShortBytes("");
+        try testing.expectEqualSlices(u8, "\x00\x00", mw.getWritten()[52..54]);
 
-        _ = try pw.writeShortBytes(null);
-        try testing.expectEqualSlices(u8, "\xff\xff", pw.getWritten()[54..56]);
+        _ = try mw.writeShortBytes(null);
+        try testing.expectEqualSlices(u8, "\xff\xff", mw.getWritten()[54..56]);
     }
 }
 
@@ -1182,74 +1182,74 @@ test "primitive writer: write uuid" {
     var arena = testutils.arenaAllocator();
     defer arena.deinit();
 
-    var pw = try PrimitiveWriter.init(arena.allocator());
+    var mw = try MessageWriter.init(arena.allocator());
 
     var uuid: [16]u8 = undefined;
     try std.posix.getrandom(&uuid);
 
-    _ = try pw.writeUUID(uuid);
-    try testing.expectEqualSlices(u8, &uuid, pw.getWritten()[0..16]);
+    _ = try mw.writeUUID(uuid);
+    try testing.expectEqualSlices(u8, &uuid, mw.getWritten()[0..16]);
 }
 
 test "primitive writer: write string list" {
     var arena = testutils.arenaAllocator();
     defer arena.deinit();
 
-    var pw = try PrimitiveWriter.init(arena.allocator());
+    var mw = try MessageWriter.init(arena.allocator());
 
     const list = &[_][]const u8{ "foo", "bar" };
 
-    _ = try pw.writeStringList(list);
-    try testing.expectEqualSlices(u8, "\x00\x02\x00\x03foo\x00\x03bar", pw.getWritten()[0..12]);
+    _ = try mw.writeStringList(list);
+    try testing.expectEqualSlices(u8, "\x00\x02\x00\x03foo\x00\x03bar", mw.getWritten()[0..12]);
 }
 
 test "primitive writer: write value" {
     var arena = testutils.arenaAllocator();
     defer arena.deinit();
 
-    var pw = try PrimitiveWriter.init(arena.allocator());
+    var mw = try MessageWriter.init(arena.allocator());
 
     // Normal value
-    _ = try pw.writeValue(Value{ .Set = "ab" });
-    try testing.expectEqualSlices(u8, "\x00\x00\x00\x02\x61\x62", pw.getWritten()[0..6]);
+    _ = try mw.writeValue(Value{ .Set = "ab" });
+    try testing.expectEqualSlices(u8, "\x00\x00\x00\x02\x61\x62", mw.getWritten()[0..6]);
 
     // Null value
-    _ = try pw.writeValue(Value{ .Null = {} });
-    try testing.expectEqualSlices(u8, "\xff\xff\xff\xff", pw.getWritten()[6..10]);
+    _ = try mw.writeValue(Value{ .Null = {} });
+    try testing.expectEqualSlices(u8, "\xff\xff\xff\xff", mw.getWritten()[6..10]);
 
     // "Not set" value
-    _ = try pw.writeValue(Value{ .NotSet = {} });
-    try testing.expectEqualSlices(u8, "\xff\xff\xff\xfe", pw.getWritten()[10..14]);
+    _ = try mw.writeValue(Value{ .NotSet = {} });
+    try testing.expectEqualSlices(u8, "\xff\xff\xff\xfe", mw.getWritten()[10..14]);
 }
 
 test "primitive writer: write inet and inetaddr" {
     var arena = testutils.arenaAllocator();
     defer arena.deinit();
 
-    var pw = try PrimitiveWriter.init(arena.allocator());
+    var mw = try MessageWriter.init(arena.allocator());
 
     // IPv4
-    _ = try pw.writeInet(net.Address.initIp4([_]u8{ 0x78, 0x56, 0x34, 0x12 }, 34));
-    try testing.expectEqualSlices(u8, "\x04\x78\x56\x34\x12\x00\x00\x00\x22", pw.getWritten()[0..9]);
+    _ = try mw.writeInet(net.Address.initIp4([_]u8{ 0x78, 0x56, 0x34, 0x12 }, 34));
+    try testing.expectEqualSlices(u8, "\x04\x78\x56\x34\x12\x00\x00\x00\x22", mw.getWritten()[0..9]);
 
     // IPv6
-    _ = try pw.writeInet(net.Address.initIp6([_]u8{0xff} ** 16, 34, 0, 0));
-    try testing.expectEqualSlices(u8, "\x10\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\x00\x00\x00\x22", pw.getWritten()[9..30]);
+    _ = try mw.writeInet(net.Address.initIp6([_]u8{0xff} ** 16, 34, 0, 0));
+    try testing.expectEqualSlices(u8, "\x10\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\x00\x00\x00\x22", mw.getWritten()[9..30]);
 
     // IPv4 without port
-    _ = try pw.writeInetaddr(net.Address.initIp4([_]u8{ 0x78, 0x56, 0x34, 0x12 }, 34));
-    try testing.expectEqualSlices(u8, "\x04\x78\x56\x34\x12", pw.getWritten()[30..35]);
+    _ = try mw.writeInetaddr(net.Address.initIp4([_]u8{ 0x78, 0x56, 0x34, 0x12 }, 34));
+    try testing.expectEqualSlices(u8, "\x04\x78\x56\x34\x12", mw.getWritten()[30..35]);
 
     // IPv6 without port
-    _ = try pw.writeInetaddr(net.Address.initIp6([_]u8{0xff} ** 16, 34, 0, 0));
-    try testing.expectEqualSlices(u8, "\x10\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff", pw.getWritten()[35..52]);
+    _ = try mw.writeInetaddr(net.Address.initIp6([_]u8{0xff} ** 16, 34, 0, 0));
+    try testing.expectEqualSlices(u8, "\x10\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff", mw.getWritten()[35..52]);
 }
 
 test "primitive writer: write consistency" {
     var arena = testutils.arenaAllocator();
     defer arena.deinit();
 
-    var pw = try PrimitiveWriter.init(arena.allocator());
+    var mw = try MessageWriter.init(arena.allocator());
 
     const testCase = struct {
         consistency: Consistency,
@@ -1271,9 +1271,9 @@ test "primitive writer: write consistency" {
     };
 
     for (testCases) |tc| {
-        pw.reset();
+        mw.reset();
 
-        _ = try pw.writeConsistency(tc.consistency);
-        try testing.expectEqualSlices(u8, tc.exp, pw.getWritten()[0..2]);
+        _ = try mw.writeConsistency(tc.consistency);
+        try testing.expectEqualSlices(u8, tc.exp, mw.getWritten()[0..2]);
     }
 }

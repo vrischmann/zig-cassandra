@@ -5,7 +5,7 @@ const net = std.net;
 
 const message = @import("message.zig");
 const MessageReader = message.MessageReader;
-const PrimitiveWriter = message.PrimitiveWriter;
+const MessageWriter = message.MessageWriter;
 
 const testutils = @import("testutils.zig");
 

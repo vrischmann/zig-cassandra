@@ -16,7 +16,7 @@ const ProtocolVersion = message.ProtocolVersion;
 const Value = message.Value;
 const Values = message.Values;
 const MessageReader = message.MessageReader;
-const PrimitiveWriter = message.PrimitiveWriter;
+const MessageWriter = message.MessageWriter;
 const CQLVersion = message.CQLVersion;
 const BatchType = message.BatchType;
 
@@ -444,27 +444,27 @@ pub const StartupFrame = struct {
     cql_version: CQLVersion,
     compression: ?CompressionAlgorithm,
 
-    pub fn write(self: Self, pw: *PrimitiveWriter) !void {
+    pub fn write(self: Self, mw: *MessageWriter) !void {
         var buf: [16]u8 = undefined;
         const cql_version = try self.cql_version.print(&buf);
 
         if (self.compression) |c| {
             // Always 2 keys
-            _ = try pw.startStringMap(2);
+            _ = try mw.startStringMap(2);
 
-            _ = try pw.writeString("CQL_VERSION");
-            _ = try pw.writeString(cql_version);
+            _ = try mw.writeString("CQL_VERSION");
+            _ = try mw.writeString(cql_version);
 
-            _ = try pw.writeString("COMPRESSION");
+            _ = try mw.writeString("COMPRESSION");
             switch (c) {
-                .LZ4 => _ = try pw.writeString("lz4"),
-                .Snappy => _ = try pw.writeString("snappy"),
+                .LZ4 => _ = try mw.writeString("lz4"),
+                .Snappy => _ = try mw.writeString("snappy"),
             }
         } else {
             // Always 1 key
-            _ = try pw.startStringMap(1);
-            _ = try pw.writeString("CQL_VERSION");
-            _ = try pw.writeString(cql_version);
+            _ = try mw.startStringMap(1);
+            _ = try mw.writeString("CQL_VERSION");
+            _ = try mw.writeString(cql_version);
         }
     }
 
@@ -533,14 +533,14 @@ pub const ExecuteFrame = struct {
     result_metadata_id: ?[]const u8,
     query_parameters: QueryParameters,
 
-    pub fn write(self: Self, protocol_version: ProtocolVersion, pw: *PrimitiveWriter) !void {
-        _ = try pw.writeShortBytes(self.query_id);
+    pub fn write(self: Self, protocol_version: ProtocolVersion, mw: *MessageWriter) !void {
+        _ = try mw.writeShortBytes(self.query_id);
         if (protocol_version.is(5)) {
             if (self.result_metadata_id) |id| {
-                _ = try pw.writeShortBytes(id);
+                _ = try mw.writeShortBytes(id);
             }
         }
-        _ = try self.query_parameters.write(protocol_version, pw);
+        _ = try self.query_parameters.write(protocol_version, mw);
     }
 
     pub fn read(allocator: mem.Allocator, protocol_version: ProtocolVersion, br: *MessageReader) !Self {
@@ -614,8 +614,8 @@ pub const AuthenticateFrame = struct {
 pub const AuthResponseFrame = struct {
     token: ?[]const u8,
 
-    pub fn write(self: @This(), pw: *PrimitiveWriter) !void {
-        return pw.writeBytes(self.token);
+    pub fn write(self: @This(), mw: *MessageWriter) !void {
+        return mw.writeBytes(self.token);
     }
 
     pub fn read(allocator: mem.Allocator, br: *MessageReader) !AuthResponseFrame {
@@ -725,27 +725,27 @@ const BatchQuery = struct {
 
     values: Values,
 
-    pub fn write(self: Self, pw: *PrimitiveWriter) !void {
+    pub fn write(self: Self, mw: *MessageWriter) !void {
         if (self.query_string) |query_string| {
-            _ = try pw.writeByte(0);
-            _ = try pw.writeLongString(query_string);
+            _ = try mw.writeByte(0);
+            _ = try mw.writeLongString(query_string);
         } else if (self.query_id) |query_id| {
-            _ = try pw.writeByte(1);
-            _ = try pw.writeShortBytes(query_id);
+            _ = try mw.writeByte(1);
+            _ = try mw.writeShortBytes(query_id);
         }
 
         switch (self.values) {
             .Normal => |normal_values| {
-                _ = try pw.writeInt(u16, @intCast(normal_values.len));
+                _ = try mw.writeInt(u16, @intCast(normal_values.len));
                 for (normal_values) |value| {
-                    _ = try pw.writeValue(value);
+                    _ = try mw.writeValue(value);
                 }
             },
             .Named => |named_values| {
-                _ = try pw.writeInt(u16, @intCast(named_values.len));
+                _ = try mw.writeInt(u16, @intCast(named_values.len));
                 for (named_values) |v| {
-                    _ = try pw.writeString(v.name);
-                    _ = try pw.writeValue(v.value);
+                    _ = try mw.writeString(v.name);
+                    _ = try mw.writeValue(v.value);
                 }
             },
         }
@@ -801,19 +801,19 @@ pub const BatchFrame = struct {
     const FlagWithKeyspace: u32 = 0x0080;
     const FlagWithNowInSeconds: u32 = 0x100;
 
-    pub fn write(self: Self, protocol_version: ProtocolVersion, pw: *PrimitiveWriter) !void {
-        _ = try pw.writeInt(u8, @intCast(@intFromEnum(self.batch_type)));
+    pub fn write(self: Self, protocol_version: ProtocolVersion, mw: *MessageWriter) !void {
+        _ = try mw.writeInt(u8, @intCast(@intFromEnum(self.batch_type)));
 
         // Write the queries
 
-        _ = try pw.writeInt(u16, @intCast(self.queries.len));
+        _ = try mw.writeInt(u16, @intCast(self.queries.len));
         for (self.queries) |query| {
-            _ = try query.write(pw);
+            _ = try query.write(mw);
         }
 
         // Write the consistency
 
-        _ = try pw.writeConsistency(self.consistency_level);
+        _ = try mw.writeConsistency(self.consistency_level);
 
         // Build the flags value
 
@@ -834,9 +834,9 @@ pub const BatchFrame = struct {
         }
 
         if (protocol_version.is(5)) {
-            _ = try pw.writeInt(u32, flags);
+            _ = try mw.writeInt(u32, flags);
         } else {
-            _ = try pw.writeInt(u8, @intCast(flags));
+            _ = try mw.writeInt(u8, @intCast(flags));
         }
 
         // Write the remaining body
@@ -1188,17 +1188,17 @@ pub const PrepareFrame = struct {
 
     const FlagWithKeyspace = 0x01;
 
-    pub fn write(self: Self, protocol_version: ProtocolVersion, pw: *PrimitiveWriter) !void {
-        _ = try pw.writeLongString(self.query);
+    pub fn write(self: Self, protocol_version: ProtocolVersion, mw: *MessageWriter) !void {
+        _ = try mw.writeLongString(self.query);
         if (!protocol_version.is(5)) {
             return;
         }
 
         if (self.keyspace) |ks| {
-            _ = try pw.writeInt(u32, FlagWithKeyspace);
-            _ = try pw.writeString(ks);
+            _ = try mw.writeInt(u32, FlagWithKeyspace);
+            _ = try mw.writeString(ks);
         } else {
-            _ = try pw.writeInt(u32, 0);
+            _ = try mw.writeInt(u32, 0);
         }
     }
 
@@ -1255,9 +1255,9 @@ pub const QueryFrame = struct {
     query: []const u8,
     query_parameters: QueryParameters,
 
-    pub fn write(self: Self, protocol_version: ProtocolVersion, pw: *PrimitiveWriter) !void {
-        _ = try pw.writeLongString(self.query);
-        _ = try self.query_parameters.write(protocol_version, pw);
+    pub fn write(self: Self, protocol_version: ProtocolVersion, mw: *MessageWriter) !void {
+        _ = try mw.writeLongString(self.query);
+        _ = try self.query_parameters.write(protocol_version, mw);
     }
 
     pub fn read(allocator: mem.Allocator, protocol_version: ProtocolVersion, br: *MessageReader) !Self {
@@ -1319,8 +1319,8 @@ test "ready frame" {
 const RegisterFrame = struct {
     event_types: []const []const u8,
 
-    pub fn write(self: @This(), pw: *PrimitiveWriter) !void {
-        return pw.writeStringList(self.event_types);
+    pub fn write(self: @This(), mw: *MessageWriter) !void {
+        return mw.writeStringList(self.event_types);
     }
 
     pub fn read(allocator: mem.Allocator, br: *MessageReader) !RegisterFrame {
