@@ -8,7 +8,7 @@ const testing = std.testing;
 const bigint = @import("bigint.zig");
 
 const message = @import("message.zig");
-const PrimitiveReader = message.PrimitiveReader;
+const MessageReader = message.MessageReader;
 const OptionID = message.OptionID;
 
 const RowData = @import("frame.zig").RowData;
@@ -389,16 +389,16 @@ pub const Iterator = struct {
                             },
                         };
 
-                        var pr: PrimitiveReader = undefined;
-                        pr.reset(column_data);
-                        const n = try pr.readInt(u32);
+                        var mr: MessageReader = undefined;
+                        mr.reset(column_data);
+                        const n = try mr.readInt(u32);
 
                         slice = try allocator.alloc(ChildType, @as(usize, n));
                         errdefer allocator.free(slice);
 
                         var i: usize = 0;
                         while (i < n) : (i += 1) {
-                            const bytes = (try pr.readBytes(allocator)) orelse unreachable;
+                            const bytes = (try mr.readBytes(allocator)) orelse unreachable;
                             defer allocator.free(bytes);
 
                             slice[i] = try self.readType(allocator, diags, child_column_spec, bytes, ChildType);

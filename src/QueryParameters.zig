@@ -14,7 +14,7 @@ const Value = message.Value;
 const NamedValue = message.NamedValue;
 const Values = message.Values;
 const PrimitiveWriter = message.PrimitiveWriter;
-const PrimitiveReader = message.PrimitiveReader;
+const MessageReader = message.MessageReader;
 
 const string_map = @import("string_map.zig");
 
@@ -129,7 +129,7 @@ pub fn write(self: Self, protocol_version: ProtocolVersion, pw: *PrimitiveWriter
     }
 }
 
-pub fn read(allocator: mem.Allocator, protocol_version: ProtocolVersion, pr: *PrimitiveReader) !Self {
+pub fn read(allocator: mem.Allocator, protocol_version: ProtocolVersion, mr: *MessageReader) !Self {
     var params = Self{
         .consistency_level = undefined,
         .values = null,
@@ -142,20 +142,20 @@ pub fn read(allocator: mem.Allocator, protocol_version: ProtocolVersion, pr: *Pr
         .now_in_seconds = null,
     };
 
-    params.consistency_level = try pr.readConsistency();
+    params.consistency_level = try mr.readConsistency();
 
     // The remaining data in the frame depends on the flags
 
     // The size of the flags bitmask depends on the protocol version.
     var flags: u32 = 0;
     if (protocol_version.is(5)) {
-        flags = try pr.readInt(u32);
+        flags = try mr.readInt(u32);
     } else {
-        flags = try pr.readInt(u8);
+        flags = try mr.readInt(u8);
     }
 
     if (flags & FlagWithValues == FlagWithValues) {
-        const n = try pr.readInt(u16);
+        const n = try mr.readInt(u16);
 
         if (flags & FlagWithNamedValues == FlagWithNamedValues) {
             var list = std.ArrayList(NamedValue).init(allocator);
@@ -164,8 +164,8 @@ pub fn read(allocator: mem.Allocator, protocol_version: ProtocolVersion, pr: *Pr
             var i: usize = 0;
             while (i < @as(usize, n)) : (i += 1) {
                 const nm = NamedValue{
-                    .name = try pr.readString(allocator),
-                    .value = try pr.readValue(allocator),
+                    .name = try mr.readString(allocator),
+                    .value = try mr.readValue(allocator),
                 };
                 _ = try list.append(nm);
             }
@@ -177,7 +177,7 @@ pub fn read(allocator: mem.Allocator, protocol_version: ProtocolVersion, pr: *Pr
 
             var i: usize = 0;
             while (i < @as(usize, n)) : (i += 1) {
-                const value = try pr.readValue(allocator);
+                const value = try mr.readValue(allocator);
                 _ = try list.append(value);
             }
 
@@ -188,20 +188,20 @@ pub fn read(allocator: mem.Allocator, protocol_version: ProtocolVersion, pr: *Pr
         params.skip_metadata = true;
     }
     if (flags & FlagWithPageSize == FlagWithPageSize) {
-        params.page_size = try pr.readInt(u32);
+        params.page_size = try mr.readInt(u32);
     }
     if (flags & FlagWithPagingState == FlagWithPagingState) {
-        params.paging_state = try pr.readBytes(allocator);
+        params.paging_state = try mr.readBytes(allocator);
     }
     if (flags & FlagWithSerialConsistency == FlagWithSerialConsistency) {
-        const consistency_level = try pr.readConsistency();
+        const consistency_level = try mr.readConsistency();
         if (consistency_level != .Serial and consistency_level != .LocalSerial) {
             return error.InvalidSerialConsistency;
         }
         params.serial_consistency_level = consistency_level;
     }
     if (flags & FlagWithDefaultTimestamp == FlagWithDefaultTimestamp) {
-        const timestamp = try pr.readInt(u64);
+        const timestamp = try mr.readInt(u64);
         if (timestamp < 0) {
             return error.InvalidNegativeTimestamp;
         }
@@ -215,10 +215,10 @@ pub fn read(allocator: mem.Allocator, protocol_version: ProtocolVersion, pr: *Pr
     // The following flags are only valid with protocol v5
 
     if (flags & FlagWithKeyspace == FlagWithKeyspace) {
-        params.keyspace = try pr.readString(allocator);
+        params.keyspace = try mr.readString(allocator);
     }
     if (flags & FlagWithNowInSeconds == FlagWithNowInSeconds) {
-        params.now_in_seconds = try pr.readInt(u32);
+        params.now_in_seconds = try mr.readInt(u32);
     }
 
     return params;

@@ -4,7 +4,7 @@ const testing = std.testing;
 const net = std.net;
 
 const message = @import("message.zig");
-const PrimitiveReader = message.PrimitiveReader;
+const MessageReader = message.MessageReader;
 const PrimitiveWriter = message.PrimitiveWriter;
 
 const testutils = @import("testutils.zig");
@@ -64,30 +64,30 @@ pub const SchemaChange = struct {
     target: SchemaChangeTarget,
     options: SchemaChangeOptions,
 
-    pub fn read(allocator: mem.Allocator, pr: *PrimitiveReader) !Self {
+    pub fn read(allocator: mem.Allocator, mr: *MessageReader) !Self {
         var change = Self{
             .type = undefined,
             .target = undefined,
             .options = undefined,
         };
 
-        change.type = std.meta.stringToEnum(SchemaChangeType, (try pr.readString(allocator))) orelse return error.InvalidSchemaChangeType;
-        change.target = std.meta.stringToEnum(SchemaChangeTarget, (try pr.readString(allocator))) orelse return error.InvalidSchemaChangeTarget;
+        change.type = std.meta.stringToEnum(SchemaChangeType, (try mr.readString(allocator))) orelse return error.InvalidSchemaChangeType;
+        change.target = std.meta.stringToEnum(SchemaChangeTarget, (try mr.readString(allocator))) orelse return error.InvalidSchemaChangeTarget;
 
         change.options = SchemaChangeOptions.init();
 
         switch (change.target) {
             .KEYSPACE => {
-                change.options.keyspace = try pr.readString(allocator);
+                change.options.keyspace = try mr.readString(allocator);
             },
             .TABLE, .TYPE => {
-                change.options.keyspace = try pr.readString(allocator);
-                change.options.object_name = try pr.readString(allocator);
+                change.options.keyspace = try mr.readString(allocator);
+                change.options.object_name = try mr.readString(allocator);
             },
             .FUNCTION, .AGGREGATE => {
-                change.options.keyspace = try pr.readString(allocator);
-                change.options.object_name = try pr.readString(allocator);
-                change.options.arguments = try pr.readStringList(allocator);
+                change.options.keyspace = try mr.readString(allocator);
+                change.options.object_name = try mr.readString(allocator);
+                change.options.arguments = try mr.readStringList(allocator);
             },
         }
 

@@ -408,7 +408,7 @@ test "compression algorith: fromString" {
     try testing.expectError(error.InvalidCompressionAlgorithm, CompressionAlgorithm.fromString("foobar"));
 }
 
-pub const PrimitiveReader = struct {
+pub const MessageReader = struct {
     const Self = @This();
 
     buffer: io.FixedBufferStream([]const u8),
@@ -646,82 +646,82 @@ pub const PrimitiveReader = struct {
     }
 };
 
-test "primitive reader: read int" {
-    var pr: PrimitiveReader = undefined;
-    pr.reset("\x00\x20\x11\x00");
-    try testing.expectEqual(@as(i32, 2101504), try pr.readInt(i32));
+test "message reader: read int" {
+    var mr: MessageReader = undefined;
+    mr.reset("\x00\x20\x11\x00");
+    try testing.expectEqual(@as(i32, 2101504), try mr.readInt(i32));
 
-    pr.reset("\x00\x00\x40\x00\x00\x20\x11\x00");
-    try testing.expectEqual(@as(i64, 70368746279168), try pr.readInt(i64));
+    mr.reset("\x00\x00\x40\x00\x00\x20\x11\x00");
+    try testing.expectEqual(@as(i64, 70368746279168), try mr.readInt(i64));
 
-    pr.reset("\x11\x00");
-    try testing.expectEqual(@as(u16, 4352), try pr.readInt(u16));
+    mr.reset("\x11\x00");
+    try testing.expectEqual(@as(u16, 4352), try mr.readInt(u16));
 
-    pr.reset("\xff");
-    try testing.expectEqual(@as(u8, 0xFF), try pr.readByte());
+    mr.reset("\xff");
+    try testing.expectEqual(@as(u8, 0xFF), try mr.readByte());
 }
 
-test "primitive reader: read strings and bytes" {
+test "message reader: read strings and bytes" {
     var arena = testutils.arenaAllocator();
     defer arena.deinit();
 
-    var pr: PrimitiveReader = undefined;
+    var mr: MessageReader = undefined;
     {
         // short string
-        pr.reset("\x00\x06foobar");
-        try testing.expectEqualStrings("foobar", try pr.readString(arena.allocator()));
+        mr.reset("\x00\x06foobar");
+        try testing.expectEqualStrings("foobar", try mr.readString(arena.allocator()));
 
         // long string
-        pr.reset("\x00\x00\x00\x06foobar");
-        try testing.expectEqualStrings("foobar", try pr.readLongString(arena.allocator()));
+        mr.reset("\x00\x00\x00\x06foobar");
+        try testing.expectEqualStrings("foobar", try mr.readLongString(arena.allocator()));
     }
 
     {
         // int32 + bytes
-        pr.reset("\x00\x00\x00\x0A123456789A");
-        try testing.expectEqualStrings("123456789A", (try pr.readBytes(arena.allocator())).?);
+        mr.reset("\x00\x00\x00\x0A123456789A");
+        try testing.expectEqualStrings("123456789A", (try mr.readBytes(arena.allocator())).?);
 
-        pr.reset("\x00\x00\x00\x00");
-        try testing.expectEqualStrings("", (try pr.readBytes(arena.allocator())).?);
+        mr.reset("\x00\x00\x00\x00");
+        try testing.expectEqualStrings("", (try mr.readBytes(arena.allocator())).?);
 
-        pr.reset("\xff\xff\xff\xff");
-        try testing.expect((try pr.readBytes(arena.allocator())) == null);
+        mr.reset("\xff\xff\xff\xff");
+        try testing.expect((try mr.readBytes(arena.allocator())) == null);
     }
 
     {
         // int16 + bytes
-        pr.reset("\x00\x0A123456789A");
-        try testing.expectEqualStrings("123456789A", (try pr.readShortBytes(arena.allocator())).?);
+        mr.reset("\x00\x0A123456789A");
+        try testing.expectEqualStrings("123456789A", (try mr.readShortBytes(arena.allocator())).?);
 
-        pr.reset("\x00\x00");
-        try testing.expectEqualStrings("", (try pr.readShortBytes(arena.allocator())).?);
+        mr.reset("\x00\x00");
+        try testing.expectEqualStrings("", (try mr.readShortBytes(arena.allocator())).?);
 
-        pr.reset("\xff\xff");
-        try testing.expect((try pr.readShortBytes(arena.allocator())) == null);
+        mr.reset("\xff\xff");
+        try testing.expect((try mr.readShortBytes(arena.allocator())) == null);
     }
 }
 
-test "primitive reader: read uuid" {
+test "message reader: read uuid" {
     var arena = testutils.arenaAllocator();
     defer arena.deinit();
 
     var uuid: [16]u8 = undefined;
     try std.posix.getrandom(&uuid);
 
-    var pr: PrimitiveReader = undefined;
-    pr.reset(&uuid);
+    var mr: MessageReader = undefined;
+    mr.reset(&uuid);
 
-    try testing.expectEqualSlices(u8, &uuid, &(try pr.readUUID()));
+    try testing.expectEqualSlices(u8, &uuid, &(try mr.readUUID()));
 }
 
-test "primitive reader: read string list" {
+test "message reader: read string list" {
     var arena = testutils.arenaAllocator();
     defer arena.deinit();
 
-    var pr: PrimitiveReader = undefined;
-    pr.reset("\x00\x02\x00\x03foo\x00\x03bar");
+    var mr: MessageReader = undefined;
+    mr.reset("\x00\x02\x00\x03foo\x00\x03bar");
 
-    const result = try pr.readStringList(arena.allocator());
+    const result = try mr.readStringList(arena.allocator());
     try testing.expectEqual(@as(usize, 2), result.len);
 
     var tmp = result[0];
@@ -731,28 +731,28 @@ test "primitive reader: read string list" {
     try testing.expectEqualStrings("bar", tmp);
 }
 
-test "primitive reader: read value" {
+test "message reader: read value" {
     var arena = testutils.arenaAllocator();
     defer arena.deinit();
 
     // Normal value
-    var pr: PrimitiveReader = undefined;
-    pr.reset("\x00\x00\x00\x02\x61\x62");
+    var mr: MessageReader = undefined;
+    mr.reset("\x00\x00\x00\x02\x61\x62");
 
-    const value = try pr.readValue(arena.allocator());
+    const value = try mr.readValue(arena.allocator());
     try testing.expect(value == .Set);
     try testing.expectEqualStrings("ab", value.Set);
 
     // Null value
 
-    pr.reset("\xff\xff\xff\xff");
-    const value2 = try pr.readValue(arena.allocator());
+    mr.reset("\xff\xff\xff\xff");
+    const value2 = try mr.readValue(arena.allocator());
     try testing.expect(value2 == .Null);
 
     // "Not set" value
 
-    pr.reset("\xff\xff\xff\xfe");
-    const value3 = try pr.readValue(arena.allocator());
+    mr.reset("\xff\xff\xff\xfe");
+    const value3 = try mr.readValue(arena.allocator());
     try testing.expect(value3 == .NotSet);
 }
 
@@ -765,14 +765,14 @@ test "read unsigned vint" {
     try pw.writeUnsignedVint(@as(u32, 140022));
     try pw.writeUnsignedVint(@as(u16, 24450));
 
-    var pr: PrimitiveReader = undefined;
-    pr.reset(pw.getWritten());
+    var mr: MessageReader = undefined;
+    mr.reset(pw.getWritten());
 
-    const n1 = try pr.readUnsignedVint(u64);
+    const n1 = try mr.readUnsignedVint(u64);
     try testing.expect(n1 == @as(u64, 282240));
-    const n2 = try pr.readUnsignedVint(u32);
+    const n2 = try mr.readUnsignedVint(u32);
     try testing.expect(n2 == @as(u32, 140022));
-    const n3 = try pr.readUnsignedVint(u16);
+    const n3 = try mr.readUnsignedVint(u16);
     try testing.expect(n3 == @as(u16, 24450));
 }
 
@@ -786,59 +786,59 @@ test "read vint" {
     try pw.writeVint(@as(i32, -38000));
     try pw.writeVint(@as(i32, 80000000));
 
-    var pr: PrimitiveReader = undefined;
-    pr.reset(pw.getWritten());
+    var mr: MessageReader = undefined;
+    mr.reset(pw.getWritten());
 
-    const n1 = try pr.readVint(i64);
+    const n1 = try mr.readVint(i64);
     try testing.expect(n1 == @as(i64, 282240));
-    const n2 = try pr.readVint(i64);
+    const n2 = try mr.readVint(i64);
     try testing.expect(n2 == @as(i64, -2400));
-    const n3 = try pr.readVint(i32);
+    const n3 = try mr.readVint(i32);
     try testing.expect(n3 == @as(i32, -38000));
-    const n4 = try pr.readVint(i32);
+    const n4 = try mr.readVint(i32);
     try testing.expect(n4 == @as(i32, 80000000));
 }
 
-test "primitive reader: read inet and inetaddr" {
+test "message reader: read inet and inetaddr" {
     var arena = testutils.arenaAllocator();
     defer arena.deinit();
 
-    var pr: PrimitiveReader = undefined;
+    var mr: MessageReader = undefined;
 
     // IPv4
-    pr.reset("\x04\x12\x34\x56\x78\x00\x00\x00\x22");
+    mr.reset("\x04\x12\x34\x56\x78\x00\x00\x00\x22");
 
-    var result = try pr.readInet();
+    var result = try mr.readInet();
     try testing.expectEqual(@as(u16, posix.AF.INET), result.any.family);
     try testing.expectEqual(@as(u32, 0x78563412), result.in.sa.addr);
     try testing.expectEqual(@as(u16, 34), result.getPort());
 
     // IPv6
-    pr.reset("\x10\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\x00\x00\x00\x22");
+    mr.reset("\x10\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\x00\x00\x00\x22");
 
-    result = try pr.readInet();
+    result = try mr.readInet();
     try testing.expectEqual(@as(u16, posix.AF.INET6), result.any.family);
     try testing.expectEqualSlices(u8, &[_]u8{0xff} ** 16, &result.in6.sa.addr);
     try testing.expectEqual(@as(u16, 34), result.getPort());
 
     // IPv4 without port
-    pr.reset("\x04\x12\x34\x56\x78");
+    mr.reset("\x04\x12\x34\x56\x78");
 
-    result = try pr.readInetaddr();
+    result = try mr.readInetaddr();
     try testing.expectEqual(@as(u16, posix.AF.INET), result.any.family);
     try testing.expectEqual(@as(u32, 0x78563412), result.in.sa.addr);
     try testing.expectEqual(@as(u16, 0), result.getPort());
 
     // IPv6 without port
-    pr.reset("\x10\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff");
+    mr.reset("\x10\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff");
 
-    result = try pr.readInetaddr();
+    result = try mr.readInetaddr();
     try testing.expectEqual(@as(u16, posix.AF.INET6), result.any.family);
     try testing.expectEqualSlices(u8, &[_]u8{0xff} ** 16, &result.in6.sa.addr);
     try testing.expectEqual(@as(u16, 0), result.getPort());
 }
 
-test "primitive reader: read consistency" {
+test "message reader: read consistency" {
     var arena = testutils.arenaAllocator();
     defer arena.deinit();
 
@@ -862,24 +862,24 @@ test "primitive reader: read consistency" {
     };
 
     for (testCases) |tc| {
-        var pr: PrimitiveReader = undefined;
-        pr.reset(tc.b);
+        var mr: MessageReader = undefined;
+        mr.reset(tc.b);
 
-        const result = try pr.readConsistency();
+        const result = try mr.readConsistency();
         try testing.expectEqual(tc.exp, result);
     }
 }
 
-test "primitive reader: read stringmap" {
+test "message reader: read stringmap" {
     var arena = testutils.arenaAllocator();
     defer arena.deinit();
 
     // 2 elements string map
 
-    var pr: PrimitiveReader = undefined;
-    pr.reset("\x00\x02\x00\x03foo\x00\x03baz\x00\x03bar\x00\x03baz");
+    var mr: MessageReader = undefined;
+    mr.reset("\x00\x02\x00\x03foo\x00\x03baz\x00\x03bar\x00\x03baz");
 
-    var result = try pr.readStringMap(arena.allocator());
+    var result = try mr.readStringMap(arena.allocator());
     try testing.expectEqual(@as(usize, 2), result.count());
 
     var it = result.iterator();
@@ -889,16 +889,16 @@ test "primitive reader: read stringmap" {
     }
 }
 
-test "primitive reader: read string multimap" {
+test "message reader: read string multimap" {
     var arena = testutils.arenaAllocator();
     defer arena.deinit();
 
     // 1 key, 2 values multimap
 
-    var pr: PrimitiveReader = undefined;
-    pr.reset("\x00\x01\x00\x03foo\x00\x02\x00\x03bar\x00\x03baz");
+    var mr: MessageReader = undefined;
+    mr.reset("\x00\x01\x00\x03foo\x00\x02\x00\x03bar\x00\x03baz");
 
-    var result = try pr.readStringMultimap(arena.allocator());
+    var result = try mr.readStringMultimap(arena.allocator());
     try testing.expectEqual(@as(usize, 1), result.count());
 
     const slice = result.get("foo").?;

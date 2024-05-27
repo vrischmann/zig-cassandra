@@ -10,15 +10,15 @@ const OptionID = message.OptionID;
 const ProtocolVersion = message.ProtocolVersion;
 const Value = message.Value;
 const Values = message.Values;
-const PrimitiveReader = message.PrimitiveReader;
+const MessageReader = message.MessageReader;
 
 pub const GlobalTableSpec = struct {
     keyspace: []const u8,
     table: []const u8,
 };
 
-fn readOptionID(pr: *PrimitiveReader) !OptionID {
-    return @enumFromInt(try pr.readInt(u16));
+fn readOptionID(mr: *MessageReader) !OptionID {
+    return @enumFromInt(try mr.readInt(u16));
 }
 
 pub const ColumnSpec = struct {
@@ -44,7 +44,7 @@ pub const ColumnSpec = struct {
         if (self.custom_class_name) |str| allocator.free(str);
     }
 
-    pub fn read(allocator: mem.Allocator, pr: *PrimitiveReader, has_global_table_spec: bool) !Self {
+    pub fn read(allocator: mem.Allocator, mr: *MessageReader, has_global_table_spec: bool) !Self {
         var spec = Self{
             .keyspace = null,
             .table = null,
@@ -57,28 +57,28 @@ pub const ColumnSpec = struct {
         };
 
         if (!has_global_table_spec) {
-            spec.keyspace = try pr.readString(allocator);
-            spec.table = try pr.readString(allocator);
+            spec.keyspace = try mr.readString(allocator);
+            spec.table = try mr.readString(allocator);
         }
-        spec.name = try pr.readString(allocator);
-        spec.option = try readOptionID(pr);
+        spec.name = try mr.readString(allocator);
+        spec.option = try readOptionID(mr);
 
         switch (spec.option) {
             .Tuple => unreachable,
             .UDT => unreachable,
             .Custom => {
-                spec.custom_class_name = try pr.readString(allocator);
+                spec.custom_class_name = try mr.readString(allocator);
             },
             .List, .Set => {
-                const option = try readOptionID(pr);
+                const option = try readOptionID(mr);
                 spec.listset_element_type_option = option;
                 if (option == .Custom) {
-                    spec.custom_class_name = try pr.readString(allocator);
+                    spec.custom_class_name = try mr.readString(allocator);
                 }
             },
             .Map => {
-                spec.map_key_type_option = try readOptionID(pr);
-                spec.map_value_type_option = try readOptionID(pr);
+                spec.map_key_type_option = try readOptionID(mr);
+                spec.map_value_type_option = try readOptionID(mr);
             },
             else => {},
         }
@@ -118,7 +118,7 @@ pub const RowsMetadata = struct {
         allocator.free(self.column_specs);
     }
 
-    pub fn read(allocator: mem.Allocator, protocol_version: ProtocolVersion, pr: *PrimitiveReader) !Self {
+    pub fn read(allocator: mem.Allocator, protocol_version: ProtocolVersion, mr: *MessageReader) !Self {
         var metadata = Self{
             .paging_state = null,
             .new_metadata_id = null,
@@ -127,15 +127,15 @@ pub const RowsMetadata = struct {
             .column_specs = undefined,
         };
 
-        const flags = try pr.readInt(u32);
-        metadata.columns_count = @as(usize, try pr.readInt(u32));
+        const flags = try mr.readInt(u32);
+        metadata.columns_count = @as(usize, try mr.readInt(u32));
 
         if (flags & FlagHasMorePages == FlagHasMorePages) {
-            metadata.paging_state = try pr.readBytes(allocator);
+            metadata.paging_state = try mr.readBytes(allocator);
         }
         if (protocol_version.is(5)) {
             if (flags & FlagMetadataChanged == FlagMetadataChanged) {
-                metadata.new_metadata_id = try pr.readShortBytes(allocator);
+                metadata.new_metadata_id = try mr.readShortBytes(allocator);
             }
         }
 
@@ -145,8 +145,8 @@ pub const RowsMetadata = struct {
 
         if (flags & FlagGlobalTablesSpec == FlagGlobalTablesSpec) {
             const spec = GlobalTableSpec{
-                .keyspace = try pr.readString(allocator),
-                .table = try pr.readString(allocator),
+                .keyspace = try mr.readString(allocator),
+                .table = try mr.readString(allocator),
             };
             metadata.global_table_spec = spec;
         }
@@ -154,7 +154,7 @@ pub const RowsMetadata = struct {
         var column_specs = try allocator.alloc(ColumnSpec, metadata.columns_count);
         var i: usize = 0;
         while (i < metadata.columns_count) : (i += 1) {
-            column_specs[i] = try ColumnSpec.read(allocator, pr, metadata.global_table_spec != null);
+            column_specs[i] = try ColumnSpec.read(allocator, mr, metadata.global_table_spec != null);
         }
         metadata.column_specs = column_specs;
 
@@ -185,18 +185,18 @@ pub const PreparedMetadata = struct {
         allocator.free(self.column_specs);
     }
 
-    pub fn read(allocator: mem.Allocator, protocol_version: ProtocolVersion, pr: *PrimitiveReader) !Self {
+    pub fn read(allocator: mem.Allocator, protocol_version: ProtocolVersion, mr: *MessageReader) !Self {
         var metadata = Self{
             .global_table_spec = null,
             .pk_indexes = undefined,
             .column_specs = undefined,
         };
 
-        const flags = try pr.readInt(u32);
-        const columns_count = @as(usize, try pr.readInt(u32));
+        const flags = try mr.readInt(u32);
+        const columns_count = @as(usize, try mr.readInt(u32));
 
         if (protocol_version.isAtLeast(4)) {
-            const pk_count = @as(usize, try pr.readInt(u32));
+            const pk_count = @as(usize, try mr.readInt(u32));
 
             // Read the partition key indexes
 
@@ -205,7 +205,7 @@ pub const PreparedMetadata = struct {
 
             var i: usize = 0;
             while (i < pk_count) : (i += 1) {
-                pk_indexes[i] = try pr.readInt(u16);
+                pk_indexes[i] = try mr.readInt(u16);
             }
             metadata.pk_indexes = pk_indexes;
         }
@@ -214,8 +214,8 @@ pub const PreparedMetadata = struct {
 
         if (flags & FlagGlobalTablesSpec == FlagGlobalTablesSpec) {
             const spec = GlobalTableSpec{
-                .keyspace = try pr.readString(allocator),
-                .table = try pr.readString(allocator),
+                .keyspace = try mr.readString(allocator),
+                .table = try mr.readString(allocator),
             };
             metadata.global_table_spec = spec;
         }
@@ -227,7 +227,7 @@ pub const PreparedMetadata = struct {
 
         var i: usize = 0;
         while (i < columns_count) : (i += 1) {
-            column_specs[i] = try ColumnSpec.read(allocator, pr, metadata.global_table_spec != null);
+            column_specs[i] = try ColumnSpec.read(allocator, mr, metadata.global_table_spec != null);
         }
         metadata.column_specs = column_specs;
 

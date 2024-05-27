@@ -22,7 +22,7 @@ const Opcode = message.Opcode;
 const ProtocolVersion = message.ProtocolVersion;
 const CompressionAlgorithm = message.CompressionAlgorithm;
 const CQLVersion = message.CQLVersion;
-const PrimitiveReader = message.PrimitiveReader;
+const MessageReader = message.MessageReader;
 const PrimitiveWriter = message.PrimitiveWriter;
 
 const frame = @import("frame.zig");
@@ -107,7 +107,7 @@ pub const Connection = struct {
     /// Helpers types needed to decode the CQL protocol.
     raw_frame_reader: RawFrameReaderType,
     raw_frame_writer: RawFrameWriterType,
-    primitive_reader: PrimitiveReader,
+    message_reader: MessageReader,
     primitive_writer: PrimitiveWriter,
 
     // Negotiated with the server
@@ -125,7 +125,7 @@ pub const Connection = struct {
 
         self.raw_frame_reader = RawFrameReaderType.init(self.buffered_reader.reader());
         self.raw_frame_writer = RawFrameWriterType.init(self.buffered_writer.writer());
-        PrimitiveReader.reset(&self.primitive_reader, "");
+        MessageReader.reset(&self.message_reader, "");
 
         var dummy_diags = InitOptions.Diagnostics{};
         const diags = options.diags orelse &dummy_diags;
@@ -353,22 +353,22 @@ pub const Connection = struct {
         const raw_frame = try self.readRawFrame(allocator);
         defer raw_frame.deinit(allocator);
 
-        self.primitive_reader.reset(raw_frame.body);
+        self.message_reader.reset(raw_frame.body);
 
         const frame_allocator = if (options) |opts| opts.frame_allocator else allocator;
 
         return switch (raw_frame.header.opcode) {
-            .Error => Frame{ .Error = try ErrorFrame.read(frame_allocator, &self.primitive_reader) },
-            .Startup => Frame{ .Startup = try StartupFrame.read(frame_allocator, &self.primitive_reader) },
+            .Error => Frame{ .Error = try ErrorFrame.read(frame_allocator, &self.message_reader) },
+            .Startup => Frame{ .Startup = try StartupFrame.read(frame_allocator, &self.message_reader) },
             .Ready => Frame{ .Ready = ReadyFrame{} },
             .Options => Frame{ .Options = {} },
-            .Supported => Frame{ .Supported = try SupportedFrame.read(frame_allocator, &self.primitive_reader) },
-            .Result => Frame{ .Result = try ResultFrame.read(frame_allocator, self.options.protocol_version, &self.primitive_reader) },
+            .Supported => Frame{ .Supported = try SupportedFrame.read(frame_allocator, &self.message_reader) },
+            .Result => Frame{ .Result = try ResultFrame.read(frame_allocator, self.options.protocol_version, &self.message_reader) },
             .Register => Frame{ .Register = {} },
-            .Event => Frame{ .Event = try EventFrame.read(frame_allocator, &self.primitive_reader) },
-            .Authenticate => Frame{ .Authenticate = try AuthenticateFrame.read(frame_allocator, &self.primitive_reader) },
-            .AuthChallenge => Frame{ .AuthChallenge = try AuthChallengeFrame.read(frame_allocator, &self.primitive_reader) },
-            .AuthSuccess => Frame{ .AuthSuccess = try AuthSuccessFrame.read(frame_allocator, &self.primitive_reader) },
+            .Event => Frame{ .Event = try EventFrame.read(frame_allocator, &self.message_reader) },
+            .Authenticate => Frame{ .Authenticate = try AuthenticateFrame.read(frame_allocator, &self.message_reader) },
+            .AuthChallenge => Frame{ .AuthChallenge = try AuthChallengeFrame.read(frame_allocator, &self.message_reader) },
+            .AuthSuccess => Frame{ .AuthSuccess = try AuthSuccessFrame.read(frame_allocator, &self.message_reader) },
             else => std.debug.panic("invalid read frame {}\n", .{raw_frame.header.opcode}),
         };
     }

@@ -15,7 +15,7 @@ const OptionID = message.OptionID;
 const ProtocolVersion = message.ProtocolVersion;
 const Value = message.Value;
 const Values = message.Values;
-const PrimitiveReader = message.PrimitiveReader;
+const MessageReader = message.MessageReader;
 const PrimitiveWriter = message.PrimitiveWriter;
 const CQLVersion = message.CQLVersion;
 const BatchType = message.BatchType;
@@ -209,7 +209,7 @@ pub const ErrorFrame = struct {
     already_exists: ?AlreadyExistsError,
     unprepared: ?UnpreparedError,
 
-    pub fn read(allocator: mem.Allocator, pr: *PrimitiveReader) !Self {
+    pub fn read(allocator: mem.Allocator, br: *MessageReader) !Self {
         var frame = Self{
             .error_code = undefined,
             .message = undefined,
@@ -224,56 +224,56 @@ pub const ErrorFrame = struct {
             .unprepared = null,
         };
 
-        frame.error_code = @enumFromInt(try pr.readInt(u32));
-        frame.message = try pr.readString(allocator);
+        frame.error_code = @enumFromInt(try br.readInt(u32));
+        frame.message = try br.readString(allocator);
 
         switch (frame.error_code) {
             .UnavailableReplicas => {
                 frame.unavailable_replicas = UnavailableReplicasError{
-                    .consistency_level = try pr.readConsistency(),
-                    .required = try pr.readInt(u32),
-                    .alive = try pr.readInt(u32),
+                    .consistency_level = try br.readConsistency(),
+                    .required = try br.readInt(u32),
+                    .alive = try br.readInt(u32),
                 };
             },
             .FunctionFailure => {
                 frame.function_failure = FunctionFailureError{
-                    .keyspace = try pr.readString(allocator),
-                    .function = try pr.readString(allocator),
-                    .arg_types = try pr.readStringList(allocator),
+                    .keyspace = try br.readString(allocator),
+                    .function = try br.readString(allocator),
+                    .arg_types = try br.readStringList(allocator),
                 };
             },
             .WriteTimeout => {
                 var write_timeout = WriteError.Timeout{
-                    .consistency_level = try pr.readConsistency(),
-                    .received = try pr.readInt(u32),
-                    .block_for = try pr.readInt(u32),
+                    .consistency_level = try br.readConsistency(),
+                    .received = try br.readInt(u32),
+                    .block_for = try br.readInt(u32),
                     .write_type = undefined,
                     .contentions = null,
                 };
 
-                const write_type_string = try pr.readString(allocator);
+                const write_type_string = try br.readString(allocator);
                 defer allocator.free(write_type_string);
 
                 write_timeout.write_type = std.meta.stringToEnum(WriteError.WriteType, write_type_string) orelse return error.InvalidWriteType;
                 if (write_timeout.write_type == .CAS) {
-                    write_timeout.contentions = try pr.readInt(u16);
+                    write_timeout.contentions = try br.readInt(u16);
                 }
 
                 frame.write_timeout = write_timeout;
             },
             .ReadTimeout => {
                 frame.read_timeout = ReadError.Timeout{
-                    .consistency_level = try pr.readConsistency(),
-                    .received = try pr.readInt(u32),
-                    .block_for = try pr.readInt(u32),
-                    .data_present = try pr.readByte(),
+                    .consistency_level = try br.readConsistency(),
+                    .received = try br.readInt(u32),
+                    .block_for = try br.readInt(u32),
+                    .data_present = try br.readByte(),
                 };
             },
             .WriteFailure => {
                 var write_failure = WriteError.Failure{
-                    .consistency_level = try pr.readConsistency(),
-                    .received = try pr.readInt(u32),
-                    .block_for = try pr.readInt(u32),
+                    .consistency_level = try br.readConsistency(),
+                    .received = try br.readInt(u32),
+                    .block_for = try br.readInt(u32),
                     .reason_map = undefined,
                     .write_type = undefined,
                 };
@@ -285,12 +285,12 @@ pub const ErrorFrame = struct {
                 var reason_map = std.ArrayList(WriteError.Failure.Reason).init(allocator);
                 errdefer reason_map.deinit();
 
-                const n = try pr.readInt(u32);
+                const n = try br.readInt(u32);
                 var i: usize = 0;
                 while (i < n) : (i += 1) {
                     const reason = WriteError.Failure.Reason{
-                        .endpoint = try pr.readInetaddr(),
-                        .failure_code = try pr.readInt(u16),
+                        .endpoint = try br.readInetaddr(),
+                        .failure_code = try br.readInt(u16),
                     };
                     _ = try reason_map.append(reason);
                 }
@@ -298,7 +298,7 @@ pub const ErrorFrame = struct {
 
                 // Read the rest
 
-                const write_type_string = try pr.readString(allocator);
+                const write_type_string = try br.readString(allocator);
                 defer allocator.free(write_type_string);
 
                 write_failure.write_type = std.meta.stringToEnum(WriteError.WriteType, write_type_string) orelse return error.InvalidWriteType;
@@ -307,9 +307,9 @@ pub const ErrorFrame = struct {
             },
             .ReadFailure => {
                 var read_failure = ReadError.Failure{
-                    .consistency_level = try pr.readConsistency(),
-                    .received = try pr.readInt(u32),
-                    .block_for = try pr.readInt(u32),
+                    .consistency_level = try br.readConsistency(),
+                    .received = try br.readInt(u32),
+                    .block_for = try br.readInt(u32),
                     .reason_map = undefined,
                     .data_present = undefined,
                 };
@@ -319,12 +319,12 @@ pub const ErrorFrame = struct {
                 var reason_map = std.ArrayList(ReadError.Failure.Reason).init(allocator);
                 errdefer reason_map.deinit();
 
-                const n = try pr.readInt(u32);
+                const n = try br.readInt(u32);
                 var i: usize = 0;
                 while (i < n) : (i += 1) {
                     const reason = ReadError.Failure.Reason{
-                        .endpoint = try pr.readInetaddr(),
-                        .failure_code = try pr.readInt(u16),
+                        .endpoint = try br.readInetaddr(),
+                        .failure_code = try br.readInt(u16),
                     };
                     _ = try reason_map.append(reason);
                 }
@@ -332,25 +332,25 @@ pub const ErrorFrame = struct {
 
                 // Read the rest
 
-                read_failure.data_present = try pr.readByte();
+                read_failure.data_present = try br.readByte();
 
                 frame.read_failure = read_failure;
             },
             .CASWriteUnknown => {
                 frame.cas_write_unknown = WriteError.CASUnknown{
-                    .consistency_level = try pr.readConsistency(),
-                    .received = try pr.readInt(u32),
-                    .block_for = try pr.readInt(u32),
+                    .consistency_level = try br.readConsistency(),
+                    .received = try br.readInt(u32),
+                    .block_for = try br.readInt(u32),
                 };
             },
             .AlreadyExists => {
                 frame.already_exists = AlreadyExistsError{
-                    .keyspace = try pr.readString(allocator),
-                    .table = try pr.readString(allocator),
+                    .keyspace = try br.readString(allocator),
+                    .table = try br.readString(allocator),
                 };
             },
             .Unprepared => {
-                if (try pr.readShortBytes(allocator)) |statement_id| {
+                if (try br.readShortBytes(allocator)) |statement_id| {
                     frame.unprepared = UnpreparedError{
                         .statement_id = statement_id,
                     };
@@ -375,9 +375,9 @@ test "error frame: invalid query, no keyspace specified" {
 
     try checkHeader(Opcode.Error, data.len, raw_frame.header);
 
-    var pr: PrimitiveReader = undefined;
-    pr.reset(raw_frame.body);
-    const frame = try ErrorFrame.read(arena.allocator(), &pr);
+    var mr: MessageReader = undefined;
+    mr.reset(raw_frame.body);
+    const frame = try ErrorFrame.read(arena.allocator(), &mr);
 
     try testing.expectEqual(ErrorCode.InvalidQuery, frame.error_code);
     try testing.expectEqualStrings("No keyspace has been specified. USE a keyspace, or explicitly specify keyspace.tablename", frame.message);
@@ -392,9 +392,9 @@ test "error frame: already exists" {
 
     try checkHeader(Opcode.Error, data.len, raw_frame.header);
 
-    var pr: PrimitiveReader = undefined;
-    pr.reset(raw_frame.body);
-    const frame = try ErrorFrame.read(arena.allocator(), &pr);
+    var mr: MessageReader = undefined;
+    mr.reset(raw_frame.body);
+    const frame = try ErrorFrame.read(arena.allocator(), &mr);
 
     try testing.expectEqual(ErrorCode.AlreadyExists, frame.error_code);
     try testing.expectEqualStrings("Cannot add already existing table \"hello\" to keyspace \"foobar\"", frame.message);
@@ -412,9 +412,9 @@ test "error frame: syntax error" {
 
     try checkHeader(Opcode.Error, data.len, raw_frame.header);
 
-    var pr: PrimitiveReader = undefined;
-    pr.reset(raw_frame.body);
-    const frame = try ErrorFrame.read(arena.allocator(), &pr);
+    var mr: MessageReader = undefined;
+    mr.reset(raw_frame.body);
+    const frame = try ErrorFrame.read(arena.allocator(), &mr);
 
     try testing.expectEqual(ErrorCode.SyntaxError, frame.error_code);
     try testing.expectEqualStrings("line 2:0 mismatched input ';' expecting K_FROM (select*[;])", frame.message);
@@ -468,13 +468,13 @@ pub const StartupFrame = struct {
         }
     }
 
-    pub fn read(allocator: mem.Allocator, pr: *PrimitiveReader) !Self {
+    pub fn read(allocator: mem.Allocator, br: *MessageReader) !Self {
         var frame = Self{
             .cql_version = undefined,
             .compression = null,
         };
 
-        const map = try pr.readStringMap(allocator);
+        const map = try br.readStringMap(allocator);
 
         // CQL_VERSION is mandatory and the only version supported is 3.0.0 right now.
         if (map.getEntry("CQL_VERSION")) |entry| {
@@ -511,9 +511,9 @@ test "startup frame" {
 
     try checkHeader(Opcode.Startup, exp.len, raw_frame.header);
 
-    var pr: PrimitiveReader = undefined;
-    pr.reset(raw_frame.body);
-    const frame = try StartupFrame.read(arena.allocator(), &pr);
+    var mr: MessageReader = undefined;
+    mr.reset(raw_frame.body);
+    const frame = try StartupFrame.read(arena.allocator(), &mr);
 
     try testing.expectEqual(CQLVersion{ .major = 3, .minor = 0, .patch = 0 }, frame.cql_version);
     try testing.expect(frame.compression == null);
@@ -543,18 +543,18 @@ pub const ExecuteFrame = struct {
         _ = try self.query_parameters.write(protocol_version, pw);
     }
 
-    pub fn read(allocator: mem.Allocator, protocol_version: ProtocolVersion, pr: *PrimitiveReader) !Self {
+    pub fn read(allocator: mem.Allocator, protocol_version: ProtocolVersion, br: *MessageReader) !Self {
         var frame = Self{
             .query_id = undefined,
             .result_metadata_id = null,
             .query_parameters = undefined,
         };
 
-        frame.query_id = (try pr.readShortBytes(allocator)) orelse &[_]u8{};
+        frame.query_id = (try br.readShortBytes(allocator)) orelse &[_]u8{};
         if (protocol_version.is(5)) {
-            frame.result_metadata_id = try pr.readShortBytes(allocator);
+            frame.result_metadata_id = try br.readShortBytes(allocator);
         }
-        frame.query_parameters = try QueryParameters.read(allocator, protocol_version, pr);
+        frame.query_parameters = try QueryParameters.read(allocator, protocol_version, br);
 
         return frame;
     }
@@ -571,9 +571,9 @@ test "execute frame" {
 
     try checkHeader(Opcode.Execute, exp.len, raw_frame.header);
 
-    var pr: PrimitiveReader = undefined;
-    pr.reset(raw_frame.body);
-    const frame = try ExecuteFrame.read(arena.allocator(), raw_frame.header.version, &pr);
+    var mr: MessageReader = undefined;
+    mr.reset(raw_frame.body);
+    const frame = try ExecuteFrame.read(arena.allocator(), raw_frame.header.version, &mr);
 
     const exp_query_id = "\x97\x97\x95\x6d\xfe\xb2\x4c\x99\x86\x8e\xd3\x84\xff\x6f\xd9\x4c";
     try testing.expectEqualSlices(u8, exp_query_id, frame.query_id);
@@ -601,9 +601,9 @@ test "execute frame" {
 pub const AuthenticateFrame = struct {
     authenticator: []const u8,
 
-    pub fn read(allocator: mem.Allocator, pr: *PrimitiveReader) !AuthenticateFrame {
+    pub fn read(allocator: mem.Allocator, br: *MessageReader) !AuthenticateFrame {
         return AuthenticateFrame{
-            .authenticator = try pr.readString(allocator),
+            .authenticator = try br.readString(allocator),
         };
     }
 };
@@ -618,9 +618,9 @@ pub const AuthResponseFrame = struct {
         return pw.writeBytes(self.token);
     }
 
-    pub fn read(allocator: mem.Allocator, pr: *PrimitiveReader) !AuthResponseFrame {
+    pub fn read(allocator: mem.Allocator, br: *MessageReader) !AuthResponseFrame {
         return AuthResponseFrame{
-            .token = try pr.readBytes(allocator),
+            .token = try br.readBytes(allocator),
         };
     }
 };
@@ -631,9 +631,9 @@ pub const AuthResponseFrame = struct {
 pub const AuthChallengeFrame = struct {
     token: ?[]const u8,
 
-    pub fn read(allocator: mem.Allocator, pr: *PrimitiveReader) !AuthChallengeFrame {
+    pub fn read(allocator: mem.Allocator, br: *MessageReader) !AuthChallengeFrame {
         return AuthChallengeFrame{
-            .token = try pr.readBytes(allocator),
+            .token = try br.readBytes(allocator),
         };
     }
 };
@@ -644,9 +644,9 @@ pub const AuthChallengeFrame = struct {
 pub const AuthSuccessFrame = struct {
     token: ?[]const u8,
 
-    pub fn read(allocator: mem.Allocator, pr: *PrimitiveReader) !AuthSuccessFrame {
+    pub fn read(allocator: mem.Allocator, br: *MessageReader) !AuthSuccessFrame {
         return AuthSuccessFrame{
-            .token = try pr.readBytes(allocator),
+            .token = try br.readBytes(allocator),
         };
     }
 };
@@ -662,13 +662,11 @@ test "authenticate frame" {
 
     try checkHeader(Opcode.Authenticate, exp.len, raw_frame.header);
 
-    var pr: PrimitiveReader = undefined;
-    pr.reset(raw_frame.body);
-    const foo = try pr.readString(arena.allocator());
-    _ = foo;
-    // const frame = try AuthenticateFrame.read(arena.allocator(), &pr);
-    //
-    // try testing.expectEqualStrings("org.apache.cassandra.auth.PasswordAuthenticator", frame.authenticator);
+    var mr: MessageReader = undefined;
+    mr.reset(raw_frame.body);
+    const frame = try AuthenticateFrame.read(arena.allocator(), &mr);
+
+    try testing.expectEqualStrings("org.apache.cassandra.auth.PasswordAuthenticator", frame.authenticator);
 }
 
 test "auth challenge frame" {
@@ -686,9 +684,9 @@ test "auth response frame" {
 
     try checkHeader(Opcode.AuthResponse, exp.len, raw_frame.header);
 
-    var pr: PrimitiveReader = undefined;
-    pr.reset(raw_frame.body);
-    const frame = try AuthResponseFrame.read(arena.allocator(), &pr);
+    var mr: MessageReader = undefined;
+    mr.reset(raw_frame.body);
+    const frame = try AuthResponseFrame.read(arena.allocator(), &mr);
 
     const exp_token = "\x00cassandra\x00cassandra";
     try testing.expectEqualSlices(u8, exp_token, frame.token.?);
@@ -709,9 +707,9 @@ test "auth success frame" {
 
     try checkHeader(Opcode.AuthSuccess, exp.len, raw_frame.header);
 
-    var pr: PrimitiveReader = undefined;
-    pr.reset(raw_frame.body);
-    const frame = try AuthSuccessFrame.read(arena.allocator(), &pr);
+    var mr: MessageReader = undefined;
+    mr.reset(raw_frame.body);
+    const frame = try AuthSuccessFrame.read(arena.allocator(), &mr);
 
     try testing.expect(frame.token == null);
 }
@@ -753,27 +751,27 @@ const BatchQuery = struct {
         }
     }
 
-    pub fn read(allocator: mem.Allocator, pr: *PrimitiveReader) !BatchQuery {
+    pub fn read(allocator: mem.Allocator, br: *MessageReader) !BatchQuery {
         var query = Self{
             .query_string = null,
             .query_id = null,
             .values = undefined,
         };
 
-        const kind = try pr.readByte();
+        const kind = try br.readByte();
         switch (kind) {
-            0 => query.query_string = try pr.readLongString(allocator),
-            1 => query.query_id = try pr.readShortBytes(allocator),
+            0 => query.query_string = try br.readLongString(allocator),
+            1 => query.query_id = try br.readShortBytes(allocator),
             else => return error.InvalidQueryKind,
         }
 
         var list = std.ArrayList(Value).init(allocator);
         errdefer list.deinit();
 
-        const n_values = try pr.readInt(u16);
+        const n_values = try br.readInt(u16);
         var j: usize = 0;
         while (j < @as(usize, n_values)) : (j += 1) {
-            const value = try pr.readValue(allocator);
+            const value = try br.readValue(allocator);
             _ = try list.append(value);
         }
 
@@ -844,7 +842,7 @@ pub const BatchFrame = struct {
         // Write the remaining body
     }
 
-    pub fn read(allocator: mem.Allocator, protocol_version: ProtocolVersion, pr: *PrimitiveReader) !Self {
+    pub fn read(allocator: mem.Allocator, protocol_version: ProtocolVersion, br: *MessageReader) !Self {
         var frame = Self{
             .batch_type = undefined,
             .queries = undefined,
@@ -855,7 +853,7 @@ pub const BatchFrame = struct {
             .now_in_seconds = null,
         };
 
-        frame.batch_type = @enumFromInt(try pr.readByte());
+        frame.batch_type = @enumFromInt(try br.readByte());
         frame.queries = &[_]BatchQuery{};
 
         // Read all queries in the batch
@@ -863,10 +861,10 @@ pub const BatchFrame = struct {
         var queries = std.ArrayList(BatchQuery).init(allocator);
         errdefer queries.deinit();
 
-        const n = try pr.readInt(u16);
+        const n = try br.readInt(u16);
         var i: usize = 0;
         while (i < @as(usize, n)) : (i += 1) {
-            const query = try BatchQuery.read(allocator, pr);
+            const query = try BatchQuery.read(allocator, br);
             _ = try queries.append(query);
         }
 
@@ -874,25 +872,25 @@ pub const BatchFrame = struct {
 
         // Read the rest of the frame
 
-        frame.consistency_level = try pr.readConsistency();
+        frame.consistency_level = try br.readConsistency();
 
         // The size of the flags bitmask depends on the protocol version.
         var flags: u32 = 0;
         if (protocol_version.is(5)) {
-            flags = try pr.readInt(u32);
+            flags = try br.readInt(u32);
         } else {
-            flags = try pr.readInt(u8);
+            flags = try br.readInt(u8);
         }
 
         if (flags & FlagWithSerialConsistency == FlagWithSerialConsistency) {
-            const consistency_level = try pr.readConsistency();
+            const consistency_level = try br.readConsistency();
             if (consistency_level != .Serial and consistency_level != .LocalSerial) {
                 return error.InvalidSerialConsistency;
             }
             frame.serial_consistency_level = consistency_level;
         }
         if (flags & FlagWithDefaultTimestamp == FlagWithDefaultTimestamp) {
-            const timestamp = try pr.readInt(u64);
+            const timestamp = try br.readInt(u64);
             if (timestamp < 0) {
                 return error.InvalidNegativeTimestamp;
             }
@@ -905,10 +903,10 @@ pub const BatchFrame = struct {
 
         // The following flags are only valid with protocol v5
         if (flags & FlagWithKeyspace == FlagWithKeyspace) {
-            frame.keyspace = try pr.readString(allocator);
+            frame.keyspace = try br.readString(allocator);
         }
         if (flags & FlagWithNowInSeconds == FlagWithNowInSeconds) {
-            frame.now_in_seconds = try pr.readInt(u32);
+            frame.now_in_seconds = try br.readInt(u32);
         }
 
         return frame;
@@ -926,9 +924,9 @@ test "batch frame: query type string" {
 
     try checkHeader(Opcode.Batch, exp.len, raw_frame.header);
 
-    var pr: PrimitiveReader = undefined;
-    pr.reset(raw_frame.body);
-    const frame = try BatchFrame.read(arena.allocator(), raw_frame.header.version, &pr);
+    var mr: MessageReader = undefined;
+    mr.reset(raw_frame.body);
+    const frame = try BatchFrame.read(arena.allocator(), raw_frame.header.version, &mr);
 
     try testing.expectEqual(BatchType.Logged, frame.batch_type);
 
@@ -963,9 +961,9 @@ test "batch frame: query type prepared" {
 
     try checkHeader(Opcode.Batch, exp.len, raw_frame.header);
 
-    var pr: PrimitiveReader = undefined;
-    pr.reset(raw_frame.body);
-    const frame = try BatchFrame.read(arena.allocator(), raw_frame.header.version, &pr);
+    var mr: MessageReader = undefined;
+    mr.reset(raw_frame.body);
+    const frame = try BatchFrame.read(arena.allocator(), raw_frame.header.version, &mr);
 
     try testing.expectEqual(BatchType.Logged, frame.batch_type);
 
@@ -1013,12 +1011,12 @@ pub const EventFrame = struct {
 
     event: event.Event,
 
-    pub fn read(allocator: mem.Allocator, pr: *PrimitiveReader) !Self {
+    pub fn read(allocator: mem.Allocator, br: *MessageReader) !Self {
         var frame = Self{
             .event = undefined,
         };
 
-        const event_type = std.meta.stringToEnum(event.EventType, try pr.readString(allocator)) orelse return error.InvalidEventType;
+        const event_type = std.meta.stringToEnum(event.EventType, try br.readString(allocator)) orelse return error.InvalidEventType;
 
         switch (event_type) {
             .TOPOLOGY_CHANGE => {
@@ -1027,8 +1025,8 @@ pub const EventFrame = struct {
                     .node_address = undefined,
                 };
 
-                change.type = std.meta.stringToEnum(event.TopologyChangeType, try pr.readString(allocator)) orelse return error.InvalidTopologyChangeType;
-                change.node_address = try pr.readInet();
+                change.type = std.meta.stringToEnum(event.TopologyChangeType, try br.readString(allocator)) orelse return error.InvalidTopologyChangeType;
+                change.node_address = try br.readInet();
 
                 frame.event = event.Event{ .TOPOLOGY_CHANGE = change };
 
@@ -1040,15 +1038,15 @@ pub const EventFrame = struct {
                     .node_address = undefined,
                 };
 
-                change.type = std.meta.stringToEnum(event.StatusChangeType, try pr.readString(allocator)) orelse return error.InvalidStatusChangeType;
-                change.node_address = try pr.readInet();
+                change.type = std.meta.stringToEnum(event.StatusChangeType, try br.readString(allocator)) orelse return error.InvalidStatusChangeType;
+                change.node_address = try br.readInet();
 
                 frame.event = event.Event{ .STATUS_CHANGE = change };
 
                 return frame;
             },
             .SCHEMA_CHANGE => {
-                frame.event = event.Event{ .SCHEMA_CHANGE = try event.SchemaChange.read(allocator, pr) };
+                frame.event = event.Event{ .SCHEMA_CHANGE = try event.SchemaChange.read(allocator, br) };
 
                 return frame;
             },
@@ -1067,9 +1065,9 @@ test "event frame: topology change" {
 
     try checkHeader(Opcode.Event, exp.len, raw_frame.header);
 
-    var pr: PrimitiveReader = undefined;
-    pr.reset(raw_frame.body);
-    const frame = try EventFrame.read(arena.allocator(), &pr);
+    var mr: MessageReader = undefined;
+    mr.reset(raw_frame.body);
+    const frame = try EventFrame.read(arena.allocator(), &mr);
 
     try testing.expect(frame.event == .TOPOLOGY_CHANGE);
 
@@ -1089,9 +1087,9 @@ test "event frame: status change" {
 
     try checkHeader(Opcode.Event, data.len, raw_frame.header);
 
-    var pr: PrimitiveReader = undefined;
-    pr.reset(raw_frame.body);
-    const frame = try EventFrame.read(arena.allocator(), &pr);
+    var mr: MessageReader = undefined;
+    mr.reset(raw_frame.body);
+    const frame = try EventFrame.read(arena.allocator(), &mr);
 
     try testing.expect(frame.event == .STATUS_CHANGE);
 
@@ -1111,9 +1109,9 @@ test "event frame: schema change/keyspace" {
 
     try checkHeader(Opcode.Event, data.len, raw_frame.header);
 
-    var pr: PrimitiveReader = undefined;
-    pr.reset(raw_frame.body);
-    const frame = try EventFrame.read(arena.allocator(), &pr);
+    var mr: MessageReader = undefined;
+    mr.reset(raw_frame.body);
+    const frame = try EventFrame.read(arena.allocator(), &mr);
 
     try testing.expect(frame.event == .SCHEMA_CHANGE);
 
@@ -1136,9 +1134,9 @@ test "event frame: schema change/table" {
 
     try checkHeader(Opcode.Event, data.len, raw_frame.header);
 
-    var pr: PrimitiveReader = undefined;
-    pr.reset(raw_frame.body);
-    const frame = try EventFrame.read(arena.allocator(), &pr);
+    var mr: MessageReader = undefined;
+    mr.reset(raw_frame.body);
+    const frame = try EventFrame.read(arena.allocator(), &mr);
 
     try testing.expect(frame.event == .SCHEMA_CHANGE);
 
@@ -1161,9 +1159,9 @@ test "event frame: schema change/function" {
 
     try checkHeader(Opcode.Event, data.len, raw_frame.header);
 
-    var pr: PrimitiveReader = undefined;
-    pr.reset(raw_frame.body);
-    const frame = try EventFrame.read(arena.allocator(), &pr);
+    var mr: MessageReader = undefined;
+    mr.reset(raw_frame.body);
+    const frame = try EventFrame.read(arena.allocator(), &mr);
 
     try testing.expect(frame.event == .SCHEMA_CHANGE);
 
@@ -1204,21 +1202,21 @@ pub const PrepareFrame = struct {
         }
     }
 
-    pub fn read(allocator: mem.Allocator, protocol_version: ProtocolVersion, pr: *PrimitiveReader) !Self {
+    pub fn read(allocator: mem.Allocator, protocol_version: ProtocolVersion, br: *MessageReader) !Self {
         var frame = Self{
             .query = undefined,
             .keyspace = null,
         };
 
-        frame.query = try pr.readLongString(allocator);
+        frame.query = try br.readLongString(allocator);
 
         if (!protocol_version.is(5)) {
             return frame;
         }
 
-        const flags = try pr.readInt(u32);
+        const flags = try br.readInt(u32);
         if (flags & FlagWithKeyspace == FlagWithKeyspace) {
-            frame.keyspace = try pr.readString(allocator);
+            frame.keyspace = try br.readString(allocator);
         }
 
         return frame;
@@ -1236,9 +1234,9 @@ test "prepare frame" {
 
     try checkHeader(Opcode.Prepare, exp.len, raw_frame.header);
 
-    var pr: PrimitiveReader = undefined;
-    pr.reset(raw_frame.body);
-    const frame = try PrepareFrame.read(arena.allocator(), raw_frame.header.version, &pr);
+    var mr: MessageReader = undefined;
+    mr.reset(raw_frame.body);
+    const frame = try PrepareFrame.read(arena.allocator(), raw_frame.header.version, &mr);
 
     try testing.expectEqualStrings("SELECT age, name from foobar.user where id = ?", frame.query);
     try testing.expect(frame.keyspace == null);
@@ -1262,10 +1260,10 @@ pub const QueryFrame = struct {
         _ = try self.query_parameters.write(protocol_version, pw);
     }
 
-    pub fn read(allocator: mem.Allocator, protocol_version: ProtocolVersion, pr: *PrimitiveReader) !Self {
+    pub fn read(allocator: mem.Allocator, protocol_version: ProtocolVersion, br: *MessageReader) !Self {
         return Self{
-            .query = try pr.readLongString(allocator),
-            .query_parameters = try QueryParameters.read(allocator, protocol_version, pr),
+            .query = try br.readLongString(allocator),
+            .query_parameters = try QueryParameters.read(allocator, protocol_version, br),
         };
     }
 };
@@ -1281,9 +1279,9 @@ test "query frame: no values, no paging state" {
 
     try checkHeader(Opcode.Query, exp.len, raw_frame.header);
 
-    var pr: PrimitiveReader = undefined;
-    pr.reset(raw_frame.body);
-    const frame = try QueryFrame.read(arena.allocator(), raw_frame.header.version, &pr);
+    var mr: MessageReader = undefined;
+    mr.reset(raw_frame.body);
+    const frame = try QueryFrame.read(arena.allocator(), raw_frame.header.version, &mr);
 
     try testing.expectEqualStrings("SELECT * FROM foobar.user ;", frame.query);
     try testing.expectEqual(Consistency.One, frame.query_parameters.consistency_level);
@@ -1325,9 +1323,9 @@ const RegisterFrame = struct {
         return pw.writeStringList(self.event_types);
     }
 
-    pub fn read(allocator: mem.Allocator, pr: *PrimitiveReader) !RegisterFrame {
+    pub fn read(allocator: mem.Allocator, br: *MessageReader) !RegisterFrame {
         return RegisterFrame{
-            .event_types = try pr.readStringList(allocator),
+            .event_types = try br.readStringList(allocator),
         };
     }
 };
@@ -1343,9 +1341,9 @@ test "register frame" {
 
     try checkHeader(Opcode.Register, exp.len, raw_frame.header);
 
-    var pr: PrimitiveReader = undefined;
-    pr.reset(raw_frame.body);
-    const frame = try RegisterFrame.read(arena.allocator(), &pr);
+    var mr: MessageReader = undefined;
+    mr.reset(raw_frame.body);
+    const frame = try RegisterFrame.read(arena.allocator(), &mr);
 
     try testing.expectEqual(@as(usize, 3), frame.event_types.len);
     try testing.expectEqualStrings("TOPOLOGY_CHANGE", frame.event_types[0]);
@@ -1382,16 +1380,16 @@ const Rows = struct {
     metadata: metadata.RowsMetadata,
     data: []RowData,
 
-    pub fn read(allocator: mem.Allocator, protocol_version: ProtocolVersion, pr: *PrimitiveReader) !Self {
+    pub fn read(allocator: mem.Allocator, protocol_version: ProtocolVersion, br: *MessageReader) !Self {
         var rows = Self{
             .metadata = undefined,
             .data = undefined,
         };
 
-        rows.metadata = try metadata.RowsMetadata.read(allocator, protocol_version, pr);
+        rows.metadata = try metadata.RowsMetadata.read(allocator, protocol_version, br);
 
         // Iterate over rows
-        const rows_count = @as(usize, try pr.readInt(u32));
+        const rows_count = @as(usize, try br.readInt(u32));
 
         var data = std.ArrayList(RowData).init(allocator);
         _ = try data.ensureTotalCapacity(rows_count);
@@ -1405,7 +1403,7 @@ const Rows = struct {
             // Read a single row
             var j: usize = 0;
             while (j < rows.metadata.columns_count) : (j += 1) {
-                const column_data = (try pr.readBytes(allocator)) orelse &[_]u8{};
+                const column_data = (try br.readBytes(allocator)) orelse &[_]u8{};
 
                 _ = try row_data.append(ColumnData{
                     .slice = column_data,
@@ -1431,7 +1429,7 @@ const Prepared = struct {
     metadata: metadata.PreparedMetadata,
     rows_metadata: metadata.RowsMetadata,
 
-    pub fn read(allocator: mem.Allocator, protocol_version: ProtocolVersion, pr: *PrimitiveReader) !Self {
+    pub fn read(allocator: mem.Allocator, protocol_version: ProtocolVersion, br: *MessageReader) !Self {
         var prepared = Self{
             .query_id = undefined,
             .result_metadata_id = null,
@@ -1439,13 +1437,13 @@ const Prepared = struct {
             .rows_metadata = undefined,
         };
 
-        prepared.query_id = (try pr.readShortBytes(allocator)) orelse return error.NoQueryIDInPreparedFrame;
+        prepared.query_id = (try br.readShortBytes(allocator)) orelse return error.NoQueryIDInPreparedFrame;
         if (protocol_version.is(5)) {
-            prepared.result_metadata_id = (try pr.readShortBytes(allocator)) orelse return error.NoResultMetadataIDInPreparedFrame;
+            prepared.result_metadata_id = (try br.readShortBytes(allocator)) orelse return error.NoResultMetadataIDInPreparedFrame;
         }
 
-        prepared.metadata = try metadata.PreparedMetadata.read(allocator, protocol_version, pr);
-        prepared.rows_metadata = try metadata.RowsMetadata.read(allocator, protocol_version, pr);
+        prepared.metadata = try metadata.PreparedMetadata.read(allocator, protocol_version, br);
+        prepared.rows_metadata = try metadata.RowsMetadata.read(allocator, protocol_version, br);
 
         return prepared;
     }
@@ -1456,29 +1454,29 @@ pub const ResultFrame = struct {
 
     result: Result,
 
-    pub fn read(allocator: mem.Allocator, protocol_version: ProtocolVersion, pr: *PrimitiveReader) !ResultFrame {
+    pub fn read(allocator: mem.Allocator, protocol_version: ProtocolVersion, br: *MessageReader) !ResultFrame {
         var frame = Self{
             .result = undefined,
         };
 
-        const kind: ResultKind = @enumFromInt(try pr.readInt(u32));
+        const kind: ResultKind = @enumFromInt(try br.readInt(u32));
 
         switch (kind) {
             .Void => frame.result = Result{ .Void = {} },
             .Rows => {
-                const rows = try Rows.read(allocator, protocol_version, pr);
+                const rows = try Rows.read(allocator, protocol_version, br);
                 frame.result = Result{ .Rows = rows };
             },
             .SetKeyspace => {
-                const keyspace = try pr.readString(allocator);
+                const keyspace = try br.readString(allocator);
                 frame.result = Result{ .SetKeyspace = keyspace };
             },
             .Prepared => {
-                const prepared = try Prepared.read(allocator, protocol_version, pr);
+                const prepared = try Prepared.read(allocator, protocol_version, br);
                 frame.result = Result{ .Prepared = prepared };
             },
             .SchemaChange => {
-                const schema_change = try event.SchemaChange.read(allocator, pr);
+                const schema_change = try event.SchemaChange.read(allocator, br);
                 frame.result = Result{ .SchemaChange = schema_change };
             },
         }
@@ -1496,9 +1494,9 @@ test "result frame: void" {
 
     try checkHeader(Opcode.Result, data.len, raw_frame.header);
 
-    var pr: PrimitiveReader = undefined;
-    pr.reset(raw_frame.body);
-    const frame = try ResultFrame.read(arena.allocator(), raw_frame.header.version, &pr);
+    var mr: MessageReader = undefined;
+    mr.reset(raw_frame.body);
+    const frame = try ResultFrame.read(arena.allocator(), raw_frame.header.version, &mr);
 
     try testing.expect(frame.result == .Void);
 }
@@ -1512,9 +1510,9 @@ test "result frame: rows" {
 
     try checkHeader(Opcode.Result, data.len, raw_frame.header);
 
-    var pr: PrimitiveReader = undefined;
-    pr.reset(raw_frame.body);
-    const frame = try ResultFrame.read(arena.allocator(), raw_frame.header.version, &pr);
+    var mr: MessageReader = undefined;
+    mr.reset(raw_frame.body);
+    const frame = try ResultFrame.read(arena.allocator(), raw_frame.header.version, &mr);
 
     try testing.expect(frame.result == .Rows);
 
@@ -1567,9 +1565,9 @@ test "result frame: rows, don't skip metadata" {
 
     try checkHeader(Opcode.Result, data.len, raw_frame.header);
 
-    var pr: PrimitiveReader = undefined;
-    pr.reset(raw_frame.body);
-    const frame = try ResultFrame.read(arena.allocator(), raw_frame.header.version, &pr);
+    var mr: MessageReader = undefined;
+    mr.reset(raw_frame.body);
+    const frame = try ResultFrame.read(arena.allocator(), raw_frame.header.version, &mr);
 
     try testing.expect(frame.result == .Rows);
 
@@ -1612,9 +1610,9 @@ test "result frame: rows, list of uuid" {
 
     try checkHeader(Opcode.Result, data.len, raw_frame.header);
 
-    var pr: PrimitiveReader = undefined;
-    pr.reset(raw_frame.body);
-    const frame = try ResultFrame.read(arena.allocator(), raw_frame.header.version, &pr);
+    var mr: MessageReader = undefined;
+    mr.reset(raw_frame.body);
+    const frame = try ResultFrame.read(arena.allocator(), raw_frame.header.version, &mr);
 
     try testing.expect(frame.result == .Rows);
 
@@ -1653,9 +1651,9 @@ test "result frame: set keyspace" {
 
     try checkHeader(Opcode.Result, data.len, raw_frame.header);
 
-    var pr: PrimitiveReader = undefined;
-    pr.reset(raw_frame.body);
-    const frame = try ResultFrame.read(arena.allocator(), raw_frame.header.version, &pr);
+    var mr: MessageReader = undefined;
+    mr.reset(raw_frame.body);
+    const frame = try ResultFrame.read(arena.allocator(), raw_frame.header.version, &mr);
 
     try testing.expect(frame.result == .SetKeyspace);
     try testing.expectEqualStrings("foobar", frame.result.SetKeyspace);
@@ -1670,9 +1668,9 @@ test "result frame: prepared insert" {
 
     try checkHeader(Opcode.Result, data.len, raw_frame.header);
 
-    var pr: PrimitiveReader = undefined;
-    pr.reset(raw_frame.body);
-    const frame = try ResultFrame.read(arena.allocator(), raw_frame.header.version, &pr);
+    var mr: MessageReader = undefined;
+    mr.reset(raw_frame.body);
+    const frame = try ResultFrame.read(arena.allocator(), raw_frame.header.version, &mr);
 
     try testing.expect(frame.result == .Prepared);
 
@@ -1715,9 +1713,9 @@ test "result frame: prepared select" {
 
     try checkHeader(Opcode.Result, data.len, raw_frame.header);
 
-    var pr: PrimitiveReader = undefined;
-    pr.reset(raw_frame.body);
-    const frame = try ResultFrame.read(arena.allocator(), raw_frame.header.version, &pr);
+    var mr: MessageReader = undefined;
+    mr.reset(raw_frame.body);
+    const frame = try ResultFrame.read(arena.allocator(), raw_frame.header.version, &mr);
 
     try testing.expect(frame.result == .Prepared);
 
@@ -1768,14 +1766,14 @@ pub const SupportedFrame = struct {
     cql_versions: []CQLVersion,
     compression_algorithms: []CompressionAlgorithm,
 
-    pub fn read(allocator: mem.Allocator, pr: *PrimitiveReader) !Self {
+    pub fn read(allocator: mem.Allocator, br: *MessageReader) !Self {
         var frame = Self{
             .protocol_versions = &[_]ProtocolVersion{},
             .cql_versions = &[_]CQLVersion{},
             .compression_algorithms = &[_]CompressionAlgorithm{},
         };
 
-        const options = try pr.readStringMultimap(allocator);
+        const options = try br.readStringMultimap(allocator);
 
         if (options.get("CQL_VERSION")) |values| {
             var list = std.ArrayList(CQLVersion).init(allocator);
@@ -1827,9 +1825,9 @@ test "supported frame" {
 
     try checkHeader(Opcode.Supported, exp.len, raw_frame.header);
 
-    var pr: PrimitiveReader = undefined;
-    pr.reset(raw_frame.body);
-    const frame = try SupportedFrame.read(arena.allocator(), &pr);
+    var mr: MessageReader = undefined;
+    mr.reset(raw_frame.body);
+    const frame = try SupportedFrame.read(arena.allocator(), &mr);
 
     try testing.expectEqual(@as(usize, 1), frame.cql_versions.len);
     try testing.expectEqual(CQLVersion{ .major = 3, .minor = 4, .patch = 4 }, frame.cql_versions[0]);
