@@ -539,7 +539,7 @@ pub const PrimitiveReader = struct {
 
         while (true) {
             const b = try self.reader.readByte();
-            const tmp = @as(IntType, @intCast(b)) & (~@as(IntType, 0x80));
+            const tmp = @as(IntType, @intCast(b)) & ~@as(IntType, 0x80);
 
             // TODO(vincent): runtime check if the number will actually fit in the type T ?
 
@@ -573,10 +573,7 @@ pub const PrimitiveReader = struct {
 
         std.debug.print("read tmp: {}\n", .{tmp});
 
-        var n: IntType = 0;
-        n = @intCast(tmp >> 1);
-        std.debug.print("read n: {}\n", .{n});
-        n ^= -@as(IntType, @intCast(tmp & 1));
+        const n = @as(IntType, @intCast(tmp >> 1)) ^ -@as(IntType, @intCast(tmp & 1));
 
         std.debug.print("n: {}\n", .{n});
 
@@ -767,7 +764,7 @@ test "primitive reader: read value" {
 //     defer arena.deinit();
 //
 //     var pw = try PrimitiveWriter.init(arena.allocator());
-//     try pw.writeUnsignedVint(@as(u64, 282240));
+//     try pw.riteUnsignedVint(@as(u64, 282240));
 //     try pw.writeUnsignedVint(@as(u32, 140022));
 //     try pw.writeUnsignedVint(@as(u16, 24450));
 //
