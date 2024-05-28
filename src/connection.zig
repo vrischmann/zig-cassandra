@@ -277,9 +277,7 @@ pub const Connection = struct {
     ///
     /// This method is not thread safe.
     pub fn writeFrame(self: *Self, allocator: mem.Allocator, opcode: Opcode, comptime FrameType: type, fr: FrameType, options: WriteFrameOptions) !void {
-        // Reset write
-        try self.message_writer.reset(allocator);
-        defer self.message_writer.deinit();
+        self.message_writer.reset();
 
         // Prepare the raw frame
         var raw_frame = RawFrame{
