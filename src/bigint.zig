@@ -188,35 +188,67 @@ pub fn toBytes(allocator: mem.Allocator, n: big.int.Const) ![]const u8 {
     return buf[pos..];
 }
 
-// test "bigint: toBytes" {
-//     const testCase = struct {
-//         n: []const u8,
-//         exp_data: []const u8,
-//     };
-//
-//     const testCases = [_]testCase{
-//         testCase{
-//             .n = "3405245950896869895938539859386968968953285938539111111111111111111111111111111111111111122222222222222222222222222222222",
-//             .exp_data = "\x01\x51\x97\x29\x61\xfa\xec\x86\x0d\x18\x06\x93\xd0\x53\xba\xb9\x02\xbd\xde\xe9\xfa\xab\x78\xcf\x52\x2e\x43\x1c\x68\xea\x9e\xb8\xeb\x35\x6e\x96\x31\xfc\x4b\x10\xfc\x9d\x0a\x2b\x4c\x1a\x9c\x8e\x38\xe3\x8e",
-//         },
-//         testCase{
-//             .n = "-3405245950896869895938539859386968968953285938539111111111111111111111111111111111111111122222222222222222222222222222222",
-//             .exp_data = "\xfe\xae\x68\xd6\x9e\x05\x13\x79\xf2\xe7\xf9\x6c\x2f\xac\x45\x46\xfd\x42\x21\x16\x05\x54\x87\x30\xad\xd1\xbc\xe3\x97\x15\x61\x47\x14\xca\x91\x69\xce\x03\xb4\xef\x03\x62\xf5\xd4\xb3\xe5\x63\x71\xc7\x1c\x72",
-//         },
-//     };
-//
-//     inline for (testCases) |tc| {
-//         var n = try big.int.Managed.init(testing.allocator);
-//         defer n.deinit();
-//
-//         try n.setString(10, tc.n);
-//
-//         const data = try toBytes(testing.allocator, n.toConst());
-//         defer testing.allocator.free(data);
-//
-//         try testing.expectEqualSlices(u8, tc.exp_data, data);
-//     }
-// }
+test "bigint: toBytes" {
+    const testCase = struct {
+        n: []const u8,
+        exp_data: []const u8,
+    };
+
+    const testCases = [_]testCase{
+        testCase{
+            .n = "0",
+            .exp_data = "\x00",
+        },
+        testCase{
+            .n = "1",
+            .exp_data = "\x01",
+        },
+        testCase{
+            .n = "127",
+            .exp_data = "\x7F",
+        },
+        testCase{
+            .n = "128",
+            .exp_data = "\x00\x80",
+        },
+        testCase{
+            .n = "129",
+            .exp_data = "\x00\x81",
+        },
+        testCase{
+            .n = "-1",
+            .exp_data = "\xFF",
+        },
+        testCase{
+            .n = "-128",
+            .exp_data = "\x80",
+        },
+        testCase{
+            .n = "-129",
+            .exp_data = "\xFF\x7F",
+        },
+        testCase{
+            .n = "3405245950896869895938539859386968968953285938539111111111111111111111111111111111111111122222222222222222222222222222222",
+            .exp_data = "\x01\x51\x97\x29\x61\xfa\xec\x86\x0d\x18\x06\x93\xd0\x53\xba\xb9\x02\xbd\xde\xe9\xfa\xab\x78\xcf\x52\x2e\x43\x1c\x68\xea\x9e\xb8\xeb\x35\x6e\x96\x31\xfc\x4b\x10\xfc\x9d\x0a\x2b\x4c\x1a\x9c\x8e\x38\xe3\x8e",
+        },
+        testCase{
+            .n = "-3405245950896869895938539859386968968953285938539111111111111111111111111111111111111111122222222222222222222222222222222",
+            .exp_data = "\xfe\xae\x68\xd6\x9e\x05\x13\x79\xf2\xe7\xf9\x6c\x2f\xac\x45\x46\xfd\x42\x21\x16\x05\x54\x87\x30\xad\xd1\xbc\xe3\x97\x15\x61\x47\x14\xca\x91\x69\xce\x03\xb4\xef\x03\x62\xf5\xd4\xb3\xe5\x63\x71\xc7\x1c\x72",
+        },
+    };
+
+    inline for (testCases) |tc| {
+        var n = try big.int.Managed.init(testing.allocator);
+        defer n.deinit();
+
+        try n.setString(10, tc.n);
+
+        const data = try toBytes(testing.allocator, n.toConst());
+        defer testing.allocator.free(data);
+
+        try testing.expectEqualSlices(u8, tc.exp_data, data);
+    }
+}
 //
 // test "bigint: fromBytes" {
 //     const testCase = struct {
