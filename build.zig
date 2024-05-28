@@ -124,6 +124,9 @@ pub fn build(b: *std.Build) !void {
         example.linkSystemLibrary("snappy");
     }
 
+    const example_install_artifact = b.addInstallArtifact(example, .{});
+    b.getInstallStep().dependOn(&example_install_artifact.step);
+
     const example_run_cmd = b.addRunArtifact(example);
     example_run_cmd.step.dependOn(b.getInstallStep());
     if (b.args) |args| {
