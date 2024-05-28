@@ -8,10 +8,22 @@ const assert = std.debug.assert;
 const limb_bits = @typeInfo(big.Limb).Int.bits;
 const limb_bytes = limb_bits / 8;
 
+fn fromRawBytes(allocator: mem.Allocator, data: []const u8, signedness: std.builtin.Signedness) !big.int.Managed {
+    const capacity: usize = (data.len + limb_bytes - 1) / limb_bytes;
+
+    var n = try big.int.Managed.initCapacity(allocator, capacity);
+    errdefer n.deinit();
+
+    var n_mutable = n.toMutable();
+    n_mutable.readTwosComplement(data, capacity * limb_bits, .big, signedness);
+
+    return n_mutable.toManaged(allocator);
+}
+
 /// fromRawBytes decodes a big.int from the data provided.
 ///
 /// Based on https://github.com/golang/go/blob/master/src/math/big/nat.go#L1514-L1534
-fn fromRawBytes(allocator: mem.Allocator, data: []const u8) !big.int.Managed {
+fn fromRawBytes2(allocator: mem.Allocator, data: []const u8) !big.int.Managed {
     const nb_limbs: usize = (data.len + limb_bytes - 1) / limb_bytes;
 
     var limbs = try allocator.alloc(big.Limb, nb_limbs);
@@ -71,7 +83,7 @@ pub fn fromBytes(allocator: mem.Allocator, data: []const u8) !big.int.Managed {
     defer arena.deinit();
 
     // Get the raw big.int without worrying about the sign.
-    const n = try fromRawBytes(arena.allocator(), data);
+    const n = try fromRawBytes(arena.allocator(), data, .signed);
 
     // Per the spec, a MSB of 1 in the data means it's negative.
 
