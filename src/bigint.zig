@@ -105,7 +105,13 @@ pub fn fromBytes(allocator: mem.Allocator, data: []const u8) !big.int.Managed {
 /// rawBytes encodes n into buf and returns the number of bytes written.
 ///
 /// Based on https://github.com/golang/go/blob/master/src/math/big/nat.go#L1478-L1504
-fn rawBytes(buf: []u8, n: big.int.Const) !usize {
+/// From this method:
+///
+/// Writes the value of n into buf using big-endian encoding.
+/// The value of n is encoded in the slice buf[i:]. If the value of n
+/// cannot be represented in buf, bytes panics. The number i of unused
+/// bytes at the beginning of buf is returned as result.
+fn toRawBytes(buf: []u8, n: big.int.Const) !usize {
     var i: usize = buf.len;
     for (n.limbs) |v| {
         var limb = v;
@@ -141,22 +147,38 @@ pub fn toBytes(allocator: mem.Allocator, n: big.int.Const) ![]const u8 {
         return b;
     }
 
+    var buf = std.ArrayList(u8).init(allocator);
+    defer buf.deinit();
+
+    //
     // Handle positive numbers
+    //
+
     if (n.positive) {
-        var buf = try allocator.alloc(u8, n.limbs.len * 8);
-        errdefer allocator.free(buf);
+        const result = blk: {
+            try buf.resize(n.limbs.len * 8);
+            const pos = try toRawBytes(buf.items, n);
 
-        const pos = try rawBytes(buf, n);
+            const tmp_result = buf.items[pos..];
 
-        // This is for §6.23 https://github.com/apache/cassandra/blob/trunk/doc/native_protocol_v5.spec#L1037-L1040
-        if ((buf[0] & 0x80) > 0) {
-            buf[pos - 1] = 0;
-            return buf[pos - 1 ..];
-        }
-        return buf[pos..];
+            // This is for §6.23 https://github.com/apache/cassandra/blob/trunk/doc/native_protocol_v5.spec#L1037-L1040
+            // Prepend a 0 if the first byte has its most significant bit set.
+            if ((tmp_result[0] & 0x80) != 0) {
+                break :blk buf.items[pos - 1 ..];
+            } else {
+                break :blk buf.items[pos..];
+            }
+        };
+
+        return try allocator.dupe(u8, result);
     }
 
+    //
     // Handle negative numbers
+    //
+
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
 
     const shift = (n.bitCountTwosComp() / 8 + 1) * 8;
 
@@ -166,26 +188,37 @@ pub fn toBytes(allocator: mem.Allocator, n: big.int.Const) ![]const u8 {
     // * one more to store the remaining bytes
     const capacity = (shift / limb_bytes) + 1;
 
-    // Allocate a temporary big.int to hold the shifted value.
-    var tmp = try big.int.Managed.initCapacity(allocator, capacity);
-    defer tmp.deinit();
-    var tmp_mutable = tmp.toMutable();
-
     // 1 << shift
-    tmp_mutable.shiftLeft(big_one, shift);
+    const one_shifted = blk: {
+        var one_shifted = try big.int.Managed.initCapacity(arena.allocator(), capacity);
+        var one_shifted_mutable = one_shifted.toMutable();
+
+        one_shifted_mutable.shiftLeft(big_one, shift);
+
+        break :blk one_shifted_mutable.toManaged(arena.allocator());
+    };
 
     // n = n + (1 << shift)
-    var n_tmp = try n.toManaged(allocator);
-    defer n_tmp.deinit();
+    var n_tmp = try n.toManaged(arena.allocator());
+    try n_tmp.add(&n_tmp, &one_shifted);
 
-    try n_tmp.add(&n_tmp, &tmp);
+    // Encode
 
-    var buf = try allocator.alloc(u8, (n_tmp.len() + 1) * limb_bytes);
-    errdefer allocator.free(buf);
+    const result = blk: {
+        try buf.resize((n_tmp.len() + 1) * limb_bytes);
+        const pos = try toRawBytes(buf.items, n_tmp.toConst());
 
-    const pos = try rawBytes(buf, n_tmp.toConst());
+        const tmp_result = buf.items[pos..];
 
-    return buf[pos..];
+        // This strip operation is taken from here https://github.com/gocql/gocql/blob/34fdeebefcbf183ed7f916f931aa0586fdaa1b40/marshal.go#L1212-L1217
+        if (tmp_result.len >= 2 and tmp_result[0] == 0xFF and tmp_result[1] & 0x80 != 0) {
+            break :blk tmp_result[1..];
+        } else {
+            break :blk tmp_result;
+        }
+    };
+
+    return try allocator.dupe(u8, result);
 }
 
 test "bigint: toBytes" {
