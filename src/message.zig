@@ -1286,7 +1286,7 @@ pub const MessageWriter = struct {
     }
 };
 
-test "primitive writer: write int" {
+test "message writer: write int" {
     var arena = testutils.arenaAllocator();
     defer arena.deinit();
 
@@ -1305,7 +1305,7 @@ test "primitive writer: write int" {
     try testing.expectEqualSlices(u8, "\xff", mw.getWritten()[14..15]);
 }
 
-test "primitive writer: write strings and bytes" {
+test "message writer: write strings and bytes" {
     var arena = testutils.arenaAllocator();
     defer arena.deinit();
 
@@ -1347,7 +1347,7 @@ test "primitive writer: write strings and bytes" {
     }
 }
 
-test "primitive writer: write uuid" {
+test "message writer: write uuid" {
     var arena = testutils.arenaAllocator();
     defer arena.deinit();
 
@@ -1360,7 +1360,7 @@ test "primitive writer: write uuid" {
     try testing.expectEqualSlices(u8, &uuid, mw.getWritten()[0..16]);
 }
 
-test "primitive writer: write string list" {
+test "message writer: write string list" {
     var arena = testutils.arenaAllocator();
     defer arena.deinit();
 
@@ -1372,7 +1372,7 @@ test "primitive writer: write string list" {
     try testing.expectEqualSlices(u8, "\x00\x02\x00\x03foo\x00\x03bar", mw.getWritten()[0..12]);
 }
 
-test "primitive writer: write value" {
+test "message writer: write value" {
     var arena = testutils.arenaAllocator();
     defer arena.deinit();
 
@@ -1391,7 +1391,7 @@ test "primitive writer: write value" {
     try testing.expectEqualSlices(u8, "\xff\xff\xff\xfe", mw.getWritten()[10..14]);
 }
 
-test "primitive writer: write inet and inetaddr" {
+test "message writer: write inet and inetaddr" {
     var arena = testutils.arenaAllocator();
     defer arena.deinit();
 
@@ -1414,7 +1414,7 @@ test "primitive writer: write inet and inetaddr" {
     try testing.expectEqualSlices(u8, "\x10\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff", mw.getWritten()[35..52]);
 }
 
-test "primitive writer: write consistency" {
+test "message writer: write consistency" {
     var arena = testutils.arenaAllocator();
     defer arena.deinit();
 

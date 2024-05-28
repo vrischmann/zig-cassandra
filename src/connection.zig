@@ -108,7 +108,7 @@ pub const Connection = struct {
     raw_frame_reader: RawFrameReaderType,
     raw_frame_writer: RawFrameWriterType,
     message_reader: MessageReader,
-    primitive_writer: MessageWriter,
+    message_writer: MessageWriter,
 
     // Negotiated with the server
     negotiated_state: NegotiatedState,
@@ -277,10 +277,9 @@ pub const Connection = struct {
     ///
     /// This method is not thread safe.
     pub fn writeFrame(self: *Self, allocator: mem.Allocator, opcode: Opcode, comptime FrameType: type, fr: FrameType, options: WriteFrameOptions) !void {
-        // Reset primitive writer
-        // TODO(vincent): for async we probably should do something else for the primitive writer.
-        try self.primitive_writer.reset(allocator);
-        defer self.primitive_writer.deinit();
+        // Reset write
+        try self.message_writer.reset(allocator);
+        defer self.message_writer.deinit();
 
         // Prepare the raw frame
         var raw_frame = RawFrame{
@@ -303,16 +302,16 @@ pub const Connection = struct {
             switch (@typeInfo(@TypeOf(FrameType.write))) {
                 .Fn => |info| {
                     if (info.params.len == 3) {
-                        try fr.write(options.protocol_version, &self.primitive_writer);
+                        try fr.write(options.protocol_version, &self.message_writer);
                     } else {
-                        try fr.write(&self.primitive_writer);
+                        try fr.write(&self.message_writer);
                     }
                 },
                 else => unreachable,
             }
 
             // This is the actual bytes of the encoded body.
-            const written = self.primitive_writer.getWritten();
+            const written = self.message_writer.getWritten();
 
             // Default to using the uncompressed body.
             raw_frame.header.body_len = @intCast(written.len);
