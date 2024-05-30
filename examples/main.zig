@@ -326,11 +326,13 @@ pub fn main() anyerror!void {
         std.process.exit(1);
     }
 
+    //
+    // Connect to the seed node
+    //
+
     // Define the seed node we will connect to. We use localhost:9042.
     const address = net.Address.initIp4([_]u8{ 127, 0, 0, 1 }, 9042);
 
-    // Connect to the seed node
-    //
     // The struct InitOptions can be used to control some aspects of the CQL client,
     // such as the protocol version, if compression is enabled, etc.
 
@@ -362,7 +364,11 @@ pub fn main() anyerror!void {
         },
         else => return err,
     };
-    defer connection.close();
+    defer connection.deinit();
+
+    //
+    // Connection established, create the client and do the thing.
+    //
 
     var client = cassandra.Client.initWithConnection(allocator, &connection, .{});
     defer client.deinit();

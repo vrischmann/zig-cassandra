@@ -136,8 +136,9 @@ pub const Connection = struct {
         try self.handshake(diags);
     }
 
-    pub fn close(self: *Self) void {
+    pub fn deinit(self: *Self) void {
         self.socket.close();
+        self.message_writer.deinit();
     }
 
     fn handshake(self: *Self, diags: *InitOptions.Diagnostics) !void {
