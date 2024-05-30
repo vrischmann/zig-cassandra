@@ -125,7 +125,10 @@ pub const Connection = struct {
 
         self.envelope_reader = EnvelopeReaderType.init(self.buffered_reader.reader());
         self.envelope_writer = EnvelopeWriterType.init(self.buffered_writer.writer());
+
         MessageReader.reset(&self.message_reader, "");
+        // TODO(vincent): don't use the root allocator here, limit how much memory we can use
+        self.message_writer = try MessageWriter.init(allocator);
 
         var dummy_diags = InitOptions.Diagnostics{};
         const diags = options.diags orelse &dummy_diags;
