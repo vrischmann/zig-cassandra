@@ -5,10 +5,10 @@ const mem = std.mem;
 const MessageWriter = @import("message.zig").MessageWriter;
 
 const frame = @import("frame.zig");
-const FrameHeader = frame.FrameHeader;
-const RawFrame = frame.RawFrame;
-const RawFrameReader = frame.RawFrameReader;
-const RawFrameWriter = frame.RawFrameWriter;
+const EnvelopeHeader = frame.EnvelopeHeader;
+const Envelope = frame.Envelope;
+const EnvelopeReader = frame.EnvelopeReader;
+const EnvelopeWriter = frame.EnvelopeWriter;
 
 pub fn printHRBytes(comptime fmt: []const u8, exp: []const u8, args: anytype) void {
     const hextable = "0123456789abcdef";
@@ -45,16 +45,16 @@ pub fn arenaAllocator() std.heap.ArenaAllocator {
 
 /// Reads a raw frame from the provided buffer.
 /// Only intended to be used for tests.
-pub fn readRawFrame(_allocator: mem.Allocator, data: []const u8) !RawFrame {
+pub fn readEnvelope(_allocator: mem.Allocator, data: []const u8) !Envelope {
     var source = io.StreamSource{ .const_buffer = io.fixedBufferStream(data) };
     const reader = source.reader();
 
-    var fr = RawFrameReader(@TypeOf(reader)).init(reader);
+    var fr = EnvelopeReader(@TypeOf(reader)).init(reader);
 
     return fr.read(_allocator);
 }
 
-pub fn expectSameRawFrame(comptime T: type, fr: T, header: FrameHeader, exp: []const u8) !void {
+pub fn expectSameEnvelope(comptime T: type, fr: T, header: EnvelopeHeader, exp: []const u8) !void {
     var arena = arenaAllocator();
     defer arena.deinit();
     const allocator = arena.allocator();
@@ -76,7 +76,7 @@ pub fn expectSameRawFrame(comptime T: type, fr: T, header: FrameHeader, exp: []c
 
     // Write raw frame
 
-    const raw_frame = RawFrame{
+    const envelope = Envelope{
         .header = header,
         .body = mw.getWritten(),
     };
@@ -84,13 +84,13 @@ pub fn expectSameRawFrame(comptime T: type, fr: T, header: FrameHeader, exp: []c
     var buf2: [1024]u8 = undefined;
     var source = io.StreamSource{ .buffer = io.fixedBufferStream(&buf2) };
     const writer = source.writer();
-    var fw = RawFrameWriter(@TypeOf(writer)).init(writer);
+    var fw = EnvelopeWriter(@TypeOf(writer)).init(writer);
 
-    try fw.write(raw_frame);
+    try fw.write(envelope);
 
     if (!std.mem.eql(u8, exp, source.buffer.getWritten())) {
         printHRBytes("\n==> exp   : {s}\n", exp, .{});
         printHRBytes("==> source: {s}\n", source.buffer.getWritten(), .{});
-        std.debug.panic("frames are different\n", .{});
+        std.debug.panic("envelopes are different\n", .{});
     }
 }

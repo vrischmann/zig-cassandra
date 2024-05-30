@@ -34,7 +34,7 @@ const QueryParameters = @import("QueryParameters.zig");
 
 const testutils = @import("testutils.zig");
 
-pub const FrameFlags = struct {
+pub const EnvelopeFlags = struct {
     pub const Compression: u8 = 0x01;
     pub const Tracing: u8 = 0x02;
     pub const CustomPayload: u8 = 0x04;
@@ -42,7 +42,7 @@ pub const FrameFlags = struct {
     pub const UseBeta: u8 = 0x10;
 };
 
-pub const FrameHeader = packed struct {
+pub const EnvelopeHeader = packed struct {
     version: ProtocolVersion,
     flags: u8,
     stream: i16,
@@ -51,7 +51,7 @@ pub const FrameHeader = packed struct {
 
     const Size = 9;
 
-    pub fn init(comptime ReaderType: type, in: ReaderType) !FrameHeader {
+    pub fn init(comptime ReaderType: type, in: ReaderType) !EnvelopeHeader {
         var buf: [Size]u8 = undefined;
 
         const read = try in.readAll(&buf);
@@ -59,7 +59,7 @@ pub const FrameHeader = packed struct {
             return error.UnexpectedEOF;
         }
 
-        return FrameHeader{
+        return EnvelopeHeader{
             .version = try ProtocolVersion.init(buf[0]),
             .flags = buf[1],
             .stream = mem.readInt(i16, @ptrCast(buf[2..4]), .big),
@@ -69,8 +69,8 @@ pub const FrameHeader = packed struct {
     }
 };
 
-pub const RawFrame = struct {
-    header: FrameHeader,
+pub const Envelope = struct {
+    header: EnvelopeHeader,
     body: []const u8,
 
     pub fn deinit(self: @This(), allocator: mem.Allocator) void {
@@ -78,7 +78,7 @@ pub const RawFrame = struct {
     }
 };
 
-pub fn RawFrameReader(comptime ReaderType: type) type {
+pub fn EnvelopeReader(comptime ReaderType: type) type {
     return struct {
         const Self = @This();
 
@@ -90,15 +90,15 @@ pub fn RawFrameReader(comptime ReaderType: type) type {
             };
         }
 
-        pub fn read(self: *Self, allocator: mem.Allocator) !RawFrame {
-            var buf: [FrameHeader.Size]u8 = undefined;
+        pub fn read(self: *Self, allocator: mem.Allocator) !Envelope {
+            var buf: [EnvelopeHeader.Size]u8 = undefined;
 
             const n_header_read = try self.reader.readAll(&buf);
-            if (n_header_read != FrameHeader.Size) {
+            if (n_header_read != EnvelopeHeader.Size) {
                 return error.UnexpectedEOF;
             }
 
-            const header = FrameHeader{
+            const header = EnvelopeHeader{
                 .version = ProtocolVersion{ .version = buf[0] },
                 .flags = buf[1],
                 .stream = mem.readInt(i16, @ptrCast(buf[2..4]), .big),
@@ -114,7 +114,7 @@ pub fn RawFrameReader(comptime ReaderType: type) type {
                 return error.UnexpectedEOF;
             }
 
-            return RawFrame{
+            return Envelope{
                 .header = header,
                 .body = body,
             };
@@ -122,7 +122,7 @@ pub fn RawFrameReader(comptime ReaderType: type) type {
     };
 }
 
-pub fn RawFrameWriter(comptime WriterType: type) type {
+pub fn EnvelopeWriter(comptime WriterType: type) type {
     return struct {
         const Self = @This();
 
@@ -134,17 +134,17 @@ pub fn RawFrameWriter(comptime WriterType: type) type {
             };
         }
 
-        pub fn write(self: *Self, raw_frame: RawFrame) !void {
-            var buf: [FrameHeader.Size]u8 = undefined;
+        pub fn write(self: *Self, envelope: Envelope) !void {
+            var buf: [EnvelopeHeader.Size]u8 = undefined;
 
-            buf[0] = raw_frame.header.version.version;
-            buf[1] = raw_frame.header.flags;
-            mem.writeInt(i16, @ptrCast(buf[2..4]), raw_frame.header.stream, .big);
-            buf[4] = @intFromEnum(raw_frame.header.opcode);
-            mem.writeInt(u32, @ptrCast(buf[5..9]), raw_frame.header.body_len, .big);
+            buf[0] = envelope.header.version.version;
+            buf[1] = envelope.header.flags;
+            mem.writeInt(i16, @ptrCast(buf[2..4]), envelope.header.stream, .big);
+            buf[4] = @intFromEnum(envelope.header.opcode);
+            mem.writeInt(u32, @ptrCast(buf[5..9]), envelope.header.body_len, .big);
 
             try self.writer.writeAll(&buf);
-            try self.writer.writeAll(raw_frame.body);
+            try self.writer.writeAll(envelope.body);
         }
     };
 }
@@ -161,16 +161,16 @@ pub const RowData = struct {
     slice: []const ColumnData,
 };
 
-pub fn checkHeader(opcode: Opcode, data_len: usize, header: FrameHeader) !void {
+pub fn checkHeader(opcode: Opcode, data_len: usize, header: EnvelopeHeader) !void {
     // We can only use v4 for now
     try testing.expect(header.version.is(4));
     // Don't care about the flags here
     // Don't care about the stream
     try testing.expectEqual(opcode, header.opcode);
-    try testing.expectEqual(@as(usize, header.body_len), data_len - FrameHeader.Size);
+    try testing.expectEqual(@as(usize, header.body_len), data_len - EnvelopeHeader.Size);
 }
 
-test "frame header: read and write" {
+test "envelope header: read and write" {
     const exp = "\x04\x00\x00\xd7\x05\x00\x00\x00\x00";
     var fbs = io.fixedBufferStream(exp);
 
@@ -178,14 +178,14 @@ test "frame header: read and write" {
 
     const reader = fbs.reader();
 
-    const header = try FrameHeader.init(@TypeOf(reader), fbs.reader());
+    const header = try EnvelopeHeader.init(@TypeOf(reader), fbs.reader());
     try testing.expect(header.version.is(4));
     try testing.expect(header.version.isRequest());
     try testing.expectEqual(@as(u8, 0), header.flags);
     try testing.expectEqual(@as(i16, 215), header.stream);
     try testing.expectEqual(Opcode.Options, header.opcode);
     try testing.expectEqual(@as(u32, 0), header.body_len);
-    try testing.expectEqual(@as(usize, 0), exp.len - FrameHeader.Size);
+    try testing.expectEqual(@as(usize, 0), exp.len - EnvelopeHeader.Size);
 }
 
 /// ERROR is sent by a node if there's an error processing a request.
@@ -371,12 +371,12 @@ test "error frame: invalid query, no keyspace specified" {
     defer arena.deinit();
 
     const data = "\x84\x00\x00\x02\x00\x00\x00\x00\x5e\x00\x00\x22\x00\x00\x58\x4e\x6f\x20\x6b\x65\x79\x73\x70\x61\x63\x65\x20\x68\x61\x73\x20\x62\x65\x65\x6e\x20\x73\x70\x65\x63\x69\x66\x69\x65\x64\x2e\x20\x55\x53\x45\x20\x61\x20\x6b\x65\x79\x73\x70\x61\x63\x65\x2c\x20\x6f\x72\x20\x65\x78\x70\x6c\x69\x63\x69\x74\x6c\x79\x20\x73\x70\x65\x63\x69\x66\x79\x20\x6b\x65\x79\x73\x70\x61\x63\x65\x2e\x74\x61\x62\x6c\x65\x6e\x61\x6d\x65";
-    const raw_frame = try testutils.readRawFrame(arena.allocator(), data);
+    const envelope = try testutils.readEnvelope(arena.allocator(), data);
 
-    try checkHeader(Opcode.Error, data.len, raw_frame.header);
+    try checkHeader(Opcode.Error, data.len, envelope.header);
 
     var mr: MessageReader = undefined;
-    mr.reset(raw_frame.body);
+    mr.reset(envelope.body);
     const frame = try ErrorFrame.read(arena.allocator(), &mr);
 
     try testing.expectEqual(ErrorCode.InvalidQuery, frame.error_code);
@@ -388,12 +388,12 @@ test "error frame: already exists" {
     defer arena.deinit();
 
     const data = "\x84\x00\x00\x23\x00\x00\x00\x00\x53\x00\x00\x24\x00\x00\x3e\x43\x61\x6e\x6e\x6f\x74\x20\x61\x64\x64\x20\x61\x6c\x72\x65\x61\x64\x79\x20\x65\x78\x69\x73\x74\x69\x6e\x67\x20\x74\x61\x62\x6c\x65\x20\x22\x68\x65\x6c\x6c\x6f\x22\x20\x74\x6f\x20\x6b\x65\x79\x73\x70\x61\x63\x65\x20\x22\x66\x6f\x6f\x62\x61\x72\x22\x00\x06\x66\x6f\x6f\x62\x61\x72\x00\x05\x68\x65\x6c\x6c\x6f";
-    const raw_frame = try testutils.readRawFrame(arena.allocator(), data);
+    const envelope = try testutils.readEnvelope(arena.allocator(), data);
 
-    try checkHeader(Opcode.Error, data.len, raw_frame.header);
+    try checkHeader(Opcode.Error, data.len, envelope.header);
 
     var mr: MessageReader = undefined;
-    mr.reset(raw_frame.body);
+    mr.reset(envelope.body);
     const frame = try ErrorFrame.read(arena.allocator(), &mr);
 
     try testing.expectEqual(ErrorCode.AlreadyExists, frame.error_code);
@@ -408,12 +408,12 @@ test "error frame: syntax error" {
     defer arena.deinit();
 
     const data = "\x84\x00\x00\x2f\x00\x00\x00\x00\x41\x00\x00\x20\x00\x00\x3b\x6c\x69\x6e\x65\x20\x32\x3a\x30\x20\x6d\x69\x73\x6d\x61\x74\x63\x68\x65\x64\x20\x69\x6e\x70\x75\x74\x20\x27\x3b\x27\x20\x65\x78\x70\x65\x63\x74\x69\x6e\x67\x20\x4b\x5f\x46\x52\x4f\x4d\x20\x28\x73\x65\x6c\x65\x63\x74\x2a\x5b\x3b\x5d\x29";
-    const raw_frame = try testutils.readRawFrame(arena.allocator(), data);
+    const envelope = try testutils.readEnvelope(arena.allocator(), data);
 
-    try checkHeader(Opcode.Error, data.len, raw_frame.header);
+    try checkHeader(Opcode.Error, data.len, envelope.header);
 
     var mr: MessageReader = undefined;
-    mr.reset(raw_frame.body);
+    mr.reset(envelope.body);
     const frame = try ErrorFrame.read(arena.allocator(), &mr);
 
     try testing.expectEqual(ErrorCode.SyntaxError, frame.error_code);
@@ -430,9 +430,9 @@ test "options frame" {
     defer arena.deinit();
 
     const data = "\x04\x00\x00\x05\x05\x00\x00\x00\x00";
-    const raw_frame = try testutils.readRawFrame(arena.allocator(), data);
+    const envelope = try testutils.readEnvelope(arena.allocator(), data);
 
-    try checkHeader(Opcode.Options, data.len, raw_frame.header);
+    try checkHeader(Opcode.Options, data.len, envelope.header);
 }
 
 /// STARTUP is sent to a node to initialize a connection.
@@ -507,12 +507,12 @@ test "startup frame" {
     // read
 
     const exp = "\x04\x00\x00\x00\x01\x00\x00\x00\x16\x00\x01\x00\x0b\x43\x51\x4c\x5f\x56\x45\x52\x53\x49\x4f\x4e\x00\x05\x33\x2e\x30\x2e\x30";
-    const raw_frame = try testutils.readRawFrame(arena.allocator(), exp);
+    const envelope = try testutils.readEnvelope(arena.allocator(), exp);
 
-    try checkHeader(Opcode.Startup, exp.len, raw_frame.header);
+    try checkHeader(Opcode.Startup, exp.len, envelope.header);
 
     var mr: MessageReader = undefined;
-    mr.reset(raw_frame.body);
+    mr.reset(envelope.body);
     const frame = try StartupFrame.read(arena.allocator(), &mr);
 
     try testing.expectEqual(CQLVersion{ .major = 3, .minor = 0, .patch = 0 }, frame.cql_version);
@@ -520,7 +520,7 @@ test "startup frame" {
 
     // write
 
-    try testutils.expectSameRawFrame(StartupFrame, frame, raw_frame.header, exp);
+    try testutils.expectSameEnvelope(StartupFrame, frame, envelope.header, exp);
 }
 
 /// EXECUTE is sent to execute a prepared query.
@@ -567,13 +567,13 @@ test "execute frame" {
     // read
 
     const exp = "\x04\x00\x01\x00\x0a\x00\x00\x00\x37\x00\x10\x97\x97\x95\x6d\xfe\xb2\x4c\x99\x86\x8e\xd3\x84\xff\x6f\xd9\x4c\x00\x04\x27\x00\x01\x00\x00\x00\x10\xeb\x11\xc9\x1e\xd8\xcc\x48\x4d\xaf\x55\xe9\x9f\x5c\xd9\xec\x4a\x00\x00\x13\x88\x00\x05\xa2\x41\x4c\x1b\x06\x4c";
-    const raw_frame = try testutils.readRawFrame(arena.allocator(), exp);
+    const envelope = try testutils.readEnvelope(arena.allocator(), exp);
 
-    try checkHeader(Opcode.Execute, exp.len, raw_frame.header);
+    try checkHeader(Opcode.Execute, exp.len, envelope.header);
 
     var mr: MessageReader = undefined;
-    mr.reset(raw_frame.body);
-    const frame = try ExecuteFrame.read(arena.allocator(), raw_frame.header.version, &mr);
+    mr.reset(envelope.body);
+    const frame = try ExecuteFrame.read(arena.allocator(), envelope.header.version, &mr);
 
     const exp_query_id = "\x97\x97\x95\x6d\xfe\xb2\x4c\x99\x86\x8e\xd3\x84\xff\x6f\xd9\x4c";
     try testing.expectEqualSlices(u8, exp_query_id, frame.query_id);
@@ -592,7 +592,7 @@ test "execute frame" {
 
     // write
 
-    try testutils.expectSameRawFrame(ExecuteFrame, frame, raw_frame.header, exp);
+    try testutils.expectSameEnvelope(ExecuteFrame, frame, envelope.header, exp);
 }
 
 /// AUTHENTICATE is sent by a node in response to a STARTUP frame if authentication is required.
@@ -658,12 +658,12 @@ test "authenticate frame" {
     // read
 
     const exp = "\x84\x00\x00\x00\x03\x00\x00\x00\x31\x00\x2f\x6f\x72\x67\x2e\x61\x70\x61\x63\x68\x65\x2e\x63\x61\x73\x73\x61\x6e\x64\x72\x61\x2e\x61\x75\x74\x68\x2e\x50\x61\x73\x73\x77\x6f\x72\x64\x41\x75\x74\x68\x65\x6e\x74\x69\x63\x61\x74\x6f\x72";
-    const raw_frame = try testutils.readRawFrame(arena.allocator(), exp);
+    const envelope = try testutils.readEnvelope(arena.allocator(), exp);
 
-    try checkHeader(Opcode.Authenticate, exp.len, raw_frame.header);
+    try checkHeader(Opcode.Authenticate, exp.len, envelope.header);
 
     var mr: MessageReader = undefined;
-    mr.reset(raw_frame.body);
+    mr.reset(envelope.body);
     const frame = try AuthenticateFrame.read(arena.allocator(), &mr);
 
     try testing.expectEqualStrings("org.apache.cassandra.auth.PasswordAuthenticator", frame.authenticator);
@@ -680,12 +680,12 @@ test "auth response frame" {
     // read
 
     const exp = "\x04\x00\x00\x02\x0f\x00\x00\x00\x18\x00\x00\x00\x14\x00\x63\x61\x73\x73\x61\x6e\x64\x72\x61\x00\x63\x61\x73\x73\x61\x6e\x64\x72\x61";
-    const raw_frame = try testutils.readRawFrame(arena.allocator(), exp);
+    const envelope = try testutils.readEnvelope(arena.allocator(), exp);
 
-    try checkHeader(Opcode.AuthResponse, exp.len, raw_frame.header);
+    try checkHeader(Opcode.AuthResponse, exp.len, envelope.header);
 
     var mr: MessageReader = undefined;
-    mr.reset(raw_frame.body);
+    mr.reset(envelope.body);
     const frame = try AuthResponseFrame.read(arena.allocator(), &mr);
 
     const exp_token = "\x00cassandra\x00cassandra";
@@ -693,7 +693,7 @@ test "auth response frame" {
 
     // write
 
-    try testutils.expectSameRawFrame(AuthResponseFrame, frame, raw_frame.header, exp);
+    try testutils.expectSameEnvelope(AuthResponseFrame, frame, envelope.header, exp);
 }
 
 test "auth success frame" {
@@ -703,12 +703,12 @@ test "auth success frame" {
     // read
 
     const exp = "\x84\x00\x00\x02\x10\x00\x00\x00\x04\xff\xff\xff\xff";
-    const raw_frame = try testutils.readRawFrame(arena.allocator(), exp);
+    const envelope = try testutils.readEnvelope(arena.allocator(), exp);
 
-    try checkHeader(Opcode.AuthSuccess, exp.len, raw_frame.header);
+    try checkHeader(Opcode.AuthSuccess, exp.len, envelope.header);
 
     var mr: MessageReader = undefined;
-    mr.reset(raw_frame.body);
+    mr.reset(envelope.body);
     const frame = try AuthSuccessFrame.read(arena.allocator(), &mr);
 
     try testing.expect(frame.token == null);
@@ -920,13 +920,13 @@ test "batch frame: query type string" {
     // read
 
     const exp = "\x04\x00\x00\xc0\x0d\x00\x00\x00\xcc\x00\x00\x03\x00\x00\x00\x00\x3b\x49\x4e\x53\x45\x52\x54\x20\x49\x4e\x54\x4f\x20\x66\x6f\x6f\x62\x61\x72\x2e\x75\x73\x65\x72\x28\x69\x64\x2c\x20\x6e\x61\x6d\x65\x29\x20\x76\x61\x6c\x75\x65\x73\x28\x75\x75\x69\x64\x28\x29\x2c\x20\x27\x76\x69\x6e\x63\x65\x6e\x74\x27\x29\x00\x00\x00\x00\x00\x00\x3b\x49\x4e\x53\x45\x52\x54\x20\x49\x4e\x54\x4f\x20\x66\x6f\x6f\x62\x61\x72\x2e\x75\x73\x65\x72\x28\x69\x64\x2c\x20\x6e\x61\x6d\x65\x29\x20\x76\x61\x6c\x75\x65\x73\x28\x75\x75\x69\x64\x28\x29\x2c\x20\x27\x76\x69\x6e\x63\x65\x6e\x74\x27\x29\x00\x00\x00\x00\x00\x00\x3b\x49\x4e\x53\x45\x52\x54\x20\x49\x4e\x54\x4f\x20\x66\x6f\x6f\x62\x61\x72\x2e\x75\x73\x65\x72\x28\x69\x64\x2c\x20\x6e\x61\x6d\x65\x29\x20\x76\x61\x6c\x75\x65\x73\x28\x75\x75\x69\x64\x28\x29\x2c\x20\x27\x76\x69\x6e\x63\x65\x6e\x74\x27\x29\x00\x00\x00\x00\x00";
-    const raw_frame = try testutils.readRawFrame(arena.allocator(), exp);
+    const envelope = try testutils.readEnvelope(arena.allocator(), exp);
 
-    try checkHeader(Opcode.Batch, exp.len, raw_frame.header);
+    try checkHeader(Opcode.Batch, exp.len, envelope.header);
 
     var mr: MessageReader = undefined;
-    mr.reset(raw_frame.body);
-    const frame = try BatchFrame.read(arena.allocator(), raw_frame.header.version, &mr);
+    mr.reset(envelope.body);
+    const frame = try BatchFrame.read(arena.allocator(), envelope.header.version, &mr);
 
     try testing.expectEqual(BatchType.Logged, frame.batch_type);
 
@@ -947,7 +947,7 @@ test "batch frame: query type string" {
 
     // write
 
-    try testutils.expectSameRawFrame(BatchFrame, frame, raw_frame.header, exp);
+    try testutils.expectSameEnvelope(BatchFrame, frame, envelope.header, exp);
 }
 
 test "batch frame: query type prepared" {
@@ -957,13 +957,13 @@ test "batch frame: query type prepared" {
     // read
 
     const exp = "\x04\x00\x01\x00\x0d\x00\x00\x00\xa2\x00\x00\x03\x01\x00\x10\x88\xb7\xd6\x81\x8b\x2d\x8d\x97\xfc\x41\xc1\x34\x7b\x27\xde\x65\x00\x02\x00\x00\x00\x10\x3a\x9a\xab\x41\x68\x24\x4a\xef\x9d\xf5\x72\xc7\x84\xab\xa2\x57\x00\x00\x00\x07\x56\x69\x6e\x63\x65\x6e\x74\x01\x00\x10\x88\xb7\xd6\x81\x8b\x2d\x8d\x97\xfc\x41\xc1\x34\x7b\x27\xde\x65\x00\x02\x00\x00\x00\x10\xed\x54\xb0\x6d\xcc\xb2\x43\x51\x96\x51\x74\x5e\xee\xae\xd2\xfe\x00\x00\x00\x07\x56\x69\x6e\x63\x65\x6e\x74\x01\x00\x10\x88\xb7\xd6\x81\x8b\x2d\x8d\x97\xfc\x41\xc1\x34\x7b\x27\xde\x65\x00\x02\x00\x00\x00\x10\x79\xdf\x8a\x28\x5a\x60\x47\x19\x9b\x42\x84\xea\x69\x10\x1a\xe6\x00\x00\x00\x07\x56\x69\x6e\x63\x65\x6e\x74\x00\x00\x00";
-    const raw_frame = try testutils.readRawFrame(arena.allocator(), exp);
+    const envelope = try testutils.readEnvelope(arena.allocator(), exp);
 
-    try checkHeader(Opcode.Batch, exp.len, raw_frame.header);
+    try checkHeader(Opcode.Batch, exp.len, envelope.header);
 
     var mr: MessageReader = undefined;
-    mr.reset(raw_frame.body);
-    const frame = try BatchFrame.read(arena.allocator(), raw_frame.header.version, &mr);
+    mr.reset(envelope.body);
+    const frame = try BatchFrame.read(arena.allocator(), envelope.header.version, &mr);
 
     try testing.expectEqual(BatchType.Logged, frame.batch_type);
 
@@ -1000,7 +1000,7 @@ test "batch frame: query type prepared" {
 
     // write
 
-    try testutils.expectSameRawFrame(BatchFrame, frame, raw_frame.header, exp);
+    try testutils.expectSameEnvelope(BatchFrame, frame, envelope.header, exp);
 }
 
 /// EVENT is an event pushed by the server.
@@ -1061,12 +1061,12 @@ test "event frame: topology change" {
     // read
 
     const exp = "\x84\x00\xff\xff\x0c\x00\x00\x00\x24\x00\x0f\x54\x4f\x50\x4f\x4c\x4f\x47\x59\x5f\x43\x48\x41\x4e\x47\x45\x00\x08\x4e\x45\x57\x5f\x4e\x4f\x44\x45\x04\x7f\x00\x00\x04\x00\x00\x23\x52";
-    const raw_frame = try testutils.readRawFrame(arena.allocator(), exp);
+    const envlope = try testutils.readEnvelope(arena.allocator(), exp);
 
-    try checkHeader(Opcode.Event, exp.len, raw_frame.header);
+    try checkHeader(Opcode.Event, exp.len, envlope.header);
 
     var mr: MessageReader = undefined;
-    mr.reset(raw_frame.body);
+    mr.reset(envlope.body);
     const frame = try EventFrame.read(arena.allocator(), &mr);
 
     try testing.expect(frame.event == .TOPOLOGY_CHANGE);
@@ -1083,12 +1083,12 @@ test "event frame: status change" {
     defer arena.deinit();
 
     const data = "\x84\x00\xff\xff\x0c\x00\x00\x00\x1e\x00\x0d\x53\x54\x41\x54\x55\x53\x5f\x43\x48\x41\x4e\x47\x45\x00\x04\x44\x4f\x57\x4e\x04\x7f\x00\x00\x01\x00\x00\x23\x52";
-    const raw_frame = try testutils.readRawFrame(arena.allocator(), data);
+    const envelope = try testutils.readEnvelope(arena.allocator(), data);
 
-    try checkHeader(Opcode.Event, data.len, raw_frame.header);
+    try checkHeader(Opcode.Event, data.len, envelope.header);
 
     var mr: MessageReader = undefined;
-    mr.reset(raw_frame.body);
+    mr.reset(envelope.body);
     const frame = try EventFrame.read(arena.allocator(), &mr);
 
     try testing.expect(frame.event == .STATUS_CHANGE);
@@ -1105,12 +1105,12 @@ test "event frame: schema change/keyspace" {
     defer arena.deinit();
 
     const data = "\x84\x00\xff\xff\x0c\x00\x00\x00\x2a\x00\x0d\x53\x43\x48\x45\x4d\x41\x5f\x43\x48\x41\x4e\x47\x45\x00\x07\x43\x52\x45\x41\x54\x45\x44\x00\x08\x4b\x45\x59\x53\x50\x41\x43\x45\x00\x06\x62\x61\x72\x62\x61\x7a";
-    const raw_frame = try testutils.readRawFrame(arena.allocator(), data);
+    const envelope = try testutils.readEnvelope(arena.allocator(), data);
 
-    try checkHeader(Opcode.Event, data.len, raw_frame.header);
+    try checkHeader(Opcode.Event, data.len, envelope.header);
 
     var mr: MessageReader = undefined;
-    mr.reset(raw_frame.body);
+    mr.reset(envelope.body);
     const frame = try EventFrame.read(arena.allocator(), &mr);
 
     try testing.expect(frame.event == .SCHEMA_CHANGE);
@@ -1130,12 +1130,12 @@ test "event frame: schema change/table" {
     defer arena.deinit();
 
     const data = "\x84\x00\xff\xff\x0c\x00\x00\x00\x2e\x00\x0d\x53\x43\x48\x45\x4d\x41\x5f\x43\x48\x41\x4e\x47\x45\x00\x07\x43\x52\x45\x41\x54\x45\x44\x00\x05\x54\x41\x42\x4c\x45\x00\x06\x66\x6f\x6f\x62\x61\x72\x00\x05\x73\x61\x6c\x75\x74";
-    const raw_frame = try testutils.readRawFrame(arena.allocator(), data);
+    const envelope = try testutils.readEnvelope(arena.allocator(), data);
 
-    try checkHeader(Opcode.Event, data.len, raw_frame.header);
+    try checkHeader(Opcode.Event, data.len, envelope.header);
 
     var mr: MessageReader = undefined;
-    mr.reset(raw_frame.body);
+    mr.reset(envelope.body);
     const frame = try EventFrame.read(arena.allocator(), &mr);
 
     try testing.expect(frame.event == .SCHEMA_CHANGE);
@@ -1155,12 +1155,12 @@ test "event frame: schema change/function" {
     defer arena.deinit();
 
     const data = "\x84\x00\xff\xff\x0c\x00\x00\x00\x40\x00\x0d\x53\x43\x48\x45\x4d\x41\x5f\x43\x48\x41\x4e\x47\x45\x00\x07\x43\x52\x45\x41\x54\x45\x44\x00\x08\x46\x55\x4e\x43\x54\x49\x4f\x4e\x00\x06\x66\x6f\x6f\x62\x61\x72\x00\x0d\x73\x6f\x6d\x65\x5f\x66\x75\x6e\x63\x74\x69\x6f\x6e\x00\x01\x00\x03\x69\x6e\x74";
-    const raw_frame = try testutils.readRawFrame(arena.allocator(), data);
+    const envelope = try testutils.readEnvelope(arena.allocator(), data);
 
-    try checkHeader(Opcode.Event, data.len, raw_frame.header);
+    try checkHeader(Opcode.Event, data.len, envelope.header);
 
     var mr: MessageReader = undefined;
-    mr.reset(raw_frame.body);
+    mr.reset(envelope.body);
     const frame = try EventFrame.read(arena.allocator(), &mr);
 
     try testing.expect(frame.event == .SCHEMA_CHANGE);
@@ -1230,20 +1230,20 @@ test "prepare frame" {
     // read
 
     const exp = "\x04\x00\x00\xc0\x09\x00\x00\x00\x32\x00\x00\x00\x2e\x53\x45\x4c\x45\x43\x54\x20\x61\x67\x65\x2c\x20\x6e\x61\x6d\x65\x20\x66\x72\x6f\x6d\x20\x66\x6f\x6f\x62\x61\x72\x2e\x75\x73\x65\x72\x20\x77\x68\x65\x72\x65\x20\x69\x64\x20\x3d\x20\x3f";
-    const raw_frame = try testutils.readRawFrame(arena.allocator(), exp);
+    const envelope = try testutils.readEnvelope(arena.allocator(), exp);
 
-    try checkHeader(Opcode.Prepare, exp.len, raw_frame.header);
+    try checkHeader(Opcode.Prepare, exp.len, envelope.header);
 
     var mr: MessageReader = undefined;
-    mr.reset(raw_frame.body);
-    const frame = try PrepareFrame.read(arena.allocator(), raw_frame.header.version, &mr);
+    mr.reset(envelope.body);
+    const frame = try PrepareFrame.read(arena.allocator(), envelope.header.version, &mr);
 
     try testing.expectEqualStrings("SELECT age, name from foobar.user where id = ?", frame.query);
     try testing.expect(frame.keyspace == null);
 
     // write
 
-    try testutils.expectSameRawFrame(PrepareFrame, frame, raw_frame.header, exp);
+    try testutils.expectSameEnvelope(PrepareFrame, frame, envelope.header, exp);
 }
 
 /// QUERY is sent to perform a CQL query.
@@ -1275,13 +1275,13 @@ test "query frame: no values, no paging state" {
     // read
 
     const exp = "\x04\x00\x00\x08\x07\x00\x00\x00\x30\x00\x00\x00\x1b\x53\x45\x4c\x45\x43\x54\x20\x2a\x20\x46\x52\x4f\x4d\x20\x66\x6f\x6f\x62\x61\x72\x2e\x75\x73\x65\x72\x20\x3b\x00\x01\x34\x00\x00\x00\x64\x00\x08\x00\x05\xa2\x2c\xf0\x57\x3e\x3f";
-    const raw_frame = try testutils.readRawFrame(arena.allocator(), exp);
+    const envelope = try testutils.readEnvelope(arena.allocator(), exp);
 
-    try checkHeader(Opcode.Query, exp.len, raw_frame.header);
+    try checkHeader(Opcode.Query, exp.len, envelope.header);
 
     var mr: MessageReader = undefined;
-    mr.reset(raw_frame.body);
-    const frame = try QueryFrame.read(arena.allocator(), raw_frame.header.version, &mr);
+    mr.reset(envelope.body);
+    const frame = try QueryFrame.read(arena.allocator(), envelope.header.version, &mr);
 
     try testing.expectEqualStrings("SELECT * FROM foobar.user ;", frame.query);
     try testing.expectEqual(Consistency.One, frame.query_parameters.consistency_level);
@@ -1295,7 +1295,7 @@ test "query frame: no values, no paging state" {
 
     // write
 
-    try testutils.expectSameRawFrame(QueryFrame, frame, raw_frame.header, exp);
+    try testutils.expectSameEnvelope(QueryFrame, frame, envelope.header, exp);
 }
 
 /// READY is sent by a node to indicate it is ready to process queries.
@@ -1308,9 +1308,9 @@ test "ready frame" {
     defer arena.deinit();
 
     const data = "\x84\x00\x00\x02\x02\x00\x00\x00\x00";
-    const raw_frame = try testutils.readRawFrame(arena.allocator(), data);
+    const envelope = try testutils.readEnvelope(arena.allocator(), data);
 
-    try checkHeader(Opcode.Ready, data.len, raw_frame.header);
+    try checkHeader(Opcode.Ready, data.len, envelope.header);
 }
 
 /// REGISTER is sent to register this connection to receive some types of events.
@@ -1337,12 +1337,12 @@ test "register frame" {
     // read
 
     const exp = "\x04\x00\x00\xc0\x0b\x00\x00\x00\x31\x00\x03\x00\x0f\x54\x4f\x50\x4f\x4c\x4f\x47\x59\x5f\x43\x48\x41\x4e\x47\x45\x00\x0d\x53\x54\x41\x54\x55\x53\x5f\x43\x48\x41\x4e\x47\x45\x00\x0d\x53\x43\x48\x45\x4d\x41\x5f\x43\x48\x41\x4e\x47\x45";
-    const raw_frame = try testutils.readRawFrame(arena.allocator(), exp);
+    const envelope = try testutils.readEnvelope(arena.allocator(), exp);
 
-    try checkHeader(Opcode.Register, exp.len, raw_frame.header);
+    try checkHeader(Opcode.Register, exp.len, envelope.header);
 
     var mr: MessageReader = undefined;
-    mr.reset(raw_frame.body);
+    mr.reset(envelope.body);
     const frame = try RegisterFrame.read(arena.allocator(), &mr);
 
     try testing.expectEqual(@as(usize, 3), frame.event_types.len);
@@ -1352,7 +1352,7 @@ test "register frame" {
 
     // write
 
-    try testutils.expectSameRawFrame(RegisterFrame, frame, raw_frame.header, exp);
+    try testutils.expectSameEnvelope(RegisterFrame, frame, envelope.header, exp);
 }
 
 pub const Result = union(ResultKind) {
@@ -1490,13 +1490,13 @@ test "result frame: void" {
     defer arena.deinit();
 
     const data = "\x84\x00\x00\x9d\x08\x00\x00\x00\x04\x00\x00\x00\x01";
-    const raw_frame = try testutils.readRawFrame(arena.allocator(), data);
+    const envelope = try testutils.readEnvelope(arena.allocator(), data);
 
-    try checkHeader(Opcode.Result, data.len, raw_frame.header);
+    try checkHeader(Opcode.Result, data.len, envelope.header);
 
     var mr: MessageReader = undefined;
-    mr.reset(raw_frame.body);
-    const frame = try ResultFrame.read(arena.allocator(), raw_frame.header.version, &mr);
+    mr.reset(envelope.body);
+    const frame = try ResultFrame.read(arena.allocator(), envelope.header.version, &mr);
 
     try testing.expect(frame.result == .Void);
 }
@@ -1506,13 +1506,13 @@ test "result frame: rows" {
     defer arena.deinit();
 
     const data = "\x84\x00\x00\x20\x08\x00\x00\x00\xa2\x00\x00\x00\x02\x00\x00\x00\x01\x00\x00\x00\x03\x00\x06\x66\x6f\x6f\x62\x61\x72\x00\x04\x75\x73\x65\x72\x00\x02\x69\x64\x00\x0c\x00\x03\x61\x67\x65\x00\x14\x00\x04\x6e\x61\x6d\x65\x00\x0d\x00\x00\x00\x03\x00\x00\x00\x10\x35\x94\x43\xf3\xb7\xc4\x47\xb2\x8a\xb4\xe2\x42\x39\x79\x36\xf8\x00\x00\x00\x01\x00\x00\x00\x00\x08\x56\x69\x6e\x63\x65\x6e\x74\x30\x00\x00\x00\x10\xd7\x77\xd5\xd7\x58\xc0\x4d\x2b\x8c\xf9\xa3\x53\xfa\x8e\x6c\x96\x00\x00\x00\x01\x01\x00\x00\x00\x08\x56\x69\x6e\x63\x65\x6e\x74\x31\x00\x00\x00\x10\x94\xa4\x7b\xb2\x8c\xf7\x43\x3d\x97\x6e\x72\x74\xb3\xfd\xd3\x31\x00\x00\x00\x01\x02\x00\x00\x00\x08\x56\x69\x6e\x63\x65\x6e\x74\x32";
-    const raw_frame = try testutils.readRawFrame(arena.allocator(), data);
+    const envelope = try testutils.readEnvelope(arena.allocator(), data);
 
-    try checkHeader(Opcode.Result, data.len, raw_frame.header);
+    try checkHeader(Opcode.Result, data.len, envelope.header);
 
     var mr: MessageReader = undefined;
-    mr.reset(raw_frame.body);
-    const frame = try ResultFrame.read(arena.allocator(), raw_frame.header.version, &mr);
+    mr.reset(envelope.body);
+    const frame = try ResultFrame.read(arena.allocator(), envelope.header.version, &mr);
 
     try testing.expect(frame.result == .Rows);
 
@@ -1561,13 +1561,13 @@ test "result frame: rows, don't skip metadata" {
     defer arena.deinit();
 
     const data = "\x84\x00\x00\x00\x08\x00\x00\x02\x3a\x00\x00\x00\x02\x00\x00\x00\x01\x00\x00\x00\x03\x00\x06\x66\x6f\x6f\x62\x61\x72\x00\x04\x75\x73\x65\x72\x00\x02\x69\x64\x00\x0c\x00\x03\x61\x67\x65\x00\x00\x00\x28\x6f\x72\x67\x2e\x61\x70\x61\x63\x68\x65\x2e\x63\x61\x73\x73\x61\x6e\x64\x72\x61\x2e\x64\x62\x2e\x6d\x61\x72\x73\x68\x61\x6c\x2e\x42\x79\x74\x65\x54\x79\x70\x65\x00\x04\x6e\x61\x6d\x65\x00\x0d\x00\x00\x00\x0d\x00\x00\x00\x10\x35\x94\x43\xf3\xb7\xc4\x47\xb2\x8a\xb4\xe2\x42\x39\x79\x36\xf8\x00\x00\x00\x01\x00\x00\x00\x00\x08\x56\x69\x6e\x63\x65\x6e\x74\x30\x00\x00\x00\x10\x87\x0e\x45\x7f\x56\x4a\x4f\xd5\xb5\xd6\x4a\x48\x4b\xe0\x67\x67\x00\x00\x00\x01\x01\x00\x00\x00\x08\x56\x69\x6e\x63\x65\x6e\x74\x31\x00\x00\x00\x10\xc5\xb1\x12\xf4\x0d\xea\x4d\x22\x83\x5b\xe0\x25\xef\x69\x0c\xe1\x00\x00\x00\x01\x01\x00\x00\x00\x08\x56\x69\x6e\x63\x65\x6e\x74\x31\x00\x00\x00\x10\xd7\x77\xd5\xd7\x58\xc0\x4d\x2b\x8c\xf9\xa3\x53\xfa\x8e\x6c\x96\x00\x00\x00\x01\x01\x00\x00\x00\x08\x56\x69\x6e\x63\x65\x6e\x74\x31\x00\x00\x00\x10\x65\x54\x02\x89\x33\xe1\x42\x73\x82\xcc\x1c\xdb\x3d\x24\x5e\x40\x00\x00\x00\x01\x00\x00\x00\x00\x08\x56\x69\x6e\x63\x65\x6e\x74\x30\x00\x00\x00\x10\x6a\xd1\x07\x9d\x27\x23\x47\x76\x8b\x7f\x39\x4d\xe3\xb8\x97\xc5\x00\x00\x00\x01\x02\x00\x00\x00\x08\x56\x69\x6e\x63\x65\x6e\x74\x32\x00\x00\x00\x10\xe9\xef\xfe\xa6\xeb\xc5\x4d\xb9\xaf\xc7\xd7\xc0\x28\x43\x27\x40\x00\x00\x00\x01\x00\x00\x00\x00\x08\x56\x69\x6e\x63\x65\x6e\x74\x30\x00\x00\x00\x10\x96\xe6\xdd\x62\x14\xc9\x4e\x7c\xa1\x2f\x98\x5e\xe9\xe0\x91\x0d\x00\x00\x00\x01\x02\x00\x00\x00\x08\x56\x69\x6e\x63\x65\x6e\x74\x32\x00\x00\x00\x10\xef\xd5\x5a\x9b\xec\x7f\x4c\x5c\x89\xc3\x8c\xfa\x28\xf9\x6d\xfe\x00\x00\x00\x01\x00\x00\x00\x00\x08\x56\x69\x6e\x63\x65\x6e\x74\x30\x00\x00\x00\x10\x94\xa4\x7b\xb2\x8c\xf7\x43\x3d\x97\x6e\x72\x74\xb3\xfd\xd3\x31\x00\x00\x00\x01\x02\x00\x00\x00\x08\x56\x69\x6e\x63\x65\x6e\x74\x32\x00\x00\x00\x10\xe6\x02\xc7\x47\xbf\xca\x44\xbc\x9d\xc6\x6b\x04\x0f\xb7\x15\xed\x00\x00\x00\x01\x78\x00\x00\x00\x04\x48\x61\x68\x61\x00\x00\x00\x10\xac\x5e\xcc\xa8\x8e\xa1\x42\x2f\x86\xe6\xa0\x93\xbe\xd2\x73\x22\x00\x00\x00\x01\x02\x00\x00\x00\x08\x56\x69\x6e\x63\x65\x6e\x74\x32\x00\x00\x00\x10\xbe\x90\x37\x66\x31\xe5\x43\x93\xbc\x99\x43\xd3\x69\xf8\xe6\xba\x00\x00\x00\x01\x01\x00\x00\x00\x08\x56\x69\x6e\x63\x65\x6e\x74\x31";
-    const raw_frame = try testutils.readRawFrame(arena.allocator(), data);
+    const envelope = try testutils.readEnvelope(arena.allocator(), data);
 
-    try checkHeader(Opcode.Result, data.len, raw_frame.header);
+    try checkHeader(Opcode.Result, data.len, envelope.header);
 
     var mr: MessageReader = undefined;
-    mr.reset(raw_frame.body);
-    const frame = try ResultFrame.read(arena.allocator(), raw_frame.header.version, &mr);
+    mr.reset(envelope.body);
+    const frame = try ResultFrame.read(arena.allocator(), envelope.header.version, &mr);
 
     try testing.expect(frame.result == .Rows);
 
@@ -1606,13 +1606,13 @@ test "result frame: rows, list of uuid" {
     defer arena.deinit();
 
     const data = "\x84\x00\x00\x00\x08\x00\x00\x00\x58\x00\x00\x00\x02\x00\x00\x00\x01\x00\x00\x00\x02\x00\x06\x66\x6f\x6f\x62\x61\x72\x00\x0a\x61\x67\x65\x5f\x74\x6f\x5f\x69\x64\x73\x00\x03\x61\x67\x65\x00\x09\x00\x03\x69\x64\x73\x00\x20\x00\x0c\x00\x00\x00\x01\x00\x00\x00\x04\x00\x00\x00\x78\x00\x00\x00\x18\x00\x00\x00\x01\x00\x00\x00\x10\xe6\x02\xc7\x47\xbf\xca\x44\xbc\x9d\xc6\x6b\x04\x0f\xb7\x15\xed";
-    const raw_frame = try testutils.readRawFrame(arena.allocator(), data);
+    const envelope = try testutils.readEnvelope(arena.allocator(), data);
 
-    try checkHeader(Opcode.Result, data.len, raw_frame.header);
+    try checkHeader(Opcode.Result, data.len, envelope.header);
 
     var mr: MessageReader = undefined;
-    mr.reset(raw_frame.body);
-    const frame = try ResultFrame.read(arena.allocator(), raw_frame.header.version, &mr);
+    mr.reset(envelope.body);
+    const frame = try ResultFrame.read(arena.allocator(), envelope.header.version, &mr);
 
     try testing.expect(frame.result == .Rows);
 
@@ -1647,13 +1647,13 @@ test "result frame: set keyspace" {
     defer arena.deinit();
 
     const data = "\x84\x00\x00\x77\x08\x00\x00\x00\x0c\x00\x00\x00\x03\x00\x06\x66\x6f\x6f\x62\x61\x72";
-    const raw_frame = try testutils.readRawFrame(arena.allocator(), data);
+    const envelope = try testutils.readEnvelope(arena.allocator(), data);
 
-    try checkHeader(Opcode.Result, data.len, raw_frame.header);
+    try checkHeader(Opcode.Result, data.len, envelope.header);
 
     var mr: MessageReader = undefined;
-    mr.reset(raw_frame.body);
-    const frame = try ResultFrame.read(arena.allocator(), raw_frame.header.version, &mr);
+    mr.reset(envelope.body);
+    const frame = try ResultFrame.read(arena.allocator(), envelope.header.version, &mr);
 
     try testing.expect(frame.result == .SetKeyspace);
     try testing.expectEqualStrings("foobar", frame.result.SetKeyspace);
@@ -1664,13 +1664,13 @@ test "result frame: prepared insert" {
     defer arena.deinit();
 
     const data = "\x84\x00\x00\x80\x08\x00\x00\x00\x4f\x00\x00\x00\x04\x00\x10\x63\x7c\x1c\x1f\xd0\x13\x4a\xb8\xfc\x94\xca\x67\xf2\x88\xb2\xa3\x00\x00\x00\x01\x00\x00\x00\x03\x00\x00\x00\x01\x00\x00\x00\x06\x66\x6f\x6f\x62\x61\x72\x00\x04\x75\x73\x65\x72\x00\x02\x69\x64\x00\x0c\x00\x03\x61\x67\x65\x00\x14\x00\x04\x6e\x61\x6d\x65\x00\x0d\x00\x00\x00\x04\x00\x00\x00\x00";
-    const raw_frame = try testutils.readRawFrame(arena.allocator(), data);
+    const envelope = try testutils.readEnvelope(arena.allocator(), data);
 
-    try checkHeader(Opcode.Result, data.len, raw_frame.header);
+    try checkHeader(Opcode.Result, data.len, envelope.header);
 
     var mr: MessageReader = undefined;
-    mr.reset(raw_frame.body);
-    const frame = try ResultFrame.read(arena.allocator(), raw_frame.header.version, &mr);
+    mr.reset(envelope.body);
+    const frame = try ResultFrame.read(arena.allocator(), envelope.header.version, &mr);
 
     try testing.expect(frame.result == .Prepared);
 
@@ -1709,13 +1709,13 @@ test "result frame: prepared select" {
     defer arena.deinit();
 
     const data = "\x84\x00\x00\xc0\x08\x00\x00\x00\x63\x00\x00\x00\x04\x00\x10\x3b\x2e\x8d\x03\x43\xf4\x3b\xfc\xad\xa1\x78\x9c\x27\x0e\xcf\xee\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x06\x66\x6f\x6f\x62\x61\x72\x00\x04\x75\x73\x65\x72\x00\x02\x69\x64\x00\x0c\x00\x00\x00\x01\x00\x00\x00\x03\x00\x06\x66\x6f\x6f\x62\x61\x72\x00\x04\x75\x73\x65\x72\x00\x02\x69\x64\x00\x0c\x00\x03\x61\x67\x65\x00\x14\x00\x04\x6e\x61\x6d\x65\x00\x0d";
-    const raw_frame = try testutils.readRawFrame(arena.allocator(), data);
+    const envelope = try testutils.readEnvelope(arena.allocator(), data);
 
-    try checkHeader(Opcode.Result, data.len, raw_frame.header);
+    try checkHeader(Opcode.Result, data.len, envelope.header);
 
     var mr: MessageReader = undefined;
-    mr.reset(raw_frame.body);
-    const frame = try ResultFrame.read(arena.allocator(), raw_frame.header.version, &mr);
+    mr.reset(envelope.body);
+    const frame = try ResultFrame.read(arena.allocator(), envelope.header.version, &mr);
 
     try testing.expect(frame.result == .Prepared);
 
@@ -1821,12 +1821,12 @@ test "supported frame" {
     // read
 
     const exp = "\x84\x00\x00\x09\x06\x00\x00\x00\x60\x00\x03\x00\x11\x50\x52\x4f\x54\x4f\x43\x4f\x4c\x5f\x56\x45\x52\x53\x49\x4f\x4e\x53\x00\x03\x00\x04\x33\x2f\x76\x33\x00\x04\x34\x2f\x76\x34\x00\x09\x35\x2f\x76\x35\x2d\x62\x65\x74\x61\x00\x0b\x43\x4f\x4d\x50\x52\x45\x53\x53\x49\x4f\x4e\x00\x02\x00\x06\x73\x6e\x61\x70\x70\x79\x00\x03\x6c\x7a\x34\x00\x0b\x43\x51\x4c\x5f\x56\x45\x52\x53\x49\x4f\x4e\x00\x01\x00\x05\x33\x2e\x34\x2e\x34";
-    const raw_frame = try testutils.readRawFrame(arena.allocator(), exp);
+    const envelope = try testutils.readEnvelope(arena.allocator(), exp);
 
-    try checkHeader(Opcode.Supported, exp.len, raw_frame.header);
+    try checkHeader(Opcode.Supported, exp.len, envelope.header);
 
     var mr: MessageReader = undefined;
-    mr.reset(raw_frame.body);
+    mr.reset(envelope.body);
     const frame = try SupportedFrame.read(arena.allocator(), &mr);
 
     try testing.expectEqual(@as(usize, 1), frame.cql_versions.len);

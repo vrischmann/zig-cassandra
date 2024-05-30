@@ -8,11 +8,11 @@ const net = std.net;
 
 const frame = @import("frame.zig");
 
-const FrameFlags = frame.FrameFlags;
-const FrameHeader = frame.FrameHeader;
-const RawFrame = frame.RawFrame;
-const RawFrameReader = frame.RawFrameReader;
-const RawFrameWriter = frame.RawFrameWriter;
+const EnvelopeFlags = frame.EnvelopeFlags;
+const EnvelopeHeader = frame.EnvelopeHeader;
+const Envelope = frame.Envelope;
+const EnvelopeReader = frame.EnvelopeReader;
+const EnvelopeWriter = frame.EnvelopeWriter;
 
 const AuthChallengeFrame = frame.AuthChallengeFrame;
 const AuthResponseFrame = frame.AuthResponseFrame;
@@ -88,8 +88,8 @@ pub const Connection = struct {
     const BufferedReaderType = io.BufferedReader(4096, std.net.Stream.Reader);
     const BufferedWriterType = io.BufferedWriter(4096, std.net.Stream.Writer);
 
-    const RawFrameReaderType = RawFrameReader(BufferedReaderType.Reader);
-    const RawFrameWriterType = RawFrameWriter(BufferedWriterType.Writer);
+    const EnvelopeReaderType = EnvelopeReader(BufferedReaderType.Reader);
+    const EnvelopeWriterType = EnvelopeWriter(BufferedWriterType.Writer);
 
     /// Contains the state that is negotiated with a node as part of the handshake.
     const NegotiatedState = struct {
@@ -105,8 +105,8 @@ pub const Connection = struct {
     buffered_writer: BufferedWriterType,
 
     /// Helpers types needed to decode the CQL protocol.
-    raw_frame_reader: RawFrameReaderType,
-    raw_frame_writer: RawFrameWriterType,
+    envelope_reader: EnvelopeReaderType,
+    envelope_writer: EnvelopeWriterType,
     message_reader: MessageReader,
     message_writer: MessageWriter,
 
@@ -123,8 +123,8 @@ pub const Connection = struct {
         self.buffered_reader = BufferedReaderType{ .unbuffered_reader = self.socket.reader() };
         self.buffered_writer = BufferedWriterType{ .unbuffered_writer = self.socket.writer() };
 
-        self.raw_frame_reader = RawFrameReaderType.init(self.buffered_reader.reader());
-        self.raw_frame_writer = RawFrameWriterType.init(self.buffered_writer.writer());
+        self.envelope_reader = EnvelopeReaderType.init(self.buffered_reader.reader());
+        self.envelope_writer = EnvelopeWriterType.init(self.buffered_writer.writer());
         MessageReader.reset(&self.message_reader, "");
 
         var dummy_diags = InitOptions.Diagnostics{};
@@ -280,8 +280,8 @@ pub const Connection = struct {
         self.message_writer.reset();
 
         // Prepare the raw frame
-        var raw_frame = RawFrame{
-            .header = FrameHeader{
+        var envelope = Envelope{
+            .header = EnvelopeHeader{
                 .version = options.protocol_version,
                 .flags = 0,
                 .stream = 0,
@@ -292,7 +292,7 @@ pub const Connection = struct {
         };
 
         if (options.protocol_version.is(5)) {
-            raw_frame.header.flags |= FrameFlags.UseBeta;
+            envelope.header.flags |= EnvelopeFlags.UseBeta;
         }
 
         if (std.meta.hasMethod(FrameType, "write")) {
@@ -312,8 +312,8 @@ pub const Connection = struct {
             const written = self.message_writer.getWritten();
 
             // Default to using the uncompressed body.
-            raw_frame.header.body_len = @intCast(written.len);
-            raw_frame.body = written;
+            envelope.header.body_len = @intCast(written.len);
+            envelope.body = written;
 
             // Compress the body if we can use it.
             if (options.compression) |compression| {
@@ -321,24 +321,24 @@ pub const Connection = struct {
                     .LZ4 => {
                         const compressed_data = try lz4.compress(allocator, written);
 
-                        raw_frame.header.flags |= FrameFlags.Compression;
-                        raw_frame.header.body_len = @intCast(compressed_data.len);
-                        raw_frame.body = compressed_data;
+                        envelope.header.flags |= EnvelopeFlags.Compression;
+                        envelope.header.body_len = @intCast(compressed_data.len);
+                        envelope.body = compressed_data;
                     },
                     .Snappy => {
                         if (comptime !enable_snappy) return error.InvalidCompressedFrame;
 
                         const compressed_data = try snappy.compress(allocator, written);
 
-                        raw_frame.header.flags |= FrameFlags.Compression;
-                        raw_frame.header.body_len = @intCast(compressed_data.len);
-                        raw_frame.body = compressed_data;
+                        envelope.header.flags |= EnvelopeFlags.Compression;
+                        envelope.header.body_len = @intCast(compressed_data.len);
+                        envelope.body = compressed_data;
                     },
                 }
             }
         }
 
-        try self.raw_frame_writer.write(raw_frame);
+        try self.envelope_writer.write(envelope);
         try self.buffered_writer.flush();
     }
 
@@ -347,14 +347,14 @@ pub const Connection = struct {
     };
 
     pub fn readFrame(self: *Self, allocator: mem.Allocator, options: ?ReadFrameOptions) !Frame {
-        const raw_frame = try self.readRawFrame(allocator);
-        defer raw_frame.deinit(allocator);
+        const envelope = try self.readEnvelope(allocator);
+        defer envelope.deinit(allocator);
 
-        self.message_reader.reset(raw_frame.body);
+        self.message_reader.reset(envelope.body);
 
         const frame_allocator = if (options) |opts| opts.frame_allocator else allocator;
 
-        return switch (raw_frame.header.opcode) {
+        return switch (envelope.header.opcode) {
             .Error => Frame{ .Error = try ErrorFrame.read(frame_allocator, &self.message_reader) },
             .Startup => Frame{ .Startup = try StartupFrame.read(frame_allocator, &self.message_reader) },
             .Ready => Frame{ .Ready = ReadyFrame{} },
@@ -366,30 +366,30 @@ pub const Connection = struct {
             .Authenticate => Frame{ .Authenticate = try AuthenticateFrame.read(frame_allocator, &self.message_reader) },
             .AuthChallenge => Frame{ .AuthChallenge = try AuthChallengeFrame.read(frame_allocator, &self.message_reader) },
             .AuthSuccess => Frame{ .AuthSuccess = try AuthSuccessFrame.read(frame_allocator, &self.message_reader) },
-            else => std.debug.panic("invalid read frame {}\n", .{raw_frame.header.opcode}),
+            else => std.debug.panic("invalid read frame {}\n", .{envelope.header.opcode}),
         };
     }
 
-    fn readRawFrame(self: *Self, allocator: mem.Allocator) !RawFrame {
-        var raw_frame = try self.raw_frame_reader.read(allocator);
+    fn readEnvelope(self: *Self, allocator: mem.Allocator) !Envelope {
+        var envelope = try self.envelope_reader.read(allocator);
 
-        if (raw_frame.header.flags & FrameFlags.Compression == FrameFlags.Compression) {
+        if (envelope.header.flags & EnvelopeFlags.Compression == EnvelopeFlags.Compression) {
             const compression = self.options.compression orelse return error.InvalidCompressedFrame;
 
             switch (compression) {
                 .LZ4 => {
-                    const decompressed_data = try lz4.decompress(allocator, raw_frame.body);
-                    raw_frame.body = decompressed_data;
+                    const decompressed_data = try lz4.decompress(allocator, envelope.body);
+                    envelope.body = decompressed_data;
                 },
                 .Snappy => {
                     if (comptime !enable_snappy) return error.InvalidCompressedFrame;
 
-                    const decompressed_data = try snappy.decompress(allocator, raw_frame.body);
-                    raw_frame.body = decompressed_data;
+                    const decompressed_data = try snappy.decompress(allocator, envelope.body);
+                    envelope.body = decompressed_data;
                 },
             }
         }
 
-        return raw_frame;
+        return envelope;
     }
 };
