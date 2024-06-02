@@ -2,13 +2,12 @@ const std = @import("std");
 const io = std.io;
 const mem = std.mem;
 
-const MessageWriter = @import("message.zig").MessageWriter;
-
-const frame = @import("frame.zig");
-const EnvelopeHeader = frame.EnvelopeHeader;
-const Envelope = frame.Envelope;
-const EnvelopeReader = frame.EnvelopeReader;
-const EnvelopeWriter = frame.EnvelopeWriter;
+const protocol = @import("protocol.zig");
+const EnvelopeHeader = protocol.EnvelopeHeader;
+const Envelope = protocol.Envelope;
+const EnvelopeReader = protocol.EnvelopeReader;
+const EnvelopeWriter = protocol.EnvelopeWriter;
+const MessageWriter = protocol.MessageWriter;
 
 pub fn printHRBytes(comptime fmt: []const u8, exp: []const u8, args: anytype) void {
     const hextable = "0123456789abcdef";

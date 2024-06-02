@@ -7,12 +7,12 @@ const testing = std.testing;
 
 const bigint = @import("bigint.zig");
 
-const message = @import("message.zig");
-const MessageReader = message.MessageReader;
-const OptionID = message.OptionID;
+const protocol = @import("protocol.zig");
 
-const ColumnData = @import("frame.zig").ColumnData;
-const RowData = @import("frame.zig").RowData;
+const ColumnData = protocol.ColumnData;
+const RowData = protocol.RowData;
+const MessageReader = protocol.MessageReader;
+const OptionID = protocol.OptionID;
 
 const ColumnSpec = @import("metadata.zig").ColumnSpec;
 const GlobalTableSpec = @import("metadata.zig").GlobalTableSpec;

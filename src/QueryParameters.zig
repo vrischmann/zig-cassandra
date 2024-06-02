@@ -3,17 +3,17 @@ const mem = std.mem;
 const meta = std.meta;
 const net = std.net;
 
-const message = @import("message.zig");
-const CompressionAlgorithm = message.CompressionAlgorithm;
-const Consistency = message.Consistency;
-const MessageReader = message.MessageReader;
-const MessageWriter = message.MessageWriter;
-const NamedValue = message.NamedValue;
-const NotSet = message.NotSet;
-const OptionID = message.OptionID;
-const ProtocolVersion = message.ProtocolVersion;
-const Value = message.Value;
-const Values = message.Values;
+const protocol = @import("protocol.zig");
+const CompressionAlgorithm = protocol.CompressionAlgorithm;
+const Consistency = protocol.Consistency;
+const MessageReader = protocol.MessageReader;
+const MessageWriter = protocol.MessageWriter;
+const NamedValue = protocol.NamedValue;
+const NotSet = protocol.NotSet;
+const OptionID = protocol.OptionID;
+const ProtocolVersion = protocol.ProtocolVersion;
+const Value = protocol.Value;
+const Values = protocol.Values;
 
 const Self = @This();
 

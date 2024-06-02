@@ -3,9 +3,9 @@ const mem = std.mem;
 const testing = std.testing;
 const net = std.net;
 
-const message = @import("message.zig");
-const MessageReader = message.MessageReader;
-const MessageWriter = message.MessageWriter;
+const protocol = @import("protocol.zig");
+const MessageReader = protocol.MessageReader;
+const MessageWriter = protocol.MessageWriter;
 
 const testutils = @import("testutils.zig");
 

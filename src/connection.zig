@@ -6,36 +6,35 @@ const log = std.log;
 const mem = std.mem;
 const net = std.net;
 
-const frame = @import("frame.zig");
+const protocol = @import("protocol.zig");
 
-const EnvelopeFlags = frame.EnvelopeFlags;
-const EnvelopeHeader = frame.EnvelopeHeader;
-const Envelope = frame.Envelope;
-const EnvelopeReader = frame.EnvelopeReader;
-const EnvelopeWriter = frame.EnvelopeWriter;
+const EnvelopeFlags = protocol.EnvelopeFlags;
+const EnvelopeHeader = protocol.EnvelopeHeader;
+const Envelope = protocol.Envelope;
+const EnvelopeReader = protocol.EnvelopeReader;
+const EnvelopeWriter = protocol.EnvelopeWriter;
 
-const AuthChallengeFrame = frame.AuthChallengeFrame;
-const AuthResponseFrame = frame.AuthResponseFrame;
-const AuthSuccessFrame = frame.AuthSuccessFrame;
-const AuthenticateFrame = frame.AuthenticateFrame;
-const BatchFrame = frame.BatchFrame;
-const ErrorFrame = frame.ErrorFrame;
-const EventFrame = frame.EventFrame;
-const ExecuteFrame = frame.ExecuteFrame;
-const PrepareFrame = frame.PrepareFrame;
-const QueryFrame = frame.QueryFrame;
-const ReadyFrame = frame.ReadyFrame;
-const ResultFrame = frame.ResultFrame;
-const StartupFrame = frame.StartupFrame;
-const SupportedFrame = frame.SupportedFrame;
+const CQLVersion = protocol.CQLVersion;
+const CompressionAlgorithm = protocol.CompressionAlgorithm;
+const MessageReader = protocol.MessageReader;
+const MessageWriter = protocol.MessageWriter;
+const Opcode = protocol.Opcode;
+const ProtocolVersion = protocol.ProtocolVersion;
 
-const message = @import("message.zig");
-const CQLVersion = message.CQLVersion;
-const CompressionAlgorithm = message.CompressionAlgorithm;
-const MessageReader = message.MessageReader;
-const MessageWriter = message.MessageWriter;
-const Opcode = message.Opcode;
-const ProtocolVersion = message.ProtocolVersion;
+const AuthChallengeFrame = protocol.AuthChallengeFrame;
+const AuthResponseFrame = protocol.AuthResponseFrame;
+const AuthSuccessFrame = protocol.AuthSuccessFrame;
+const AuthenticateFrame = protocol.AuthenticateFrame;
+const BatchFrame = protocol.BatchFrame;
+const ErrorFrame = protocol.ErrorFrame;
+const EventFrame = protocol.EventFrame;
+const ExecuteFrame = protocol.ExecuteFrame;
+const PrepareFrame = protocol.PrepareFrame;
+const QueryFrame = protocol.QueryFrame;
+const ReadyFrame = protocol.ReadyFrame;
+const ResultFrame = protocol.ResultFrame;
+const StartupFrame = protocol.StartupFrame;
+const SupportedFrame = protocol.SupportedFrame;
 
 const lz4 = @import("lz4.zig");
 const enable_snappy = build_options.with_snappy;
@@ -171,7 +170,7 @@ pub const Connection = struct {
         try self.writeFrame(
             fba.allocator(),
             .Options,
-            frame.OptionsFrame,
+            protocol.OptionsFrame,
             .{},
             .{
                 .protocol_version = self.options.protocol_version,
@@ -195,8 +194,8 @@ pub const Connection = struct {
         try self.writeFrame(
             fba.allocator(),
             .Startup,
-            frame.StartupFrame,
-            frame.StartupFrame{
+            protocol.StartupFrame,
+            protocol.StartupFrame{
                 .cql_version = self.negotiated_state.cql_version,
                 .compression = self.options.compression,
             },
@@ -236,8 +235,8 @@ pub const Connection = struct {
             try self.writeFrame(
                 allocator,
                 .AuthResponse,
-                frame.AuthResponseFrame,
-                frame.AuthResponseFrame{
+                protocol.AuthResponseFrame,
+                protocol.AuthResponseFrame{
                     .token = token,
                 },
                 .{
@@ -280,7 +279,7 @@ pub const Connection = struct {
     /// Additionally this method takes care of compression if enabled.
     ///
     /// This method is not thread safe.
-    pub fn writeFrame(self: *Self, allocator: mem.Allocator, opcode: Opcode, comptime FrameType: type, fr: FrameType, options: WriteFrameOptions) !void {
+    pub fn writeFrame(self: *Self, allocator: mem.Allocator, opcode: Opcode, comptime FrameType: type, frame: FrameType, options: WriteFrameOptions) !void {
         self.message_writer.reset();
 
         // Prepare the raw frame
@@ -304,9 +303,9 @@ pub const Connection = struct {
             switch (@typeInfo(@TypeOf(FrameType.write))) {
                 .Fn => |info| {
                     if (info.params.len == 3) {
-                        try fr.write(options.protocol_version, &self.message_writer);
+                        try frame.write(options.protocol_version, &self.message_writer);
                     } else {
-                        try fr.write(&self.message_writer);
+                        try frame.write(&self.message_writer);
                     }
                 },
                 else => unreachable,

@@ -2,15 +2,16 @@ const std = @import("std");
 const mem = std.mem;
 const testing = std.testing;
 
-const message = @import("message.zig");
-const CompressionAlgorithm = message.CompressionAlgorithm;
-const Consistency = message.Consistency;
-const MessageReader = message.MessageReader;
-const NotSet = message.NotSet;
-const OptionID = message.OptionID;
-const ProtocolVersion = message.ProtocolVersion;
-const Value = message.Value;
-const Values = message.Values;
+const protocol = @import("protocol.zig");
+
+const CompressionAlgorithm = protocol.CompressionAlgorithm;
+const Consistency = protocol.Consistency;
+const MessageReader = protocol.MessageReader;
+const NotSet = protocol.NotSet;
+const OptionID = protocol.OptionID;
+const ProtocolVersion = protocol.ProtocolVersion;
+const Value = protocol.Value;
+const Values = protocol.Values;
 
 pub const GlobalTableSpec = struct {
     keyspace: []const u8,

@@ -3,9 +3,9 @@ const big = std.math.big;
 const mem = std.mem;
 const testing = std.testing;
 
-const message = @import("message.zig");
-const CompressionAlgorithm = message.CompressionAlgorithm;
-const ProtocolVersion = message.ProtocolVersion;
+const protocol = @import("protocol.zig");
+const CompressionAlgorithm = protocol.CompressionAlgorithm;
+const ProtocolVersion = protocol.ProtocolVersion;
 
 const Client = @import("client.zig").Client;
 const Connection = @import("connection.zig").Connection;

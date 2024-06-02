@@ -17,29 +17,29 @@ const ColumnSpec = @import("metadata.zig").ColumnSpec;
 
 const bigint = @import("bigint.zig");
 
-const message = @import("message.zig");
-const CompressionAlgorithm = message.CompressionAlgorithm;
-const Consistency = message.Consistency;
-const NotSet = message.NotSet;
-const OptionID = message.OptionID;
-const ProtocolVersion = message.ProtocolVersion;
-const Value = message.Value;
-const Values = message.Values;
-const MessageWriter = message.MessageWriter;
+const protocol = @import("protocol.zig");
+const CompressionAlgorithm = protocol.CompressionAlgorithm;
+const Consistency = protocol.Consistency;
+const NotSet = protocol.NotSet;
+const OptionID = protocol.OptionID;
+const ProtocolVersion = protocol.ProtocolVersion;
+const Value = protocol.Value;
+const Values = protocol.Values;
+const MessageWriter = protocol.MessageWriter;
 
-const AlreadyExistsError = message.AlreadyExistsError;
-const FunctionFailureError = message.FunctionFailureError;
-const ReadError = message.ReadError;
-const UnavailableReplicasError = message.UnavailableReplicasError;
-const UnpreparedError = message.UnpreparedError;
-const WriteError = message.WriteError;
+const ExecuteFrame = protocol.ExecuteFrame;
+const PrepareFrame = protocol.PrepareFrame;
+const QueryFrame = protocol.QueryFrame;
+
+const AlreadyExistsError = protocol.AlreadyExistsError;
+const FunctionFailureError = protocol.FunctionFailureError;
+const ReadError = protocol.ReadError;
+const UnavailableReplicasError = protocol.UnavailableReplicasError;
+const UnpreparedError = protocol.UnpreparedError;
+const WriteError = protocol.WriteError;
 
 const Iterator = @import("iterator.zig").Iterator;
 const QueryParameters = @import("QueryParameters.zig");
-
-const ExecuteFrame = @import("frame.zig").ExecuteFrame;
-const PrepareFrame = @import("frame.zig").PrepareFrame;
-const QueryFrame = @import("frame.zig").QueryFrame;
 
 const testutils = @import("testutils.zig");
 const casstest = @import("casstest.zig");
