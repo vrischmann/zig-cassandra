@@ -1,3 +1,4 @@
-/zig-cache
+/.zig-cache
 /vgcore.*
+/qemu*.core
 /build_runner.zig
