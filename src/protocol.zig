@@ -1569,8 +1569,6 @@ test "message writer: write consistency" {
     }
 }
 
-// TODO(vincent): do we want to keep these wrapper types ?
-
 /// ColumnData is a wrapper around a slice of bytes.
 pub const ColumnData = struct {
     slice: []const u8,
@@ -1581,7 +1579,7 @@ pub const RowData = struct {
     slice: []const ColumnData,
 };
 
-pub fn checkHeader(opcode: Opcode, data_len: usize, header: EnvelopeHeader) !void {
+fn checkHeader(opcode: Opcode, data_len: usize, header: EnvelopeHeader) !void {
     // We can only use v4 for now
     try testing.expect(header.version.is(4));
     // Don't care about the flags here
@@ -1607,6 +1605,10 @@ test "envelope header: read and write" {
     try testing.expectEqual(@as(u32, 0), header.body_len);
     try testing.expectEqual(@as(usize, 0), exp.len - EnvelopeHeader.Size);
 }
+
+//
+// All messages defined in https://github.com/apache/cassandra/blob/trunk/doc/native_protocol_v5.spec#L39-L62
+//
 
 /// ERROR is sent by a node if there's an error processing a request.
 ///
