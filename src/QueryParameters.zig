@@ -141,7 +141,7 @@ pub fn read(allocator: mem.Allocator, protocol_version: ProtocolVersion, mr: *Me
 
     params.consistency_level = try mr.readConsistency();
 
-    // The remaining data in the frame depends on the flags
+    // The remaining data in the message depends on the flags
 
     // The size of the flags bitmask depends on the protocol version.
     var flags: u32 = 0;

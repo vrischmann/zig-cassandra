@@ -42,7 +42,7 @@ pub fn arenaAllocator() std.heap.ArenaAllocator {
     return std.heap.ArenaAllocator.init(std.testing.allocator);
 }
 
-/// Reads a raw frame from the provided buffer.
+/// Reads an enevelope from the provided buffer.
 /// Only intended to be used for tests.
 pub fn readEnvelope(_allocator: mem.Allocator, data: []const u8) !Envelope {
     var source = io.StreamSource{ .const_buffer = io.fixedBufferStream(data) };
@@ -58,7 +58,7 @@ pub fn expectSameEnvelope(comptime T: type, fr: T, header: EnvelopeHeader, exp: 
     defer arena.deinit();
     const allocator = arena.allocator();
 
-    // Write frame body
+    // Write message body
     var mw = try MessageWriter.init(allocator);
 
     const write_fn = @typeInfo(@TypeOf(T.write));
@@ -73,8 +73,7 @@ pub fn expectSameEnvelope(comptime T: type, fr: T, header: EnvelopeHeader, exp: 
         else => unreachable,
     }
 
-    // Write raw frame
-
+    // Write envelope
     const envelope = Envelope{
         .header = header,
         .body = mw.getWritten(),

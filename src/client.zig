@@ -27,9 +27,9 @@ const Value = protocol.Value;
 const Values = protocol.Values;
 const MessageWriter = protocol.MessageWriter;
 
-const ExecuteFrame = protocol.ExecuteFrame;
-const PrepareFrame = protocol.PrepareFrame;
-const QueryFrame = protocol.QueryFrame;
+const ExecuteMessage = protocol.ExecuteMessage;
+const PrepareMessage = protocol.PrepareMessage;
+const QueryMessage = protocol.QueryMessage;
 
 const AlreadyExistsError = protocol.AlreadyExistsError;
 const FunctionFailureError = protocol.FunctionFailureError;
@@ -170,11 +170,11 @@ pub const Client = struct {
 
         // Write PREPARE, expect RESULT
         {
-            try self.connection.writeFrame(
+            try self.connection.writeMessage(
                 allocator,
                 .Prepare,
-                PrepareFrame,
-                PrepareFrame{
+                PrepareMessage,
+                PrepareMessage{
                     .query = query_string,
                     .keyspace = null,
                 },
@@ -185,11 +185,11 @@ pub const Client = struct {
             );
         }
 
-        const read_frame = try self.connection.readFrame(allocator, Connection.ReadFrameOptions{
-            .frame_allocator = self.allocator,
+        const read_message = try self.connection.readMessage(allocator, Connection.ReadMessageOptions{
+            .message_allocator = self.allocator,
         });
-        switch (read_frame) {
-            .Result => |frame| switch (frame.result) {
+        switch (read_message) {
+            .Result => |result_message| switch (result_message.result) {
                 .Prepared => |prepared| {
                     const id = prepared.query_id;
 
@@ -261,11 +261,11 @@ pub const Client = struct {
 
         // Write QUERY
         {
-            try self.connection.writeFrame(
+            try self.connection.writeMessage(
                 allocator,
                 .Query,
-                QueryFrame,
-                QueryFrame{
+                QueryMessage,
+                QueryMessage{
                     .query = query_string,
                     .query_parameters = query_parameters,
                 },
@@ -277,9 +277,9 @@ pub const Client = struct {
         }
 
         // Read either RESULT or ERROR
-        return switch (try self.connection.readFrame(allocator, null)) {
-            .Result => |frame| {
-                return switch (frame.result) {
+        return switch (try self.connection.readMessage(allocator, null)) {
+            .Result => |result_message| {
+                return switch (result_message.result) {
                     .Rows => |rows| blk: {
                         break :blk Iterator.init(rows.metadata, rows.data);
                     },
@@ -355,11 +355,11 @@ pub const Client = struct {
 
         // Write EXECUTE
         {
-            try self.connection.writeFrame(
+            try self.connection.writeMessage(
                 allocator,
                 .Execute,
-                ExecuteFrame,
-                ExecuteFrame{
+                ExecuteMessage,
+                ExecuteMessage{
                     .query_id = query_id,
                     .result_metadata_id = ps_result_metadata_id,
                     .query_parameters = query_parameters,
@@ -372,9 +372,9 @@ pub const Client = struct {
         }
 
         // Read either RESULT or ERROR
-        return switch (try self.connection.readFrame(allocator, null)) {
-            .Result => |frame| {
-                return switch (frame.result) {
+        return switch (try self.connection.readMessage(allocator, null)) {
+            .Result => |result_message| {
+                return switch (result_message.result) {
                     .Rows => |rows| blk: {
                         const metadata = if (rows.metadata.column_specs.len > 0)
                             rows.metadata

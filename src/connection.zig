@@ -21,42 +21,42 @@ const MessageWriter = protocol.MessageWriter;
 const Opcode = protocol.Opcode;
 const ProtocolVersion = protocol.ProtocolVersion;
 
-const AuthChallengeFrame = protocol.AuthChallengeFrame;
-const AuthResponseFrame = protocol.AuthResponseFrame;
-const AuthSuccessFrame = protocol.AuthSuccessFrame;
-const AuthenticateFrame = protocol.AuthenticateFrame;
-const BatchFrame = protocol.BatchFrame;
-const ErrorFrame = protocol.ErrorFrame;
-const EventFrame = protocol.EventFrame;
-const ExecuteFrame = protocol.ExecuteFrame;
-const PrepareFrame = protocol.PrepareFrame;
-const QueryFrame = protocol.QueryFrame;
-const ReadyFrame = protocol.ReadyFrame;
-const ResultFrame = protocol.ResultFrame;
-const StartupFrame = protocol.StartupFrame;
-const SupportedFrame = protocol.SupportedFrame;
+const AuthChallengeMessage = protocol.AuthChallengeMessage;
+const AuthResponseMessage = protocol.AuthResponseMessage;
+const AuthSuccessMessage = protocol.AuthSuccessMessage;
+const AuthenticateMessage = protocol.AuthenticateMessage;
+const BatchMessage = protocol.BatchMessage;
+const ErrorMessage = protocol.ErrorMessage;
+const EventMessage = protocol.EventMessage;
+const ExecuteMessage = protocol.ExecuteMessage;
+const PrepareMessage = protocol.PrepareMessage;
+const QueryMessage = protocol.QueryMessage;
+const ReadyMessage = protocol.ReadyMessage;
+const ResultMessage = protocol.ResultMessage;
+const StartupMessage = protocol.StartupMessage;
+const SupportedMessage = protocol.SupportedMessage;
 
 const lz4 = @import("lz4.zig");
 const enable_snappy = build_options.with_snappy;
 const snappy = if (enable_snappy) @import("snappy.zig");
 
-pub const Frame = union(Opcode) {
-    Error: ErrorFrame,
-    Startup: StartupFrame,
-    Ready: ReadyFrame,
-    Authenticate: AuthenticateFrame,
+pub const Message = union(Opcode) {
+    Error: ErrorMessage,
+    Startup: StartupMessage,
+    Ready: ReadyMessage,
+    Authenticate: AuthenticateMessage,
     Options: void,
-    Supported: SupportedFrame,
-    Query: QueryFrame,
-    Result: ResultFrame,
-    Prepare: PrepareFrame,
-    Execute: ExecuteFrame,
+    Supported: SupportedMessage,
+    Query: QueryMessage,
+    Result: ResultMessage,
+    Prepare: PrepareMessage,
+    Execute: ExecuteMessage,
     Register: void,
-    Event: EventFrame,
-    Batch: BatchFrame,
-    AuthChallenge: AuthChallengeFrame,
-    AuthResponse: AuthResponseFrame,
-    AuthSuccess: AuthSuccessFrame,
+    Event: EventMessage,
+    Batch: BatchMessage,
+    AuthChallenge: AuthChallengeMessage,
+    AuthResponse: AuthResponseMessage,
+    AuthSuccess: AuthSuccessMessage,
 };
 
 pub const Connection = struct {
@@ -167,10 +167,10 @@ pub const Connection = struct {
 
         // Write OPTIONS, expect SUPPORTED
 
-        try self.writeFrame(
+        try self.writeMessage(
             fba.allocator(),
             .Options,
-            protocol.OptionsFrame,
+            protocol.OptionsMessage,
             .{},
             .{
                 .protocol_version = self.options.protocol_version,
@@ -179,7 +179,7 @@ pub const Connection = struct {
         );
 
         fba.reset();
-        switch (try self.readFrame(fba.allocator(), null)) {
+        switch (try self.readMessage(fba.allocator(), null)) {
             .Supported => |fr| self.negotiated_state.cql_version = fr.cql_versions[0],
             .Error => |err| {
                 diags.message = err.message;
@@ -191,11 +191,11 @@ pub const Connection = struct {
         // Write STARTUP, expect either READY or AUTHENTICATE
 
         fba.reset();
-        try self.writeFrame(
+        try self.writeMessage(
             fba.allocator(),
             .Startup,
-            protocol.StartupFrame,
-            protocol.StartupFrame{
+            protocol.StartupMessage,
+            protocol.StartupMessage{
                 .cql_version = self.negotiated_state.cql_version,
                 .compression = self.options.compression,
             },
@@ -204,7 +204,7 @@ pub const Connection = struct {
                 .compression = self.options.compression,
             },
         );
-        switch (try self.readFrame(fba.allocator(), null)) {
+        switch (try self.readMessage(fba.allocator(), null)) {
             .Ready => return,
             .Authenticate => |fr| {
                 try self.authenticate(fba.allocator(), diags, fr.authenticator);
@@ -232,11 +232,11 @@ pub const Connection = struct {
             var buf: [512]u8 = undefined;
             const token = try std.fmt.bufPrint(&buf, "\x00{s}\x00{s}", .{ self.options.username.?, self.options.password.? });
 
-            try self.writeFrame(
+            try self.writeMessage(
                 allocator,
                 .AuthResponse,
-                protocol.AuthResponseFrame,
-                protocol.AuthResponseFrame{
+                protocol.AuthResponseMessage,
+                protocol.AuthResponseMessage{
                     .token = token,
                 },
                 .{
@@ -247,7 +247,7 @@ pub const Connection = struct {
         }
 
         // Read either AUTH_CHALLENGE, AUTH_SUCCESS or ERROR
-        switch (try self.readFrame(allocator, null)) {
+        switch (try self.readMessage(allocator, null)) {
             .AuthChallenge => unreachable,
             .AuthSuccess => return,
             .Error => |err| {
@@ -258,15 +258,15 @@ pub const Connection = struct {
         }
     }
 
-    const WriteFrameOptions = struct {
+    const WriteMessageOptions = struct {
         protocol_version: ProtocolVersion,
         compression: ?CompressionAlgorithm,
     };
 
-    /// writeFrame writes a single frame to the TCP connection.
+    /// writeMessage writes a single message to the TCP connection.
     ///
-    /// A frame can be:
-    /// * an anonymous struct with just a .opcode field (therefore no frame body).
+    /// A message can be:
+    /// * an anonymous struct with just a .opcode field (therefore no message body).
     /// * an anonymous struct with a .opcode field and a .body field.
     ///
     /// If the .body field is present, it must me a type implementing either of the following write function:
@@ -274,15 +274,15 @@ pub const Connection = struct {
     ///   fn write(protocol_version: ProtocolVersion, w: *MessageWriter) !void
     ///   fn write(w: *MessageWriter) !void
     ///
-    /// Some frames don't care about the protocol version so this is why the second signature is supported.
+    /// Some messages don't care about the protocol version so this is why the second signature is supported.
     ///
     /// Additionally this method takes care of compression if enabled.
     ///
     /// This method is not thread safe.
-    pub fn writeFrame(self: *Self, allocator: mem.Allocator, opcode: Opcode, comptime FrameType: type, frame: FrameType, options: WriteFrameOptions) !void {
+    pub fn writeMessage(self: *Self, allocator: mem.Allocator, opcode: Opcode, comptime MessageType: type, message: MessageType, options: WriteMessageOptions) !void {
         self.message_writer.reset();
 
-        // Prepare the raw frame
+        // Prepare the envelope
         var envelope = Envelope{
             .header = EnvelopeHeader{
                 .version = options.protocol_version,
@@ -298,14 +298,14 @@ pub const Connection = struct {
             envelope.header.flags |= EnvelopeFlags.UseBeta;
         }
 
-        if (std.meta.hasMethod(FrameType, "write")) {
+        if (std.meta.hasMethod(MessageType, "write")) {
             // Encode body
-            switch (@typeInfo(@TypeOf(FrameType.write))) {
+            switch (@typeInfo(@TypeOf(MessageType.write))) {
                 .Fn => |info| {
                     if (info.params.len == 3) {
-                        try frame.write(options.protocol_version, &self.message_writer);
+                        try message.write(options.protocol_version, &self.message_writer);
                     } else {
-                        try frame.write(&self.message_writer);
+                        try message.write(&self.message_writer);
                     }
                 },
                 else => unreachable,
@@ -345,31 +345,31 @@ pub const Connection = struct {
         try self.buffered_writer.flush();
     }
 
-    pub const ReadFrameOptions = struct {
-        frame_allocator: mem.Allocator,
+    pub const ReadMessageOptions = struct {
+        message_allocator: mem.Allocator,
     };
 
-    pub fn readFrame(self: *Self, allocator: mem.Allocator, options: ?ReadFrameOptions) !Frame {
+    pub fn readMessage(self: *Self, allocator: mem.Allocator, options: ?ReadMessageOptions) !Message {
         const envelope = try self.readEnvelope(allocator);
         defer envelope.deinit(allocator);
 
         self.message_reader.reset(envelope.body);
 
-        const frame_allocator = if (options) |opts| opts.frame_allocator else allocator;
+        const message_allocator = if (options) |opts| opts.message_allocator else allocator;
 
         return switch (envelope.header.opcode) {
-            .Error => Frame{ .Error = try ErrorFrame.read(frame_allocator, &self.message_reader) },
-            .Startup => Frame{ .Startup = try StartupFrame.read(frame_allocator, &self.message_reader) },
-            .Ready => Frame{ .Ready = ReadyFrame{} },
-            .Options => Frame{ .Options = {} },
-            .Supported => Frame{ .Supported = try SupportedFrame.read(frame_allocator, &self.message_reader) },
-            .Result => Frame{ .Result = try ResultFrame.read(frame_allocator, self.options.protocol_version, &self.message_reader) },
-            .Register => Frame{ .Register = {} },
-            .Event => Frame{ .Event = try EventFrame.read(frame_allocator, &self.message_reader) },
-            .Authenticate => Frame{ .Authenticate = try AuthenticateFrame.read(frame_allocator, &self.message_reader) },
-            .AuthChallenge => Frame{ .AuthChallenge = try AuthChallengeFrame.read(frame_allocator, &self.message_reader) },
-            .AuthSuccess => Frame{ .AuthSuccess = try AuthSuccessFrame.read(frame_allocator, &self.message_reader) },
-            else => std.debug.panic("invalid read frame {}\n", .{envelope.header.opcode}),
+            .Error => Message{ .Error = try ErrorMessage.read(message_allocator, &self.message_reader) },
+            .Startup => Message{ .Startup = try StartupMessage.read(message_allocator, &self.message_reader) },
+            .Ready => Message{ .Ready = ReadyMessage{} },
+            .Options => Message{ .Options = {} },
+            .Supported => Message{ .Supported = try SupportedMessage.read(message_allocator, &self.message_reader) },
+            .Result => Message{ .Result = try ResultMessage.read(message_allocator, self.options.protocol_version, &self.message_reader) },
+            .Register => Message{ .Register = {} },
+            .Event => Message{ .Event = try EventMessage.read(message_allocator, &self.message_reader) },
+            .Authenticate => Message{ .Authenticate = try AuthenticateMessage.read(message_allocator, &self.message_reader) },
+            .AuthChallenge => Message{ .AuthChallenge = try AuthChallengeMessage.read(message_allocator, &self.message_reader) },
+            .AuthSuccess => Message{ .AuthSuccess = try AuthSuccessMessage.read(message_allocator, &self.message_reader) },
+            else => std.debug.panic("invalid read message {}\n", .{envelope.header.opcode}),
         };
     }
 

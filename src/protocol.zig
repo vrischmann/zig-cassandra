@@ -1613,7 +1613,7 @@ test "envelope header: read and write" {
 /// ERROR is sent by a node if there's an error processing a request.
 ///
 /// Described in the protocol spec at §4.2.1.
-pub const ErrorFrame = struct {
+pub const ErrorMessage = struct {
     const Self = @This();
 
     // TODO(vincent): extract this for use by the client
@@ -1632,7 +1632,7 @@ pub const ErrorFrame = struct {
     unprepared: ?UnpreparedError,
 
     pub fn read(allocator: mem.Allocator, br: *MessageReader) !Self {
-        var frame = Self{
+        var message = Self{
             .error_code = undefined,
             .message = undefined,
             .unavailable_replicas = null,
@@ -1646,19 +1646,19 @@ pub const ErrorFrame = struct {
             .unprepared = null,
         };
 
-        frame.error_code = @enumFromInt(try br.readInt(u32));
-        frame.message = try br.readString(allocator);
+        message.error_code = @enumFromInt(try br.readInt(u32));
+        message.message = try br.readString(allocator);
 
-        switch (frame.error_code) {
+        switch (message.error_code) {
             .UnavailableReplicas => {
-                frame.unavailable_replicas = UnavailableReplicasError{
+                message.unavailable_replicas = UnavailableReplicasError{
                     .consistency_level = try br.readConsistency(),
                     .required = try br.readInt(u32),
                     .alive = try br.readInt(u32),
                 };
             },
             .FunctionFailure => {
-                frame.function_failure = FunctionFailureError{
+                message.function_failure = FunctionFailureError{
                     .keyspace = try br.readString(allocator),
                     .function = try br.readString(allocator),
                     .arg_types = try br.readStringList(allocator),
@@ -1681,10 +1681,10 @@ pub const ErrorFrame = struct {
                     write_timeout.contentions = try br.readInt(u16);
                 }
 
-                frame.write_timeout = write_timeout;
+                message.write_timeout = write_timeout;
             },
             .ReadTimeout => {
-                frame.read_timeout = ReadError.Timeout{
+                message.read_timeout = ReadError.Timeout{
                     .consistency_level = try br.readConsistency(),
                     .received = try br.readInt(u32),
                     .block_for = try br.readInt(u32),
@@ -1725,7 +1725,7 @@ pub const ErrorFrame = struct {
 
                 write_failure.write_type = std.meta.stringToEnum(WriteError.WriteType, write_type_string) orelse return error.InvalidWriteType;
 
-                frame.write_failure = write_failure;
+                message.write_failure = write_failure;
             },
             .ReadFailure => {
                 var read_failure = ReadError.Failure{
@@ -1756,24 +1756,24 @@ pub const ErrorFrame = struct {
 
                 read_failure.data_present = try br.readByte();
 
-                frame.read_failure = read_failure;
+                message.read_failure = read_failure;
             },
             .CASWriteUnknown => {
-                frame.cas_write_unknown = WriteError.CASUnknown{
+                message.cas_write_unknown = WriteError.CASUnknown{
                     .consistency_level = try br.readConsistency(),
                     .received = try br.readInt(u32),
                     .block_for = try br.readInt(u32),
                 };
             },
             .AlreadyExists => {
-                frame.already_exists = AlreadyExistsError{
+                message.already_exists = AlreadyExistsError{
                     .keyspace = try br.readString(allocator),
                     .table = try br.readString(allocator),
                 };
             },
             .Unprepared => {
                 if (try br.readShortBytes(allocator)) |statement_id| {
-                    frame.unprepared = UnpreparedError{
+                    message.unprepared = UnpreparedError{
                         .statement_id = statement_id,
                     };
                 } else {
@@ -1784,11 +1784,11 @@ pub const ErrorFrame = struct {
             else => {},
         }
 
-        return frame;
+        return message;
     }
 };
 
-test "error frame: invalid query, no keyspace specified" {
+test "error message: invalid query, no keyspace specified" {
     var arena = testutils.arenaAllocator();
     defer arena.deinit();
 
@@ -1799,13 +1799,13 @@ test "error frame: invalid query, no keyspace specified" {
 
     var mr: MessageReader = undefined;
     mr.reset(envelope.body);
-    const frame = try ErrorFrame.read(arena.allocator(), &mr);
+    const message = try ErrorMessage.read(arena.allocator(), &mr);
 
-    try testing.expectEqual(ErrorCode.InvalidQuery, frame.error_code);
-    try testing.expectEqualStrings("No keyspace has been specified. USE a keyspace, or explicitly specify keyspace.tablename", frame.message);
+    try testing.expectEqual(ErrorCode.InvalidQuery, message.error_code);
+    try testing.expectEqualStrings("No keyspace has been specified. USE a keyspace, or explicitly specify keyspace.tablename", message.message);
 }
 
-test "error frame: already exists" {
+test "error message: already exists" {
     var arena = testutils.arenaAllocator();
     defer arena.deinit();
 
@@ -1816,16 +1816,16 @@ test "error frame: already exists" {
 
     var mr: MessageReader = undefined;
     mr.reset(envelope.body);
-    const frame = try ErrorFrame.read(arena.allocator(), &mr);
+    const message = try ErrorMessage.read(arena.allocator(), &mr);
 
-    try testing.expectEqual(ErrorCode.AlreadyExists, frame.error_code);
-    try testing.expectEqualStrings("Cannot add already existing table \"hello\" to keyspace \"foobar\"", frame.message);
-    const already_exists_error = frame.already_exists.?;
+    try testing.expectEqual(ErrorCode.AlreadyExists, message.error_code);
+    try testing.expectEqualStrings("Cannot add already existing table \"hello\" to keyspace \"foobar\"", message.message);
+    const already_exists_error = message.already_exists.?;
     try testing.expectEqualStrings("foobar", already_exists_error.keyspace);
     try testing.expectEqualStrings("hello", already_exists_error.table);
 }
 
-test "error frame: syntax error" {
+test "error message: syntax error" {
     var arena = testutils.arenaAllocator();
     defer arena.deinit();
 
@@ -1836,18 +1836,18 @@ test "error frame: syntax error" {
 
     var mr: MessageReader = undefined;
     mr.reset(envelope.body);
-    const frame = try ErrorFrame.read(arena.allocator(), &mr);
+    const message = try ErrorMessage.read(arena.allocator(), &mr);
 
-    try testing.expectEqual(ErrorCode.SyntaxError, frame.error_code);
-    try testing.expectEqualStrings("line 2:0 mismatched input ';' expecting K_FROM (select*[;])", frame.message);
+    try testing.expectEqual(ErrorCode.SyntaxError, message.error_code);
+    try testing.expectEqualStrings("line 2:0 mismatched input ';' expecting K_FROM (select*[;])", message.message);
 }
 
 /// OPTIONS is sent to a node to ask which STARTUP options are supported.
 ///
 /// Described in the protocol spec at §4.1.3.
-pub const OptionsFrame = struct {};
+pub const OptionsMessage = struct {};
 
-test "options frame" {
+test "options message" {
     var arena = testutils.arenaAllocator();
     defer arena.deinit();
 
@@ -1860,7 +1860,7 @@ test "options frame" {
 /// STARTUP is sent to a node to initialize a connection.
 ///
 /// Described in the protocol spec at §4.1.1.
-pub const StartupFrame = struct {
+pub const StartupMessage = struct {
     const Self = @This();
 
     cql_version: CQLVersion,
@@ -1891,7 +1891,7 @@ pub const StartupFrame = struct {
     }
 
     pub fn read(allocator: mem.Allocator, br: *MessageReader) !Self {
-        var frame = Self{
+        var message = Self{
             .cql_version = undefined,
             .compression = null,
         };
@@ -1903,26 +1903,26 @@ pub const StartupFrame = struct {
             if (!mem.eql(u8, "3.0.0", entry.value_ptr.*)) {
                 return error.InvalidCQLVersion;
             }
-            frame.cql_version = try CQLVersion.fromString(entry.value_ptr.*);
+            message.cql_version = try CQLVersion.fromString(entry.value_ptr.*);
         } else {
             return error.InvalidCQLVersion;
         }
 
         if (map.getEntry("COMPRESSION")) |entry| {
             if (mem.eql(u8, entry.value_ptr.*, "lz4")) {
-                frame.compression = CompressionAlgorithm.LZ4;
+                message.compression = CompressionAlgorithm.LZ4;
             } else if (mem.eql(u8, entry.value_ptr.*, "snappy")) {
-                frame.compression = CompressionAlgorithm.Snappy;
+                message.compression = CompressionAlgorithm.Snappy;
             } else {
                 return error.InvalidCompression;
             }
         }
 
-        return frame;
+        return message;
     }
 };
 
-test "startup frame" {
+test "startup message" {
     var arena = testutils.arenaAllocator();
     defer arena.deinit();
 
@@ -1935,20 +1935,20 @@ test "startup frame" {
 
     var mr: MessageReader = undefined;
     mr.reset(envelope.body);
-    const frame = try StartupFrame.read(arena.allocator(), &mr);
+    const message = try StartupMessage.read(arena.allocator(), &mr);
 
-    try testing.expectEqual(CQLVersion{ .major = 3, .minor = 0, .patch = 0 }, frame.cql_version);
-    try testing.expect(frame.compression == null);
+    try testing.expectEqual(CQLVersion{ .major = 3, .minor = 0, .patch = 0 }, message.cql_version);
+    try testing.expect(message.compression == null);
 
     // write
 
-    try testutils.expectSameEnvelope(StartupFrame, frame, envelope.header, exp);
+    try testutils.expectSameEnvelope(StartupMessage, message, envelope.header, exp);
 }
 
 /// EXECUTE is sent to execute a prepared query.
 ///
 /// Described in the protocol spec at §4.1.6
-pub const ExecuteFrame = struct {
+pub const ExecuteMessage = struct {
     const Self = @This();
 
     query_id: []const u8,
@@ -1966,23 +1966,23 @@ pub const ExecuteFrame = struct {
     }
 
     pub fn read(allocator: mem.Allocator, protocol_version: ProtocolVersion, br: *MessageReader) !Self {
-        var frame = Self{
+        var message = Self{
             .query_id = undefined,
             .result_metadata_id = null,
             .query_parameters = undefined,
         };
 
-        frame.query_id = (try br.readShortBytes(allocator)) orelse &[_]u8{};
+        message.query_id = (try br.readShortBytes(allocator)) orelse &[_]u8{};
         if (protocol_version.is(5)) {
-            frame.result_metadata_id = try br.readShortBytes(allocator);
+            message.result_metadata_id = try br.readShortBytes(allocator);
         }
-        frame.query_parameters = try QueryParameters.read(allocator, protocol_version, br);
+        message.query_parameters = try QueryParameters.read(allocator, protocol_version, br);
 
-        return frame;
+        return message;
     }
 };
 
-test "execute frame" {
+test "execute message" {
     var arena = testutils.arenaAllocator();
     defer arena.deinit();
 
@@ -1995,36 +1995,36 @@ test "execute frame" {
 
     var mr: MessageReader = undefined;
     mr.reset(envelope.body);
-    const frame = try ExecuteFrame.read(arena.allocator(), envelope.header.version, &mr);
+    const message = try ExecuteMessage.read(arena.allocator(), envelope.header.version, &mr);
 
     const exp_query_id = "\x97\x97\x95\x6d\xfe\xb2\x4c\x99\x86\x8e\xd3\x84\xff\x6f\xd9\x4c";
-    try testing.expectEqualSlices(u8, exp_query_id, frame.query_id);
+    try testing.expectEqualSlices(u8, exp_query_id, message.query_id);
 
-    try testing.expectEqual(Consistency.Quorum, frame.query_parameters.consistency_level);
+    try testing.expectEqual(Consistency.Quorum, message.query_parameters.consistency_level);
 
-    const values = frame.query_parameters.values.?.Normal;
+    const values = message.query_parameters.values.?.Normal;
     try testing.expectEqual(@as(usize, 1), values.len);
     try testing.expectEqualSlices(u8, "\xeb\x11\xc9\x1e\xd8\xcc\x48\x4d\xaf\x55\xe9\x9f\x5c\xd9\xec\x4a", values[0].Set);
-    try testing.expectEqual(@as(u32, 5000), frame.query_parameters.page_size.?);
-    try testing.expect(frame.query_parameters.paging_state == null);
-    try testing.expect(frame.query_parameters.serial_consistency_level == null);
-    try testing.expectEqual(@as(u64, 1585776216966732), frame.query_parameters.timestamp.?);
-    try testing.expect(frame.query_parameters.keyspace == null);
-    try testing.expect(frame.query_parameters.now_in_seconds == null);
+    try testing.expectEqual(@as(u32, 5000), message.query_parameters.page_size.?);
+    try testing.expect(message.query_parameters.paging_state == null);
+    try testing.expect(message.query_parameters.serial_consistency_level == null);
+    try testing.expectEqual(@as(u64, 1585776216966732), message.query_parameters.timestamp.?);
+    try testing.expect(message.query_parameters.keyspace == null);
+    try testing.expect(message.query_parameters.now_in_seconds == null);
 
     // write
 
-    try testutils.expectSameEnvelope(ExecuteFrame, frame, envelope.header, exp);
+    try testutils.expectSameEnvelope(ExecuteMessage, message, envelope.header, exp);
 }
 
-/// AUTHENTICATE is sent by a node in response to a STARTUP frame if authentication is required.
+/// AUTHENTICATE is sent by a node in response to a STARTUP message if authentication is required.
 ///
 /// Described in the protocol spec at §4.2.3.
-pub const AuthenticateFrame = struct {
+pub const AuthenticateMessage = struct {
     authenticator: []const u8,
 
-    pub fn read(allocator: mem.Allocator, br: *MessageReader) !AuthenticateFrame {
-        return AuthenticateFrame{
+    pub fn read(allocator: mem.Allocator, br: *MessageReader) !AuthenticateMessage {
+        return AuthenticateMessage{
             .authenticator = try br.readString(allocator),
         };
     }
@@ -2033,15 +2033,15 @@ pub const AuthenticateFrame = struct {
 /// AUTH_RESPONSE is sent to a node to answser a authentication challenge.
 ///
 /// Described in the protocol spec at §4.1.2.
-pub const AuthResponseFrame = struct {
+pub const AuthResponseMessage = struct {
     token: ?[]const u8,
 
     pub fn write(self: @This(), mw: *MessageWriter) !void {
         return mw.writeBytes(self.token);
     }
 
-    pub fn read(allocator: mem.Allocator, br: *MessageReader) !AuthResponseFrame {
-        return AuthResponseFrame{
+    pub fn read(allocator: mem.Allocator, br: *MessageReader) !AuthResponseMessage {
+        return AuthResponseMessage{
             .token = try br.readBytes(allocator),
         };
     }
@@ -2050,11 +2050,11 @@ pub const AuthResponseFrame = struct {
 /// AUTH_CHALLENGE is a server authentication challenge.
 ///
 /// Described in the protocol spec at §4.2.7.
-pub const AuthChallengeFrame = struct {
+pub const AuthChallengeMessage = struct {
     token: ?[]const u8,
 
-    pub fn read(allocator: mem.Allocator, br: *MessageReader) !AuthChallengeFrame {
-        return AuthChallengeFrame{
+    pub fn read(allocator: mem.Allocator, br: *MessageReader) !AuthChallengeMessage {
+        return AuthChallengeMessage{
             .token = try br.readBytes(allocator),
         };
     }
@@ -2063,17 +2063,17 @@ pub const AuthChallengeFrame = struct {
 /// AUTH_SUCCESS indicates the success of the authentication phase.
 ///
 /// Described in the protocol spec at §4.2.8.
-pub const AuthSuccessFrame = struct {
+pub const AuthSuccessMessage = struct {
     token: ?[]const u8,
 
-    pub fn read(allocator: mem.Allocator, br: *MessageReader) !AuthSuccessFrame {
-        return AuthSuccessFrame{
+    pub fn read(allocator: mem.Allocator, br: *MessageReader) !AuthSuccessMessage {
+        return AuthSuccessMessage{
             .token = try br.readBytes(allocator),
         };
     }
 };
 
-test "authenticate frame" {
+test "authenticate message" {
     var arena = testutils.arenaAllocator();
     defer arena.deinit();
 
@@ -2086,16 +2086,16 @@ test "authenticate frame" {
 
     var mr: MessageReader = undefined;
     mr.reset(envelope.body);
-    const frame = try AuthenticateFrame.read(arena.allocator(), &mr);
+    const message = try AuthenticateMessage.read(arena.allocator(), &mr);
 
-    try testing.expectEqualStrings("org.apache.cassandra.auth.PasswordAuthenticator", frame.authenticator);
+    try testing.expectEqualStrings("org.apache.cassandra.auth.PasswordAuthenticator", message.authenticator);
 }
 
-test "auth challenge frame" {
-    // TODO(vincent): how do I get one of these frame ?
+test "auth challenge message" {
+    // TODO(vincent): how do I get one of these message ?
 }
 
-test "auth response frame" {
+test "auth response message" {
     var arena = testutils.arenaAllocator();
     defer arena.deinit();
 
@@ -2108,17 +2108,17 @@ test "auth response frame" {
 
     var mr: MessageReader = undefined;
     mr.reset(envelope.body);
-    const frame = try AuthResponseFrame.read(arena.allocator(), &mr);
+    const message = try AuthResponseMessage.read(arena.allocator(), &mr);
 
     const exp_token = "\x00cassandra\x00cassandra";
-    try testing.expectEqualSlices(u8, exp_token, frame.token.?);
+    try testing.expectEqualSlices(u8, exp_token, message.token.?);
 
     // write
 
-    try testutils.expectSameEnvelope(AuthResponseFrame, frame, envelope.header, exp);
+    try testutils.expectSameEnvelope(AuthResponseMessage, message, envelope.header, exp);
 }
 
-test "auth success frame" {
+test "auth success message" {
     var arena = testutils.arenaAllocator();
     defer arena.deinit();
 
@@ -2131,14 +2131,12 @@ test "auth success frame" {
 
     var mr: MessageReader = undefined;
     mr.reset(envelope.body);
-    const frame = try AuthSuccessFrame.read(arena.allocator(), &mr);
+    const message = try AuthSuccessMessage.read(arena.allocator(), &mr);
 
-    try testing.expect(frame.token == null);
+    try testing.expect(message.token == null);
 }
 
-///
-///
-/// Structure of a query in a BATCH frame
+/// Structure of a query in a BATCH message
 const BatchQuery = struct {
     const Self = @This();
 
@@ -2206,7 +2204,7 @@ const BatchQuery = struct {
 /// BATCH is sent to execute a list of queries (prepared or not) as a batch.
 ///
 /// Described in the protocol spec at §4.1.7
-pub const BatchFrame = struct {
+pub const BatchMessage = struct {
     const Self = @This();
 
     batch_type: BatchType,
@@ -2265,7 +2263,7 @@ pub const BatchFrame = struct {
     }
 
     pub fn read(allocator: mem.Allocator, protocol_version: ProtocolVersion, br: *MessageReader) !Self {
-        var frame = Self{
+        var message = Self{
             .batch_type = undefined,
             .queries = undefined,
             .consistency_level = undefined,
@@ -2275,8 +2273,8 @@ pub const BatchFrame = struct {
             .now_in_seconds = null,
         };
 
-        frame.batch_type = @enumFromInt(try br.readByte());
-        frame.queries = &[_]BatchQuery{};
+        message.batch_type = @enumFromInt(try br.readByte());
+        message.queries = &[_]BatchQuery{};
 
         // Read all queries in the batch
 
@@ -2290,11 +2288,11 @@ pub const BatchFrame = struct {
             _ = try queries.append(query);
         }
 
-        frame.queries = try queries.toOwnedSlice();
+        message.queries = try queries.toOwnedSlice();
 
-        // Read the rest of the frame
+        // Read the rest of the message
 
-        frame.consistency_level = try br.readConsistency();
+        message.consistency_level = try br.readConsistency();
 
         // The size of the flags bitmask depends on the protocol version.
         var flags: u32 = 0;
@@ -2309,33 +2307,33 @@ pub const BatchFrame = struct {
             if (consistency_level != .Serial and consistency_level != .LocalSerial) {
                 return error.InvalidSerialConsistency;
             }
-            frame.serial_consistency_level = consistency_level;
+            message.serial_consistency_level = consistency_level;
         }
         if (flags & FlagWithDefaultTimestamp == FlagWithDefaultTimestamp) {
             const timestamp = try br.readInt(u64);
             if (timestamp < 0) {
                 return error.InvalidNegativeTimestamp;
             }
-            frame.timestamp = timestamp;
+            message.timestamp = timestamp;
         }
 
         if (!protocol_version.is(5)) {
-            return frame;
+            return message;
         }
 
         // The following flags are only valid with protocol v5
         if (flags & FlagWithKeyspace == FlagWithKeyspace) {
-            frame.keyspace = try br.readString(allocator);
+            message.keyspace = try br.readString(allocator);
         }
         if (flags & FlagWithNowInSeconds == FlagWithNowInSeconds) {
-            frame.now_in_seconds = try br.readInt(u32);
+            message.now_in_seconds = try br.readInt(u32);
         }
 
-        return frame;
+        return message;
     }
 };
 
-test "batch frame: query type string" {
+test "batch message: query type string" {
     var arena = testutils.arenaAllocator();
     defer arena.deinit();
 
@@ -2348,12 +2346,12 @@ test "batch frame: query type string" {
 
     var mr: MessageReader = undefined;
     mr.reset(envelope.body);
-    const frame = try BatchFrame.read(arena.allocator(), envelope.header.version, &mr);
+    const message = try BatchMessage.read(arena.allocator(), envelope.header.version, &mr);
 
-    try testing.expectEqual(BatchType.Logged, frame.batch_type);
+    try testing.expectEqual(BatchType.Logged, message.batch_type);
 
-    try testing.expectEqual(@as(usize, 3), frame.queries.len);
-    for (frame.queries) |query| {
+    try testing.expectEqual(@as(usize, 3), message.queries.len);
+    for (message.queries) |query| {
         const exp_query = "INSERT INTO foobar.user(id, name) values(uuid(), 'vincent')";
         try testing.expectEqualStrings(exp_query, query.query_string.?);
         try testing.expect(query.query_id == null);
@@ -2361,18 +2359,18 @@ test "batch frame: query type string" {
         try testing.expectEqual(@as(usize, 0), query.values.Normal.len);
     }
 
-    try testing.expectEqual(Consistency.Any, frame.consistency_level);
-    try testing.expect(frame.serial_consistency_level == null);
-    try testing.expect(frame.timestamp == null);
-    try testing.expect(frame.keyspace == null);
-    try testing.expect(frame.now_in_seconds == null);
+    try testing.expectEqual(Consistency.Any, message.consistency_level);
+    try testing.expect(message.serial_consistency_level == null);
+    try testing.expect(message.timestamp == null);
+    try testing.expect(message.keyspace == null);
+    try testing.expect(message.now_in_seconds == null);
 
     // write
 
-    try testutils.expectSameEnvelope(BatchFrame, frame, envelope.header, exp);
+    try testutils.expectSameEnvelope(BatchMessage, message, envelope.header, exp);
 }
 
-test "batch frame: query type prepared" {
+test "batch message: query type prepared" {
     var arena = testutils.arenaAllocator();
     defer arena.deinit();
 
@@ -2385,9 +2383,9 @@ test "batch frame: query type prepared" {
 
     var mr: MessageReader = undefined;
     mr.reset(envelope.body);
-    const frame = try BatchFrame.read(arena.allocator(), envelope.header.version, &mr);
+    const message = try BatchMessage.read(arena.allocator(), envelope.header.version, &mr);
 
-    try testing.expectEqual(BatchType.Logged, frame.batch_type);
+    try testing.expectEqual(BatchType.Logged, message.batch_type);
 
     const expUUIDs = &[_][]const u8{
         "\x3a\x9a\xab\x41\x68\x24\x4a\xef\x9d\xf5\x72\xc7\x84\xab\xa2\x57",
@@ -2395,9 +2393,9 @@ test "batch frame: query type prepared" {
         "\x79\xdf\x8a\x28\x5a\x60\x47\x19\x9b\x42\x84\xea\x69\x10\x1a\xe6",
     };
 
-    try testing.expectEqual(@as(usize, 3), frame.queries.len);
+    try testing.expectEqual(@as(usize, 3), message.queries.len);
     var i: usize = 0;
-    for (frame.queries) |query| {
+    for (message.queries) |query| {
         try testing.expect(query.query_string == null);
         const exp_query_id = "\x88\xb7\xd6\x81\x8b\x2d\x8d\x97\xfc\x41\xc1\x34\x7b\x27\xde\x65";
         try testing.expectEqualSlices(u8, exp_query_id, query.query_id.?);
@@ -2414,27 +2412,27 @@ test "batch frame: query type prepared" {
         i += 1;
     }
 
-    try testing.expectEqual(Consistency.Any, frame.consistency_level);
-    try testing.expect(frame.serial_consistency_level == null);
-    try testing.expect(frame.timestamp == null);
-    try testing.expect(frame.keyspace == null);
-    try testing.expect(frame.now_in_seconds == null);
+    try testing.expectEqual(Consistency.Any, message.consistency_level);
+    try testing.expect(message.serial_consistency_level == null);
+    try testing.expect(message.timestamp == null);
+    try testing.expect(message.keyspace == null);
+    try testing.expect(message.now_in_seconds == null);
 
     // write
 
-    try testutils.expectSameEnvelope(BatchFrame, frame, envelope.header, exp);
+    try testutils.expectSameEnvelope(BatchMessage, message, envelope.header, exp);
 }
 
 /// EVENT is an event pushed by the server.
 ///
 /// Described in the protocol spec at §4.2.6.
-pub const EventFrame = struct {
+pub const EventMessage = struct {
     const Self = @This();
 
     event: event.Event,
 
     pub fn read(allocator: mem.Allocator, br: *MessageReader) !Self {
-        var frame = Self{
+        var message = Self{
             .event = undefined,
         };
 
@@ -2450,9 +2448,9 @@ pub const EventFrame = struct {
                 change.type = std.meta.stringToEnum(event.TopologyChangeType, try br.readString(allocator)) orelse return error.InvalidTopologyChangeType;
                 change.node_address = try br.readInet();
 
-                frame.event = event.Event{ .TOPOLOGY_CHANGE = change };
+                message.event = event.Event{ .TOPOLOGY_CHANGE = change };
 
-                return frame;
+                return message;
             },
             .STATUS_CHANGE => {
                 var change = event.StatusChange{
@@ -2463,20 +2461,20 @@ pub const EventFrame = struct {
                 change.type = std.meta.stringToEnum(event.StatusChangeType, try br.readString(allocator)) orelse return error.InvalidStatusChangeType;
                 change.node_address = try br.readInet();
 
-                frame.event = event.Event{ .STATUS_CHANGE = change };
+                message.event = event.Event{ .STATUS_CHANGE = change };
 
-                return frame;
+                return message;
             },
             .SCHEMA_CHANGE => {
-                frame.event = event.Event{ .SCHEMA_CHANGE = try event.SchemaChange.read(allocator, br) };
+                message.event = event.Event{ .SCHEMA_CHANGE = try event.SchemaChange.read(allocator, br) };
 
-                return frame;
+                return message;
             },
         }
     }
 };
 
-test "event frame: topology change" {
+test "event message: topology change" {
     var arena = testutils.arenaAllocator();
     defer arena.deinit();
 
@@ -2489,18 +2487,18 @@ test "event frame: topology change" {
 
     var mr: MessageReader = undefined;
     mr.reset(envlope.body);
-    const frame = try EventFrame.read(arena.allocator(), &mr);
+    const message = try EventMessage.read(arena.allocator(), &mr);
 
-    try testing.expect(frame.event == .TOPOLOGY_CHANGE);
+    try testing.expect(message.event == .TOPOLOGY_CHANGE);
 
-    const topology_change = frame.event.TOPOLOGY_CHANGE;
+    const topology_change = message.event.TOPOLOGY_CHANGE;
     try testing.expectEqual(event.TopologyChangeType.NEW_NODE, topology_change.type);
 
     const localhost = net.Address.initIp4([4]u8{ 0x7f, 0x00, 0x00, 0x04 }, 9042);
     try testing.expect(net.Address.eql(localhost, topology_change.node_address));
 }
 
-test "event frame: status change" {
+test "event message: status change" {
     var arena = testutils.arenaAllocator();
     defer arena.deinit();
 
@@ -2511,18 +2509,18 @@ test "event frame: status change" {
 
     var mr: MessageReader = undefined;
     mr.reset(envelope.body);
-    const frame = try EventFrame.read(arena.allocator(), &mr);
+    const message = try EventMessage.read(arena.allocator(), &mr);
 
-    try testing.expect(frame.event == .STATUS_CHANGE);
+    try testing.expect(message.event == .STATUS_CHANGE);
 
-    const status_change = frame.event.STATUS_CHANGE;
+    const status_change = message.event.STATUS_CHANGE;
     try testing.expectEqual(event.StatusChangeType.DOWN, status_change.type);
 
     const localhost = net.Address.initIp4([4]u8{ 0x7f, 0x00, 0x00, 0x01 }, 9042);
     try testing.expect(net.Address.eql(localhost, status_change.node_address));
 }
 
-test "event frame: schema change/keyspace" {
+test "event message: schema change/keyspace" {
     var arena = testutils.arenaAllocator();
     defer arena.deinit();
 
@@ -2533,11 +2531,11 @@ test "event frame: schema change/keyspace" {
 
     var mr: MessageReader = undefined;
     mr.reset(envelope.body);
-    const frame = try EventFrame.read(arena.allocator(), &mr);
+    const message = try EventMessage.read(arena.allocator(), &mr);
 
-    try testing.expect(frame.event == .SCHEMA_CHANGE);
+    try testing.expect(message.event == .SCHEMA_CHANGE);
 
-    const schema_change = frame.event.SCHEMA_CHANGE;
+    const schema_change = message.event.SCHEMA_CHANGE;
     try testing.expectEqual(event.SchemaChangeType.CREATED, schema_change.type);
     try testing.expectEqual(event.SchemaChangeTarget.KEYSPACE, schema_change.target);
 
@@ -2547,7 +2545,7 @@ test "event frame: schema change/keyspace" {
     try testing.expect(options.arguments == null);
 }
 
-test "event frame: schema change/table" {
+test "event message: schema change/table" {
     var arena = testutils.arenaAllocator();
     defer arena.deinit();
 
@@ -2558,11 +2556,11 @@ test "event frame: schema change/table" {
 
     var mr: MessageReader = undefined;
     mr.reset(envelope.body);
-    const frame = try EventFrame.read(arena.allocator(), &mr);
+    const message = try EventMessage.read(arena.allocator(), &mr);
 
-    try testing.expect(frame.event == .SCHEMA_CHANGE);
+    try testing.expect(message.event == .SCHEMA_CHANGE);
 
-    const schema_change = frame.event.SCHEMA_CHANGE;
+    const schema_change = message.event.SCHEMA_CHANGE;
     try testing.expectEqual(event.SchemaChangeType.CREATED, schema_change.type);
     try testing.expectEqual(event.SchemaChangeTarget.TABLE, schema_change.target);
 
@@ -2572,7 +2570,7 @@ test "event frame: schema change/table" {
     try testing.expect(options.arguments == null);
 }
 
-test "event frame: schema change/function" {
+test "event message: schema change/function" {
     var arena = testutils.arenaAllocator();
     defer arena.deinit();
 
@@ -2583,11 +2581,11 @@ test "event frame: schema change/function" {
 
     var mr: MessageReader = undefined;
     mr.reset(envelope.body);
-    const frame = try EventFrame.read(arena.allocator(), &mr);
+    const message = try EventMessage.read(arena.allocator(), &mr);
 
-    try testing.expect(frame.event == .SCHEMA_CHANGE);
+    try testing.expect(message.event == .SCHEMA_CHANGE);
 
-    const schema_change = frame.event.SCHEMA_CHANGE;
+    const schema_change = message.event.SCHEMA_CHANGE;
     try testing.expectEqual(event.SchemaChangeType.CREATED, schema_change.type);
     try testing.expectEqual(event.SchemaChangeTarget.FUNCTION, schema_change.target);
 
@@ -2602,7 +2600,7 @@ test "event frame: schema change/function" {
 /// PREPARE is sent to prepare a CQL query for later execution (through EXECUTE).
 ///
 /// Described in the protocol spec at §4.1.5
-pub const PrepareFrame = struct {
+pub const PrepareMessage = struct {
     const Self = @This();
 
     query: []const u8,
@@ -2625,27 +2623,27 @@ pub const PrepareFrame = struct {
     }
 
     pub fn read(allocator: mem.Allocator, protocol_version: ProtocolVersion, br: *MessageReader) !Self {
-        var frame = Self{
+        var message = Self{
             .query = undefined,
             .keyspace = null,
         };
 
-        frame.query = try br.readLongString(allocator);
+        message.query = try br.readLongString(allocator);
 
         if (!protocol_version.is(5)) {
-            return frame;
+            return message;
         }
 
         const flags = try br.readInt(u32);
         if (flags & FlagWithKeyspace == FlagWithKeyspace) {
-            frame.keyspace = try br.readString(allocator);
+            message.keyspace = try br.readString(allocator);
         }
 
-        return frame;
+        return message;
     }
 };
 
-test "prepare frame" {
+test "prepare message" {
     var arena = testutils.arenaAllocator();
     defer arena.deinit();
 
@@ -2658,20 +2656,20 @@ test "prepare frame" {
 
     var mr: MessageReader = undefined;
     mr.reset(envelope.body);
-    const frame = try PrepareFrame.read(arena.allocator(), envelope.header.version, &mr);
+    const message = try PrepareMessage.read(arena.allocator(), envelope.header.version, &mr);
 
-    try testing.expectEqualStrings("SELECT age, name from foobar.user where id = ?", frame.query);
-    try testing.expect(frame.keyspace == null);
+    try testing.expectEqualStrings("SELECT age, name from foobar.user where id = ?", message.query);
+    try testing.expect(message.keyspace == null);
 
     // write
 
-    try testutils.expectSameEnvelope(PrepareFrame, frame, envelope.header, exp);
+    try testutils.expectSameEnvelope(PrepareMessage, message, envelope.header, exp);
 }
 
 /// QUERY is sent to perform a CQL query.
 ///
 /// Described in the protocol spec at §4.1.4
-pub const QueryFrame = struct {
+pub const QueryMessage = struct {
     const Self = @This();
 
     query: []const u8,
@@ -2690,7 +2688,7 @@ pub const QueryFrame = struct {
     }
 };
 
-test "query frame: no values, no paging state" {
+test "query message: no values, no paging state" {
     var arena = testutils.arenaAllocator();
     defer arena.deinit();
 
@@ -2703,29 +2701,29 @@ test "query frame: no values, no paging state" {
 
     var mr: MessageReader = undefined;
     mr.reset(envelope.body);
-    const frame = try QueryFrame.read(arena.allocator(), envelope.header.version, &mr);
+    const message = try QueryMessage.read(arena.allocator(), envelope.header.version, &mr);
 
-    try testing.expectEqualStrings("SELECT * FROM foobar.user ;", frame.query);
-    try testing.expectEqual(Consistency.One, frame.query_parameters.consistency_level);
-    try testing.expect(frame.query_parameters.values == null);
-    try testing.expectEqual(@as(u32, 100), frame.query_parameters.page_size.?);
-    try testing.expect(frame.query_parameters.paging_state == null);
-    try testing.expectEqual(Consistency.Serial, frame.query_parameters.serial_consistency_level.?);
-    try testing.expectEqual(@as(u64, 1585688778063423), frame.query_parameters.timestamp.?);
-    try testing.expect(frame.query_parameters.keyspace == null);
-    try testing.expect(frame.query_parameters.now_in_seconds == null);
+    try testing.expectEqualStrings("SELECT * FROM foobar.user ;", message.query);
+    try testing.expectEqual(Consistency.One, message.query_parameters.consistency_level);
+    try testing.expect(message.query_parameters.values == null);
+    try testing.expectEqual(@as(u32, 100), message.query_parameters.page_size.?);
+    try testing.expect(message.query_parameters.paging_state == null);
+    try testing.expectEqual(Consistency.Serial, message.query_parameters.serial_consistency_level.?);
+    try testing.expectEqual(@as(u64, 1585688778063423), message.query_parameters.timestamp.?);
+    try testing.expect(message.query_parameters.keyspace == null);
+    try testing.expect(message.query_parameters.now_in_seconds == null);
 
     // write
 
-    try testutils.expectSameEnvelope(QueryFrame, frame, envelope.header, exp);
+    try testutils.expectSameEnvelope(QueryMessage, message, envelope.header, exp);
 }
 
 /// READY is sent by a node to indicate it is ready to process queries.
 ///
 /// Described in the protocol spec at §4.2.2.
-pub const ReadyFrame = struct {};
+pub const ReadyMessage = struct {};
 
-test "ready frame" {
+test "ready message" {
     var arena = testutils.arenaAllocator();
     defer arena.deinit();
 
@@ -2738,21 +2736,21 @@ test "ready frame" {
 /// REGISTER is sent to register this connection to receive some types of events.
 ///
 /// Described in the protocol spec at §4.1.8
-const RegisterFrame = struct {
+const RegisterMessage = struct {
     event_types: []const []const u8,
 
     pub fn write(self: @This(), mw: *MessageWriter) !void {
         return mw.writeStringList(self.event_types);
     }
 
-    pub fn read(allocator: mem.Allocator, br: *MessageReader) !RegisterFrame {
-        return RegisterFrame{
+    pub fn read(allocator: mem.Allocator, br: *MessageReader) !RegisterMessage {
+        return RegisterMessage{
             .event_types = try br.readStringList(allocator),
         };
     }
 };
 
-test "register frame" {
+test "register message" {
     var arena = testutils.arenaAllocator();
     defer arena.deinit();
 
@@ -2765,16 +2763,16 @@ test "register frame" {
 
     var mr: MessageReader = undefined;
     mr.reset(envelope.body);
-    const frame = try RegisterFrame.read(arena.allocator(), &mr);
+    const message = try RegisterMessage.read(arena.allocator(), &mr);
 
-    try testing.expectEqual(@as(usize, 3), frame.event_types.len);
-    try testing.expectEqualStrings("TOPOLOGY_CHANGE", frame.event_types[0]);
-    try testing.expectEqualStrings("STATUS_CHANGE", frame.event_types[1]);
-    try testing.expectEqualStrings("SCHEMA_CHANGE", frame.event_types[2]);
+    try testing.expectEqual(@as(usize, 3), message.event_types.len);
+    try testing.expectEqualStrings("TOPOLOGY_CHANGE", message.event_types[0]);
+    try testing.expectEqualStrings("STATUS_CHANGE", message.event_types[1]);
+    try testing.expectEqualStrings("SCHEMA_CHANGE", message.event_types[2]);
 
     // write
 
-    try testutils.expectSameEnvelope(RegisterFrame, frame, envelope.header, exp);
+    try testutils.expectSameEnvelope(RegisterMessage, message, envelope.header, exp);
 }
 
 pub const Result = union(ResultKind) {
@@ -2871,43 +2869,43 @@ const Prepared = struct {
     }
 };
 
-pub const ResultFrame = struct {
+pub const ResultMessage = struct {
     const Self = @This();
 
     result: Result,
 
-    pub fn read(allocator: mem.Allocator, protocol_version: ProtocolVersion, br: *MessageReader) !ResultFrame {
-        var frame = Self{
+    pub fn read(allocator: mem.Allocator, protocol_version: ProtocolVersion, br: *MessageReader) !ResultMessage {
+        var message = Self{
             .result = undefined,
         };
 
         const kind: ResultKind = @enumFromInt(try br.readInt(u32));
 
         switch (kind) {
-            .Void => frame.result = Result{ .Void = {} },
+            .Void => message.result = Result{ .Void = {} },
             .Rows => {
                 const rows = try Rows.read(allocator, protocol_version, br);
-                frame.result = Result{ .Rows = rows };
+                message.result = Result{ .Rows = rows };
             },
             .SetKeyspace => {
                 const keyspace = try br.readString(allocator);
-                frame.result = Result{ .SetKeyspace = keyspace };
+                message.result = Result{ .SetKeyspace = keyspace };
             },
             .Prepared => {
                 const prepared = try Prepared.read(allocator, protocol_version, br);
-                frame.result = Result{ .Prepared = prepared };
+                message.result = Result{ .Prepared = prepared };
             },
             .SchemaChange => {
                 const schema_change = try event.SchemaChange.read(allocator, br);
-                frame.result = Result{ .SchemaChange = schema_change };
+                message.result = Result{ .SchemaChange = schema_change };
             },
         }
 
-        return frame;
+        return message;
     }
 };
 
-test "result frame: void" {
+test "result message: void" {
     var arena = testutils.arenaAllocator();
     defer arena.deinit();
 
@@ -2918,12 +2916,12 @@ test "result frame: void" {
 
     var mr: MessageReader = undefined;
     mr.reset(envelope.body);
-    const frame = try ResultFrame.read(arena.allocator(), envelope.header.version, &mr);
+    const message = try ResultMessage.read(arena.allocator(), envelope.header.version, &mr);
 
-    try testing.expect(frame.result == .Void);
+    try testing.expect(message.result == .Void);
 }
 
-test "result frame: rows" {
+test "result message: rows" {
     var arena = testutils.arenaAllocator();
     defer arena.deinit();
 
@@ -2934,13 +2932,13 @@ test "result frame: rows" {
 
     var mr: MessageReader = undefined;
     mr.reset(envelope.body);
-    const frame = try ResultFrame.read(arena.allocator(), envelope.header.version, &mr);
+    const message = try ResultMessage.read(arena.allocator(), envelope.header.version, &mr);
 
-    try testing.expect(frame.result == .Rows);
+    try testing.expect(message.result == .Rows);
 
     // check metadata
 
-    const rows_metadata = frame.result.Rows.metadata;
+    const rows_metadata = message.result.Rows.metadata;
     try testing.expect(rows_metadata.paging_state == null);
     try testing.expect(rows_metadata.new_metadata_id == null);
     try testing.expectEqualStrings("foobar", rows_metadata.global_table_spec.?.keyspace);
@@ -2959,7 +2957,7 @@ test "result frame: rows" {
 
     // check data
 
-    const rows = frame.result.Rows;
+    const rows = message.result.Rows;
     try testing.expectEqual(@as(usize, 3), rows.data.len);
 
     const row1 = rows.data[0].slice;
@@ -2978,7 +2976,7 @@ test "result frame: rows" {
     try testing.expectEqualSlices(u8, "\x56\x69\x6e\x63\x65\x6e\x74\x32", row3[2].slice);
 }
 
-test "result frame: rows, don't skip metadata" {
+test "result message: rows, don't skip metadata" {
     var arena = testutils.arenaAllocator();
     defer arena.deinit();
 
@@ -2989,13 +2987,13 @@ test "result frame: rows, don't skip metadata" {
 
     var mr: MessageReader = undefined;
     mr.reset(envelope.body);
-    const frame = try ResultFrame.read(arena.allocator(), envelope.header.version, &mr);
+    const message = try ResultMessage.read(arena.allocator(), envelope.header.version, &mr);
 
-    try testing.expect(frame.result == .Rows);
+    try testing.expect(message.result == .Rows);
 
     // check metadata
 
-    const rows_metadata = frame.result.Rows.metadata;
+    const rows_metadata = message.result.Rows.metadata;
     try testing.expect(rows_metadata.paging_state == null);
     try testing.expect(rows_metadata.new_metadata_id == null);
     try testing.expectEqualStrings("foobar", rows_metadata.global_table_spec.?.keyspace);
@@ -3014,7 +3012,7 @@ test "result frame: rows, don't skip metadata" {
 
     // check data
 
-    const rows = frame.result.Rows;
+    const rows = message.result.Rows;
     try testing.expectEqual(@as(usize, 13), rows.data.len);
 
     const row1 = rows.data[0].slice;
@@ -3023,7 +3021,7 @@ test "result frame: rows, don't skip metadata" {
     try testing.expectEqualSlices(u8, "\x56\x69\x6e\x63\x65\x6e\x74\x30", row1[2].slice);
 }
 
-test "result frame: rows, list of uuid" {
+test "result message: rows, list of uuid" {
     var arena = testutils.arenaAllocator();
     defer arena.deinit();
 
@@ -3034,13 +3032,13 @@ test "result frame: rows, list of uuid" {
 
     var mr: MessageReader = undefined;
     mr.reset(envelope.body);
-    const frame = try ResultFrame.read(arena.allocator(), envelope.header.version, &mr);
+    const message = try ResultMessage.read(arena.allocator(), envelope.header.version, &mr);
 
-    try testing.expect(frame.result == .Rows);
+    try testing.expect(message.result == .Rows);
 
     // check metadata
 
-    const rows_metadata = frame.result.Rows.metadata;
+    const rows_metadata = message.result.Rows.metadata;
     try testing.expect(rows_metadata.paging_state == null);
     try testing.expect(rows_metadata.new_metadata_id == null);
     try testing.expectEqualStrings("foobar", rows_metadata.global_table_spec.?.keyspace);
@@ -3056,7 +3054,7 @@ test "result frame: rows, list of uuid" {
 
     // check data
 
-    const rows = frame.result.Rows;
+    const rows = message.result.Rows;
     try testing.expectEqual(@as(usize, 1), rows.data.len);
 
     const row1 = rows.data[0].slice;
@@ -3064,7 +3062,7 @@ test "result frame: rows, list of uuid" {
     try testing.expectEqualSlices(u8, "\x00\x00\x00\x01\x00\x00\x00\x10\xe6\x02\xc7\x47\xbf\xca\x44\xbc\x9d\xc6\x6b\x04\x0f\xb7\x15\xed", row1[1].slice);
 }
 
-test "result frame: set keyspace" {
+test "result message: set keyspace" {
     var arena = testutils.arenaAllocator();
     defer arena.deinit();
 
@@ -3075,13 +3073,13 @@ test "result frame: set keyspace" {
 
     var mr: MessageReader = undefined;
     mr.reset(envelope.body);
-    const frame = try ResultFrame.read(arena.allocator(), envelope.header.version, &mr);
+    const message = try ResultMessage.read(arena.allocator(), envelope.header.version, &mr);
 
-    try testing.expect(frame.result == .SetKeyspace);
-    try testing.expectEqualStrings("foobar", frame.result.SetKeyspace);
+    try testing.expect(message.result == .SetKeyspace);
+    try testing.expectEqualStrings("foobar", message.result.SetKeyspace);
 }
 
-test "result frame: prepared insert" {
+test "result message: prepared insert" {
     var arena = testutils.arenaAllocator();
     defer arena.deinit();
 
@@ -3092,14 +3090,14 @@ test "result frame: prepared insert" {
 
     var mr: MessageReader = undefined;
     mr.reset(envelope.body);
-    const frame = try ResultFrame.read(arena.allocator(), envelope.header.version, &mr);
+    const message = try ResultMessage.read(arena.allocator(), envelope.header.version, &mr);
 
-    try testing.expect(frame.result == .Prepared);
+    try testing.expect(message.result == .Prepared);
 
     // check prepared metadata
 
     {
-        const prepared_metadata = frame.result.Prepared.metadata;
+        const prepared_metadata = message.result.Prepared.metadata;
         try testing.expectEqualStrings("foobar", prepared_metadata.global_table_spec.?.keyspace);
         try testing.expectEqualStrings("user", prepared_metadata.global_table_spec.?.table);
         try testing.expectEqual(@as(usize, 1), prepared_metadata.pk_indexes.len);
@@ -3120,13 +3118,13 @@ test "result frame: prepared insert" {
     // check rows metadata
 
     {
-        const rows_metadata = frame.result.Prepared.rows_metadata;
+        const rows_metadata = message.result.Prepared.rows_metadata;
         try testing.expect(rows_metadata.global_table_spec == null);
         try testing.expectEqual(@as(usize, 0), rows_metadata.column_specs.len);
     }
 }
 
-test "result frame: prepared select" {
+test "result message: prepared select" {
     var arena = testutils.arenaAllocator();
     defer arena.deinit();
 
@@ -3137,14 +3135,14 @@ test "result frame: prepared select" {
 
     var mr: MessageReader = undefined;
     mr.reset(envelope.body);
-    const frame = try ResultFrame.read(arena.allocator(), envelope.header.version, &mr);
+    const message = try ResultMessage.read(arena.allocator(), envelope.header.version, &mr);
 
-    try testing.expect(frame.result == .Prepared);
+    try testing.expect(message.result == .Prepared);
 
     // check prepared metadata
 
     {
-        const prepared_metadata = frame.result.Prepared.metadata;
+        const prepared_metadata = message.result.Prepared.metadata;
         try testing.expectEqualStrings("foobar", prepared_metadata.global_table_spec.?.keyspace);
         try testing.expectEqualStrings("user", prepared_metadata.global_table_spec.?.table);
         try testing.expectEqual(@as(usize, 1), prepared_metadata.pk_indexes.len);
@@ -3159,7 +3157,7 @@ test "result frame: prepared select" {
     // check rows metadata
 
     {
-        const rows_metadata = frame.result.Prepared.rows_metadata;
+        const rows_metadata = message.result.Prepared.rows_metadata;
         try testing.expectEqualStrings("foobar", rows_metadata.global_table_spec.?.keyspace);
         try testing.expectEqualStrings("user", rows_metadata.global_table_spec.?.table);
         try testing.expectEqual(@as(usize, 3), rows_metadata.column_specs.len);
@@ -3176,10 +3174,10 @@ test "result frame: prepared select" {
     }
 }
 
-/// SUPPORTED is sent by a node in response to a OPTIONS frame.
+/// SUPPORTED is sent by a node in response to a OPTIONS message.
 ///
 /// Described in the protocol spec at §4.2.4.
-pub const SupportedFrame = struct {
+pub const SupportedMessage = struct {
     const Self = @This();
 
     pub const opcode: Opcode = .Supported;
@@ -3189,7 +3187,7 @@ pub const SupportedFrame = struct {
     compression_algorithms: []CompressionAlgorithm,
 
     pub fn read(allocator: mem.Allocator, br: *MessageReader) !Self {
-        var frame = Self{
+        var message = Self{
             .protocol_versions = &[_]ProtocolVersion{},
             .cql_versions = &[_]CQLVersion{},
             .compression_algorithms = &[_]CompressionAlgorithm{},
@@ -3205,7 +3203,7 @@ pub const SupportedFrame = struct {
                 _ = try list.append(version);
             }
 
-            frame.cql_versions = try list.toOwnedSlice();
+            message.cql_versions = try list.toOwnedSlice();
         } else {
             return error.NoCQLVersion;
         }
@@ -3218,7 +3216,7 @@ pub const SupportedFrame = struct {
                 _ = try list.append(compression_algorithm);
             }
 
-            frame.compression_algorithms = try list.toOwnedSlice();
+            message.compression_algorithms = try list.toOwnedSlice();
         }
 
         if (options.get("PROTOCOL_VERSIONS")) |values| {
@@ -3229,14 +3227,14 @@ pub const SupportedFrame = struct {
                 _ = try list.append(version);
             }
 
-            frame.protocol_versions = try list.toOwnedSlice();
+            message.protocol_versions = try list.toOwnedSlice();
         }
 
-        return frame;
+        return message;
     }
 };
 
-test "supported frame" {
+test "supported message" {
     var arena = testutils.arenaAllocator();
     defer arena.deinit();
 
@@ -3249,17 +3247,17 @@ test "supported frame" {
 
     var mr: MessageReader = undefined;
     mr.reset(envelope.body);
-    const frame = try SupportedFrame.read(arena.allocator(), &mr);
+    const message = try SupportedMessage.read(arena.allocator(), &mr);
 
-    try testing.expectEqual(@as(usize, 1), frame.cql_versions.len);
-    try testing.expectEqual(CQLVersion{ .major = 3, .minor = 4, .patch = 4 }, frame.cql_versions[0]);
+    try testing.expectEqual(@as(usize, 1), message.cql_versions.len);
+    try testing.expectEqual(CQLVersion{ .major = 3, .minor = 4, .patch = 4 }, message.cql_versions[0]);
 
-    try testing.expectEqual(@as(usize, 3), frame.protocol_versions.len);
-    try testing.expect(frame.protocol_versions[0].is(3));
-    try testing.expect(frame.protocol_versions[1].is(4));
-    try testing.expect(frame.protocol_versions[2].is(5));
+    try testing.expectEqual(@as(usize, 3), message.protocol_versions.len);
+    try testing.expect(message.protocol_versions[0].is(3));
+    try testing.expect(message.protocol_versions[1].is(4));
+    try testing.expect(message.protocol_versions[2].is(5));
 
-    try testing.expectEqual(@as(usize, 2), frame.compression_algorithms.len);
-    try testing.expectEqual(CompressionAlgorithm.Snappy, frame.compression_algorithms[0]);
-    try testing.expectEqual(CompressionAlgorithm.LZ4, frame.compression_algorithms[1]);
+    try testing.expectEqual(@as(usize, 2), message.compression_algorithms.len);
+    try testing.expectEqual(CompressionAlgorithm.Snappy, message.compression_algorithms[0]);
+    try testing.expectEqual(CompressionAlgorithm.LZ4, message.compression_algorithms[1]);
 }
