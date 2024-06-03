@@ -12,6 +12,24 @@ const QueryParameters = @import("QueryParameters.zig");
 
 const testutils = @import("testutils.zig");
 
+pub const Frame = struct {
+    payload: []const u8,
+    is_self_contained: bool,
+};
+
+pub fn readFrame(reader: anytype, compression: enum { compressed, uncompressed }) !Frame {
+    switch (compression) {
+        .compressed => {
+            var buf: [6]u8 = undefined;
+            try reader.readAll(&buf);
+        },
+        .uncompressed => {
+            var buf: [8]u8 = undefined;
+            try reader.readAll(&buf);
+        },
+    }
+}
+
 pub const EnvelopeFlags = struct {
     pub const Compression: u8 = 0x01;
     pub const Tracing: u8 = 0x02;
