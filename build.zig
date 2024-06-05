@@ -24,10 +24,10 @@ pub fn build(b: *std.Build) !void {
     // lz4 is broken with -fsanitize=pointer-overflow which is added automatically by Zig with -fsanitize=undefined.
     // See here what this flag does: https://clang.llvm.org/docs/UndefinedBehaviorSanitizer.html
     lz4.addCSourceFile(.{
-        .file = b.path("src/lz4.c"),
+        .file = b.path("c/lz4.c"),
         .flags = &[_][]const u8{ "-std=c99", "-fno-sanitize=pointer-overflow" },
     });
-    lz4.addIncludePath(b.path("src"));
+    lz4.addIncludePath(b.path("c"));
 
     var lz4_tests = b.addTest(.{
         .name = "lz4_tests",
@@ -36,7 +36,7 @@ pub fn build(b: *std.Build) !void {
         .optimize = optimize,
     });
     lz4_tests.linkLibrary(lz4);
-    lz4_tests.addIncludePath(b.path("src"));
+    lz4_tests.addIncludePath(b.path("c"));
 
     const lz4_test_step = b.step("lz4-test", "Run the lz4 tests");
     lz4_test_step.dependOn(&lz4_tests.step);
