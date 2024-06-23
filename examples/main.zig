@@ -290,7 +290,7 @@ fn parseArg(comptime T: type, arg: []const u8) !T {
 
 fn findArg(comptime T: type, args: []const []const u8, key: []const u8, default: T) !T {
     for (args) |arg| {
-        var it = mem.tokenize(u8, arg, "=");
+        var it = mem.tokenizeScalar(u8, arg, 't');
         const k = it.next().?;
         const v = it.next() orelse return default;
 
