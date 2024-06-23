@@ -37,8 +37,7 @@ const StartupMessage = protocol.StartupMessage;
 const SupportedMessage = protocol.SupportedMessage;
 
 const lz4 = @import("lz4.zig");
-const enable_snappy = build_options.with_snappy;
-const snappy = if (enable_snappy) @import("snappy.zig");
+const snappy = @import("snappy.zig");
 
 pub const Message = union(Opcode) {
     Error: ErrorMessage,
@@ -329,8 +328,6 @@ pub const Connection = struct {
                         envelope.body = compressed_data;
                     },
                     .Snappy => {
-                        if (comptime !enable_snappy) return error.InvalidCompressedFrame;
-
                         const compressed_data = try snappy.compress(allocator, written);
 
                         envelope.header.flags |= EnvelopeFlags.Compression;
@@ -385,8 +382,6 @@ pub const Connection = struct {
                     envelope.body = decompressed_data;
                 },
                 .Snappy => {
-                    if (comptime !enable_snappy) return error.InvalidCompressedFrame;
-
                     const decompressed_data = try snappy.decompress(allocator, envelope.body);
                     envelope.body = decompressed_data;
                 },

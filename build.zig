@@ -5,9 +5,14 @@ pub fn build(b: *std.Build) !void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
+    const snappy_dep = b.dependency("libsnappy", .{
+        .target = target,
+        .optimize = optimize,
+    });
+    const snappy = snappy_dep.artifact("snappy");
+
     // Define options
 
-    const with_snappy = b.option(bool, "with_snappy", "Enable Snappy compression") orelse false;
     const with_cassandra = b.option(bool, "with_cassandra", "Run tests which need a Cassandra node running to work.") orelse false;
 
     // LZ4
@@ -42,26 +47,23 @@ pub fn build(b: *std.Build) !void {
     lz4_test_step.dependOn(&lz4_tests.step);
 
     // Snappy
-    if (with_snappy) {
-        var snappy_tests = b.addTest(.{
-            .name = "snappy_tests",
-            .root_source_file = b.path("src/snappy.zig"),
-            .target = target,
-            .optimize = optimize,
-        });
-        snappy_tests.linkLibC();
-        snappy_tests.linkSystemLibrary("snappy");
+    var snappy_tests = b.addTest(.{
+        .name = "snappy_tests",
+        .root_source_file = b.path("src/snappy.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    snappy_tests.linkLibC();
+    snappy_tests.linkSystemLibrary("snappy");
 
-        const snappy_test_step = b.step("snappy-test", "Run the snappy tests");
-        snappy_test_step.dependOn(&snappy_tests.step);
-    }
+    const snappy_test_step = b.step("snappy-test", "Run the snappy tests");
+    snappy_test_step.dependOn(&snappy_tests.step);
 
     //
     // Create the public 'cassandra' module
     //
 
     const module_options = b.addOptions();
-    module_options.addOption(bool, "with_snappy", with_snappy);
 
     const module = b.addModule("cassandra", .{
         .root_source_file = b.path("src/lib.zig"),
@@ -71,10 +73,9 @@ pub fn build(b: *std.Build) !void {
     });
     module.addIncludePath(b.path("src"));
     module.linkLibrary(lz4);
-    if (with_snappy) {
-        module.linkSystemLibrary("snappy", .{});
-    }
+    module.linkLibrary(snappy);
     module.addImport("build_options", module_options.createModule());
+    // module.addImport("snappy", snappy_mod);
 
     //
     // Add the main tests for the library.
@@ -86,18 +87,15 @@ pub fn build(b: *std.Build) !void {
         .optimize = optimize,
         .root_source_file = b.path("src/lib.zig"),
     });
-    main_tests.linkLibrary(lz4);
     main_tests.addIncludePath(b.path("src"));
-
-    if (with_snappy) {
-        main_tests.linkLibC();
-        main_tests.linkSystemLibrary("snappy");
-    }
+    main_tests.linkLibC();
+    main_tests.linkLibrary(lz4);
+    main_tests.linkLibrary(snappy);
 
     const main_tests_options = b.addOptions();
     main_tests.root_module.addImport("build_options", main_tests_options.createModule());
+    // main_tests.root_module.addImport("snappy", snappy_mod);
     main_tests_options.addOption(bool, "with_cassandra", with_cassandra);
-    main_tests_options.addOption(bool, "with_snappy", with_snappy);
 
     const run_main_tests = b.addRunArtifact(main_tests);
 
@@ -114,15 +112,13 @@ pub fn build(b: *std.Build) !void {
         .target = target,
         .optimize = optimize,
     });
-    example.linkLibrary(lz4);
     example.addIncludePath(b.path("src"));
+    example.linkLibC();
+    example.linkLibrary(lz4);
+    example.linkLibrary(snappy);
     example.root_module.addImport("cassandra", module);
+    // example.root_module.addImport("snappy", snappy_mod);
     example.root_module.addImport("build_options", module_options.createModule());
-
-    if (with_snappy) {
-        example.linkLibC();
-        example.linkSystemLibrary("snappy");
-    }
 
     const example_install_artifact = b.addInstallArtifact(example, .{});
     b.getInstallStep().dependOn(&example_install_artifact.step);

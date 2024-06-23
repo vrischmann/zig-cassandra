@@ -994,9 +994,6 @@ test "count bind markers" {
 
 test {
     _ = @import("bigint.zig");
-
-    if (build_options.with_snappy) {
-        _ = @import("snappy.zig");
-    }
+    _ = @import("snappy.zig");
     _ = @import("lz4.zig");
 }
