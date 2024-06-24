@@ -37,7 +37,7 @@ const StartupMessage = protocol.StartupMessage;
 const SupportedMessage = protocol.SupportedMessage;
 
 const lz4 = @import("lz4.zig");
-const snappy = @import("snappy.zig");
+const snappy = @import("snappy");
 
 pub const Message = union(Opcode) {
     Error: ErrorMessage,

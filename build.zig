@@ -10,6 +10,7 @@ pub fn build(b: *std.Build) !void {
         .optimize = optimize,
     });
     const snappy = snappy_dep.artifact("snappy");
+    const snappy_mod = snappy_dep.module("snappy");
 
     // Define options
 
@@ -46,19 +47,6 @@ pub fn build(b: *std.Build) !void {
     const lz4_test_step = b.step("lz4-test", "Run the lz4 tests");
     lz4_test_step.dependOn(&lz4_tests.step);
 
-    // Snappy
-    var snappy_tests = b.addTest(.{
-        .name = "snappy_tests",
-        .root_source_file = b.path("src/snappy.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-    snappy_tests.linkLibC();
-    snappy_tests.linkSystemLibrary("snappy");
-
-    const snappy_test_step = b.step("snappy-test", "Run the snappy tests");
-    snappy_test_step.dependOn(&snappy_tests.step);
-
     //
     // Create the public 'cassandra' module
     //
@@ -75,7 +63,7 @@ pub fn build(b: *std.Build) !void {
     module.linkLibrary(lz4);
     module.linkLibrary(snappy);
     module.addImport("build_options", module_options.createModule());
-    // module.addImport("snappy", snappy_mod);
+    module.addImport("snappy", snappy_mod);
 
     //
     // Add the main tests for the library.
@@ -94,7 +82,7 @@ pub fn build(b: *std.Build) !void {
 
     const main_tests_options = b.addOptions();
     main_tests.root_module.addImport("build_options", main_tests_options.createModule());
-    // main_tests.root_module.addImport("snappy", snappy_mod);
+    main_tests.root_module.addImport("snappy", snappy_mod);
     main_tests_options.addOption(bool, "with_cassandra", with_cassandra);
 
     const run_main_tests = b.addRunArtifact(main_tests);
@@ -117,7 +105,7 @@ pub fn build(b: *std.Build) !void {
     example.linkLibrary(lz4);
     example.linkLibrary(snappy);
     example.root_module.addImport("cassandra", module);
-    // example.root_module.addImport("snappy", snappy_mod);
+    example.root_module.addImport("snappy", snappy_mod);
     example.root_module.addImport("build_options", module_options.createModule());
 
     const example_install_artifact = b.addInstallArtifact(example, .{});
