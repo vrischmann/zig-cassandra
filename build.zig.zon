@@ -27,6 +27,10 @@
             .url = "https://github.com/vrischmann/zig-snappy/archive/refs/heads/main.zip",
             .hash = "12204d5988d5cc557232380d221cedd451ec3217ab598a2a2ede1f0564ccffe6730b",
         },
+        .liblz4 = .{
+            .url = "https://github.com/vrischmann/zig-lz4/archive/d981210302f6973791706de75a59f8930ff9cc0b.zip",
+            .hash = "1220a78fd52186f20bdbe96bae4459b2efffeff9492731a6ef8f2c106a0630bbbdda",
+        },
     },
     .paths = .{
         "build.zig",

@@ -36,7 +36,7 @@ const ResultMessage = protocol.ResultMessage;
 const StartupMessage = protocol.StartupMessage;
 const SupportedMessage = protocol.SupportedMessage;
 
-const lz4 = @import("lz4.zig");
+const lz4 = @import("lz4");
 const snappy = @import("snappy");
 
 pub const Message = union(Opcode) {
