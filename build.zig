@@ -12,40 +12,16 @@ pub fn build(b: *std.Build) !void {
     const snappy = snappy_dep.artifact("snappy");
     const snappy_mod = snappy_dep.module("snappy");
 
+    const lz4_dep = b.dependency("liblz4", .{
+        .target = target,
+        .optimize = optimize,
+    });
+    const lz4 = lz4_dep.artifact("lz4");
+    const lz4_mod = lz4_dep.module("lz4");
+
     // Define options
 
     const with_cassandra = b.option(bool, "with_cassandra", "Run tests which need a Cassandra node running to work.") orelse false;
-
-    // LZ4
-    //
-    // To make cross compiling easier we embed the lz4 source code which is small enough and is easily compiled
-    // with Zig's C compiling abilities.
-
-    const lz4 = b.addStaticLibrary(.{
-        .name = "lz4",
-        .target = target,
-        .optimize = optimize,
-    });
-    lz4.linkLibC();
-    // lz4 is broken with -fsanitize=pointer-overflow which is added automatically by Zig with -fsanitize=undefined.
-    // See here what this flag does: https://clang.llvm.org/docs/UndefinedBehaviorSanitizer.html
-    lz4.addCSourceFile(.{
-        .file = b.path("src/lz4.c"),
-        .flags = &[_][]const u8{ "-std=c99", "-fno-sanitize=pointer-overflow" },
-    });
-    lz4.addIncludePath(b.path("src"));
-
-    var lz4_tests = b.addTest(.{
-        .name = "lz4_tests",
-        .root_source_file = b.path("src/lz4.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-    lz4_tests.linkLibrary(lz4);
-    lz4_tests.addIncludePath(b.path("src"));
-
-    const lz4_test_step = b.step("lz4-test", "Run the lz4 tests");
-    lz4_test_step.dependOn(&lz4_tests.step);
 
     //
     // Create the public 'cassandra' module
@@ -63,6 +39,7 @@ pub fn build(b: *std.Build) !void {
     module.linkLibrary(lz4);
     module.linkLibrary(snappy);
     module.addImport("build_options", module_options.createModule());
+    module.addImport("lz4", lz4_mod);
     module.addImport("snappy", snappy_mod);
 
     //
@@ -82,6 +59,7 @@ pub fn build(b: *std.Build) !void {
 
     const main_tests_options = b.addOptions();
     main_tests.root_module.addImport("build_options", main_tests_options.createModule());
+    main_tests.root_module.addImport("lz4", lz4_mod);
     main_tests.root_module.addImport("snappy", snappy_mod);
     main_tests_options.addOption(bool, "with_cassandra", with_cassandra);
 
@@ -105,6 +83,7 @@ pub fn build(b: *std.Build) !void {
     example.linkLibrary(lz4);
     example.linkLibrary(snappy);
     example.root_module.addImport("cassandra", module);
+    example.root_module.addImport("lz4", lz4_mod);
     example.root_module.addImport("snappy", snappy_mod);
     example.root_module.addImport("build_options", module_options.createModule());
 

@@ -994,5 +994,4 @@ test "count bind markers" {
 
 test {
     _ = @import("bigint.zig");
-    _ = @import("lz4.zig");
 }
