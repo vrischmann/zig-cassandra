@@ -28,23 +28,6 @@ pub const EnvelopeHeader = packed struct {
     body_len: u32,
 
     const Size = 9;
-
-    pub fn init(comptime ReaderType: type, in: ReaderType) !EnvelopeHeader {
-        var buf: [Size]u8 = undefined;
-
-        const read = try in.readAll(&buf);
-        if (read != Size) {
-            return error.UnexpectedEOF;
-        }
-
-        return EnvelopeHeader{
-            .version = try ProtocolVersion.init(buf[0]),
-            .flags = buf[1],
-            .stream = mem.readInt(i16, @ptrCast(buf[2..4]), .big),
-            .opcode = @enumFromInt(buf[4]),
-            .body_len = mem.readInt(u32, @ptrCast(buf[5..9]), .big),
-        };
-    }
 };
 
 pub const Envelope = struct {
@@ -1596,7 +1579,11 @@ test "envelope header: read and write" {
 
     const reader = fbs.reader();
 
-    const header = try EnvelopeHeader.init(@TypeOf(reader), fbs.reader());
+    var envelope_reader = EnvelopeReader(@TypeOf(reader)).init(reader);
+
+    const frame = try envelope_reader.read(testing.allocator);
+    const header = frame.header;
+
     try testing.expect(header.version.is(4));
     try testing.expect(header.version.isRequest());
     try testing.expectEqual(@as(u8, 0), header.flags);
