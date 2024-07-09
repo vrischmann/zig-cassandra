@@ -12,6 +12,36 @@ const QueryParameters = @import("QueryParameters.zig");
 
 const testutils = @import("testutils.zig");
 
+const Frame = struct {
+    is_self_contained: bool,
+    payload: []const u8,
+};
+
+fn FrameReader(comptime ReaderType: type) type {
+    return struct {
+        const Self = @This();
+
+        reader: ReaderType,
+
+        pub fn init(in: ReaderType) Self {
+            return Self{
+                .reader = in,
+            };
+        }
+
+        fn readUncompressed(self: *Self, allocator: mem.Allocator) Self {
+    const Size = 6;
+
+            var buf: [6]u8 = undefined;
+
+        const read = try in.readAll(&buf);
+        if (read != Size) {
+            return error.UnexpectedEOF;
+        }
+        }
+    };
+}
+
 pub const EnvelopeFlags = struct {
     pub const Compression: u8 = 0x01;
     pub const Tracing: u8 = 0x02;
