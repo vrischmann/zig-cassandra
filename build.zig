@@ -30,12 +30,12 @@ pub fn build(b: *std.Build) !void {
     const module_options = b.addOptions();
 
     const module = b.addModule("cassandra", .{
-        .root_source_file = b.path("src/lib.zig"),
+        .root_source_file = b.path("lib.zig"),
         .link_libc = true,
         .target = target,
         .optimize = optimize,
     });
-    module.addIncludePath(b.path("src"));
+    module.addIncludePath(b.path("."));
     module.linkLibrary(lz4);
     module.linkLibrary(snappy);
     module.addImport("build_options", module_options.createModule());
@@ -50,9 +50,9 @@ pub fn build(b: *std.Build) !void {
         .name = "main",
         .target = target,
         .optimize = optimize,
-        .root_source_file = b.path("src/lib.zig"),
+        .root_source_file = b.path("lib.zig"),
     });
-    main_tests.addIncludePath(b.path("src"));
+    main_tests.addIncludePath(b.path("."));
     main_tests.linkLibC();
     main_tests.linkLibrary(lz4);
     main_tests.linkLibrary(snappy);
@@ -78,7 +78,7 @@ pub fn build(b: *std.Build) !void {
         .target = target,
         .optimize = optimize,
     });
-    example.addIncludePath(b.path("src"));
+    example.addIncludePath(b.path("."));
     example.linkLibC();
     example.linkLibrary(lz4);
     example.linkLibrary(snappy);
