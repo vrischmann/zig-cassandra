@@ -3,6 +3,8 @@ const io = std.io;
 const mem = std.mem;
 
 const protocol = @import("protocol.zig");
+const Frame = protocol.Frame;
+const FrameReader = protocol.FrameReader;
 const EnvelopeHeader = protocol.EnvelopeHeader;
 const Envelope = protocol.Envelope;
 const EnvelopeReader = protocol.EnvelopeReader;
@@ -49,6 +51,17 @@ pub fn readEnvelope(_allocator: mem.Allocator, data: []const u8) !Envelope {
     const reader = source.reader();
 
     var fr = EnvelopeReader(@TypeOf(reader)).init(reader);
+
+    return fr.read(_allocator);
+}
+
+/// Reads a frame from the provided buffer.
+/// Only intended to be used for tests.
+pub fn readFrame(_allocator: mem.Allocator, data: []const u8) !Frame {
+    var source = io.StreamSource{ .const_buffer = io.fixedBufferStream(data) };
+    const reader = source.reader();
+
+    var fr = FrameReader(@TypeOf(reader)).init(reader);
 
     return fr.read(_allocator);
 }

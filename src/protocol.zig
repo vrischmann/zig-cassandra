@@ -29,17 +29,37 @@ fn FrameReader(comptime ReaderType: type) type {
             };
         }
 
-        fn readUncompressed(self: *Self, allocator: mem.Allocator) Self {
-    const Size = 6;
+        fn readUncompressed(self: *Self, _: mem.Allocator) Self {
+            const Size = 6;
 
             var buf: [6]u8 = undefined;
 
-        const read = try in.readAll(&buf);
-        if (read != Size) {
-            return error.UnexpectedEOF;
-        }
+            const read = try self.reader.readAll(&buf);
+            if (read != Size) {
+                return error.UnexpectedEOF;
+            }
+
+            const payload_length = (buf[0] << 16) | (buf[1] << 8) | buf[2] & 0x80;
+            const is_self_contained = buf[2] & 0x40;
+
+            std.debug.print("payload length: {}, is self contained: {}", .{
+                payload_length,
+                is_self_contained,
+            });
+
+            return Frame{};
         }
     };
+}
+
+test "frame reader" {
+    var arena = testutils.arenaAllocator();
+    defer arena.deinit();
+
+    const data = "";
+    const frame = try testutils.readFrame(arena.allocator(), data);
+
+    _ = frame;
 }
 
 pub const EnvelopeFlags = struct {
