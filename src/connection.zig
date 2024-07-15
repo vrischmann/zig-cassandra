@@ -178,7 +178,7 @@ pub const Connection = struct {
         );
 
         fba.reset();
-        switch (try self.readMessage(fba.allocator(), null)) {
+        switch (try self.readMessage(fba.allocator(), .{})) {
             .Supported => |fr| self.negotiated_state.cql_version = fr.cql_versions[0],
             .Error => |err| {
                 diags.message = err.message;
@@ -203,7 +203,7 @@ pub const Connection = struct {
                 .compression = self.options.compression,
             },
         );
-        switch (try self.readMessage(fba.allocator(), null)) {
+        switch (try self.readMessage(fba.allocator(), .{})) {
             .Ready => return,
             .Authenticate => |fr| {
                 try self.authenticate(fba.allocator(), diags, fr.authenticator);
@@ -246,7 +246,7 @@ pub const Connection = struct {
         }
 
         // Read either AUTH_CHALLENGE, AUTH_SUCCESS or ERROR
-        switch (try self.readMessage(allocator, null)) {
+        switch (try self.readMessage(allocator, .{})) {
             .AuthChallenge => unreachable,
             .AuthSuccess => return,
             .Error => |err| {
@@ -343,16 +343,24 @@ pub const Connection = struct {
     }
 
     pub const ReadMessageOptions = struct {
-        message_allocator: mem.Allocator,
+        /// If set the message will be allocated using this allocator instead of the allocator
+        /// passed in `readMessage`.
+        ///
+        /// This is useful if you want the message to have a different lifecycle, for example
+        /// if you need to store the message in a list or a map.
+        message_allocator: ?mem.Allocator = null,
     };
 
-    pub fn readMessage(self: *Self, allocator: mem.Allocator, options: ?ReadMessageOptions) !Message {
+    pub fn readMessage(self: *Self, allocator: mem.Allocator, options: ReadMessageOptions) !Message {
         const envelope = try self.readEnvelope(allocator);
         defer envelope.deinit(allocator);
 
         self.message_reader.reset(envelope.body);
 
-        const message_allocator = if (options) |opts| opts.message_allocator else allocator;
+        const message_allocator = if (options.message_allocator) |message_allocator|
+            message_allocator
+        else
+            allocator;
 
         return switch (envelope.header.opcode) {
             .Error => Message{ .Error = try ErrorMessage.read(message_allocator, &self.message_reader) },

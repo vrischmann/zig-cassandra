@@ -44,6 +44,23 @@ const QueryParameters = @import("QueryParameters.zig");
 const testutils = @import("testutils.zig");
 const casstest = @import("casstest.zig");
 
+const PreparedStatementMetadataValue = struct {
+    result_metadata_id: ?[]const u8,
+    metadata: PreparedMetadata,
+    rows_metadata: RowsMetadata,
+
+    fn deinit(self: *PreparedStatementMetadataValue, allocator: mem.Allocator) void {
+        if (self.result_metadata_id) |result_metadata_id| {
+            allocator.free(result_metadata_id);
+        }
+        self.metadata.deinit(allocator);
+        self.rows_metadata.deinit(allocator);
+    }
+};
+
+/// Maps a prepared statement id to the types of the arguments needed when executing it.
+const PreparedStatementsMetadata = std.StringHashMap(PreparedStatementMetadataValue);
+
 pub const Client = struct {
     const Self = @This();
 
@@ -119,15 +136,6 @@ pub const Client = struct {
         };
     };
 
-    const PreparedStatementMetadataValue = struct {
-        result_metadata_id: ?[]const u8,
-        metadata: PreparedMetadata,
-        rows_metadata: RowsMetadata,
-    };
-
-    /// Maps a prepared statement id to the types of the arguments needed when executing it.
-    const PreparedStatementsMetadata = std.StringHashMap(PreparedStatementMetadataValue);
-
     allocator: mem.Allocator,
     connection: *Connection,
     options: InitOptions,
@@ -141,12 +149,24 @@ pub const Client = struct {
         self.connection = connection;
         self.options = options;
 
-        self.prepared_statements_metadata = PreparedStatementsMetadata.init(allocator);
+        self.prepared_statements_metadata = PreparedStatementsMetadata.init(self.allocator);
 
         return self;
     }
 
-    pub fn deinit(_: *Self) void {}
+    pub fn deinit(self: *Self) void {
+        {
+            var iter = self.prepared_statements_metadata.iterator();
+            while (iter.next()) |entry| {
+                self.allocator.free(entry.key_ptr.*);
+                entry.value_ptr.deinit(self.allocator);
+            }
+
+            self.prepared_statements_metadata.deinit();
+        }
+
+        self.connection.deinit();
+    }
 
     pub fn prepare(self: *Self, allocator: mem.Allocator, options: QueryOptions, comptime query_string: []const u8, args: anytype) ![]const u8 {
         var dummy_diags = QueryOptions.Diagnostics{};
@@ -185,23 +205,18 @@ pub const Client = struct {
             );
         }
 
-        const read_message = try self.connection.readMessage(allocator, Connection.ReadMessageOptions{
+        const read_message = try self.connection.readMessage(allocator, .{
             .message_allocator = self.allocator,
         });
         switch (read_message) {
             .Result => |result_message| switch (result_message.result) {
                 .Prepared => |prepared| {
-                    const id = prepared.query_id;
-
                     // Store the metadata for later use with `execute`.
 
-                    const gop = try self.prepared_statements_metadata.getOrPut(id);
+                    const gop = try self.prepared_statements_metadata.getOrPut(prepared.query_id);
                     if (gop.found_existing) {
-                        if (gop.value_ptr.result_metadata_id) |result_metadata_id| {
-                            self.allocator.free(result_metadata_id);
-                        }
-                        gop.value_ptr.metadata.deinit(self.allocator);
-                        gop.value_ptr.rows_metadata.deinit(self.allocator);
+                        self.allocator.free(prepared.query_id);
+                        gop.value_ptr.deinit(self.allocator);
                     }
 
                     gop.value_ptr.* = .{
@@ -210,7 +225,7 @@ pub const Client = struct {
                         .rows_metadata = prepared.rows_metadata,
                     };
 
-                    return id;
+                    return gop.key_ptr.*;
                 },
                 else => return error.InvalidServerResponse,
             },
@@ -277,7 +292,7 @@ pub const Client = struct {
         }
 
         // Read either RESULT or ERROR
-        return switch (try self.connection.readMessage(allocator, null)) {
+        return switch (try self.connection.readMessage(allocator, .{})) {
             .Result => |result_message| {
                 return switch (result_message.result) {
                     .Rows => |rows| blk: {
@@ -372,7 +387,7 @@ pub const Client = struct {
         }
 
         // Read either RESULT or ERROR
-        return switch (try self.connection.readMessage(allocator, null)) {
+        return switch (try self.connection.readMessage(allocator, .{})) {
             .Result => |result_message| {
                 return switch (result_message.result) {
                     .Rows => |rows| blk: {
