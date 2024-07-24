@@ -73,29 +73,42 @@ fn doQuery(allocator: mem.Allocator, client: *cassandra.Client) !void {
     log.info("read {} rows", .{total});
 }
 
-fn doPrepare(allocator: mem.Allocator, client: *cassandra.Client) ![]const u8 {
-    // We want query diagonistics in case of failure.
-    var diags = cassandra.Client.QueryOptions.Diagnostics{};
-    const options = cassandra.Client.QueryOptions{
-        .diags = &diags,
-    };
+fn doPrepare(parent_allocator: mem.Allocator, client: *cassandra.Client, n: usize) ![]const u8 {
+    var arena = std.heap.ArenaAllocator.init(parent_allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
 
-    const query_id = client.prepare(
-        allocator,
-        options,
-        "SELECT ids, age, name FROM foobar.age_to_ids WHERE age in (?, ?)",
-        .{
-            .age1 = @as(u32, 0),
-            .age2 = @as(u32, 0),
-        },
-    ) catch |err| switch (err) {
-        error.QueryPreparationFailed => {
-            std.debug.panic("query preparation failed, received cassandra error: {s}\n", .{diags.message});
-        },
-        else => return err,
-    };
+    log.info("preparing {d} times", .{n});
 
-    log.info("prepared query id is {s}", .{std.fmt.fmtSliceHexLower(query_id)});
+    //
+
+    var query_id: []const u8 = undefined;
+
+    var i: usize = 0;
+    while (i < n) : (i += 1) {
+        // We want query diagonistics in case of failure.
+        var diags = cassandra.Client.QueryOptions.Diagnostics{};
+        const options = cassandra.Client.QueryOptions{
+            .diags = &diags,
+        };
+
+        query_id = client.prepare(
+            allocator,
+            options,
+            "SELECT ids, age, name FROM foobar.age_to_ids WHERE age in (?, ?)",
+            .{
+                .age1 = @as(u32, 0),
+                .age2 = @as(u32, 0),
+            },
+        ) catch |err| switch (err) {
+            error.QueryPreparationFailed => {
+                std.debug.panic("query preparation failed, received cassandra error: {s}\n", .{diags.message});
+            },
+            else => return err,
+        };
+
+        log.info("prepared query id is {s}", .{std.fmt.fmtSliceHexLower(query_id)});
+    }
 
     return query_id;
 }
@@ -127,13 +140,13 @@ fn doExecute(allocator: mem.Allocator, client: *cassandra.Client, query_id: []co
 fn doPrepareThenExec(allocator: mem.Allocator, client: *cassandra.Client, n: usize) !void {
     var i: usize = 0;
     while (i < n) : (i += 1) {
-        const query_id = try doPrepare(allocator, client);
+        const query_id = try doPrepare(allocator, client, n);
         try doExecute(allocator, client, query_id);
     }
 }
 
 fn doPrepareOnceThenExec(allocator: mem.Allocator, client: *cassandra.Client, n: usize) !void {
-    const query_id = try doPrepare(allocator, client);
+    const query_id = try doPrepare(allocator, client, n);
 
     var i: usize = 0;
     while (i < n) : (i += 1) {
@@ -141,7 +154,14 @@ fn doPrepareOnceThenExec(allocator: mem.Allocator, client: *cassandra.Client, n:
     }
 }
 
-fn doInsert(allocator: mem.Allocator, client: *cassandra.Client, n: usize) !void {
+fn doInsert(parent_allocator: mem.Allocator, client: *cassandra.Client, n: usize) !void {
+    var arena = heap.ArenaAllocator.init(parent_allocator);
+    defer arena.deinit();
+
+    const allocator = arena.allocator();
+
+    log.info("inserting {d} times", .{n});
+
     // We want query diagonistics in case of failure.
     var diags = cassandra.Client.QueryOptions.Diagnostics{};
     const options = cassandra.Client.QueryOptions{
@@ -364,7 +384,6 @@ pub fn main() anyerror!void {
         },
         else => return err,
     };
-    defer connection.deinit();
 
     //
     // Connection established, create the client and do the thing.
@@ -393,14 +412,17 @@ pub fn main() anyerror!void {
     if (mem.eql(u8, cmd, "query")) {
         return doQuery(allocator, &client);
     } else if (mem.eql(u8, cmd, "prepare")) {
-        _ = try doPrepare(allocator, &client);
-    } else if (mem.eql(u8, cmd, "insert")) {
-        if (args.len < 3) {
-            try std.fmt.format(stderr, "Usage: {s} insert <iterations>\n", .{args[0]});
-            std.process.exit(1);
-        }
+        const n = if (args.len > 1)
+            try std.fmt.parseInt(usize, args[2], 10)
+        else
+            1;
 
-        const n = try std.fmt.parseInt(usize, args[2], 10);
+        _ = try doPrepare(allocator, &client, n);
+    } else if (mem.eql(u8, cmd, "insert")) {
+        const n = if (args.len > 1)
+            try std.fmt.parseInt(usize, args[2], 10)
+        else
+            1;
 
         return doInsert(allocator, &client, n);
     } else if (mem.eql(u8, cmd, "prepare-then-exec")) {
