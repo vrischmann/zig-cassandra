@@ -109,6 +109,16 @@ fn FrameReader(comptime ReaderType: type) type {
             };
         }
 
+        fn computeAndVerifyCRC32(payload_and_trailer: PayloadAndTrailer) !void {
+            var hash = std.hash.Crc32.init();
+            hash.update(initial_crc32_bytes);
+            hash.update(payload_and_trailer.payload);
+            const computed_crc32 = hash.final();
+
+            const expected_crc32 = mem.readInt(u32, &payload_and_trailer.trailer, .little);
+            if (computed_crc32 != expected_crc32) return error.InvalidPayloadChecksum;
+        }
+
         fn readUncompressed(self: *Self, allocator: mem.Allocator) !Frame {
             const header_size = 6;
 
@@ -130,14 +140,7 @@ fn FrameReader(comptime ReaderType: type) type {
             std.debug.assert(self.reader.readByte() == error.EndOfStream);
 
             // Verify payload CRC32
-
-            var hash = std.hash.Crc32.init();
-            hash.update(initial_crc32_bytes);
-            hash.update(payload_and_trailer.payload);
-            const computed_crc32 = hash.final();
-
-            const expected_crc32 = mem.readInt(u32, &payload_and_trailer.trailer, .little);
-            if (computed_crc32 != expected_crc32) return error.InvalidPayloadChecksum;
+            try computeAndVerifyCRC32(payload_and_trailer);
 
             return Frame{
                 .payload = payload_and_trailer.payload,
@@ -167,17 +170,9 @@ fn FrameReader(comptime ReaderType: type) type {
             std.debug.assert(self.reader.readByte() == error.EndOfStream);
 
             // Verify compressed payload CRC32
+            try computeAndVerifyCRC32(payload_and_trailer);
 
-            var hash = std.hash.Crc32.init();
-            hash.update(initial_crc32_bytes);
-            hash.update(payload_and_trailer.payload);
-            const computed_crc32 = hash.final();
-
-            const expected_crc32 = mem.readInt(u32, &payload_and_trailer.trailer, .little);
-            if (computed_crc32 != expected_crc32) return error.InvalidPayloadChecksum;
-
-            // Read and decompress payload
-
+            // Decompress payload if necessary
             const payload = if (uncompressed_length == 0)
                 payload_and_trailer.payload
             else
