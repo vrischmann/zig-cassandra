@@ -200,8 +200,6 @@ fn FrameReader(comptime ReaderType: type) type {
 }
 
 test "frame reader: QUERY message" {
-    if (true) return error.SkipZigTest;
-
     var arena = testutils.arenaAllocator();
     defer arena.deinit();
 
