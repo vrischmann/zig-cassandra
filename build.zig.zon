@@ -28,8 +28,8 @@
             .hash = "1220cd02214579a57576593e89ac45a1738af4fe07761782c98254c9e89e6ad9c6cd",
         },
         .liblz4 = .{
-            .url = "https://github.com/vrischmann/zig-lz4/archive/42e4335ef0977ab7edaa9064b09b2c8a9158c301.zip",
-            .hash = "1220f79d1bc1d5846981601aea366a63db780ca2518bd139f0031f5fd72ef8ca74df",
+            .url = "https://github.com/vrischmann/zig-lz4/archive/b600461ea3feb4e9f7fd9e526af314927095e339.zip",
+            .hash = "12207e232de5c20af2182303e142166415fbae56bf417bc23cbacb725925a72682ad",
         },
     },
     .paths = .{
