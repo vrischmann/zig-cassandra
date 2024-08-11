@@ -24,12 +24,12 @@
     // internet connectivity.
     .dependencies = .{
         .libsnappy = .{
-            .url = "https://github.com/vrischmann/zig-snappy/archive/refs/heads/main.zip",
-            .hash = "12204d5988d5cc557232380d221cedd451ec3217ab598a2a2ede1f0564ccffe6730b",
+            .url = "https://github.com/vrischmann/zig-snappy/archive/5af101fbfb5d7e12b504ca678160ccd32caab76d.zip",
+            .hash = "1220cd02214579a57576593e89ac45a1738af4fe07761782c98254c9e89e6ad9c6cd",
         },
         .liblz4 = .{
-            .url = "https://github.com/vrischmann/zig-lz4/archive/d981210302f6973791706de75a59f8930ff9cc0b.zip",
-            .hash = "1220a78fd52186f20bdbe96bae4459b2efffeff9492731a6ef8f2c106a0630bbbdda",
+            .url = "https://github.com/vrischmann/zig-lz4/archive/42e4335ef0977ab7edaa9064b09b2c8a9158c301.zip",
+            .hash = "1220f79d1bc1d5846981601aea366a63db780ca2518bd139f0031f5fd72ef8ca74df",
         },
     },
     .paths = .{
