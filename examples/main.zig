@@ -6,7 +6,7 @@ const net = std.net;
 const big = std.math.big;
 
 const cassandra = @import("cassandra");
-const casstest = @import("../src/casstest.zig");
+const casstest = @import("../casstest.zig");
 
 /// Runs a single SELECT reading all data from the age_to_ids table.
 ///
@@ -337,14 +337,17 @@ pub fn main() anyerror!void {
 
     const stderr = std.io.getStdErr().writer();
 
-    const args = try std.process.argsAlloc(allocator);
-    defer std.process.argsFree(allocator, args);
+    const all_args = try std.process.argsAlloc(allocator);
+    defer std.process.argsFree(allocator, all_args);
 
-    if (args.len <= 1) {
+    if (all_args.len <= 1) {
         try stderr.writeAll("expected command argument\n\n");
         try stderr.writeAll(usage);
         std.process.exit(1);
     }
+
+    const cmd = all_args[1];
+    const args = all_args[2..];
 
     //
     // Connect to the seed node
@@ -408,39 +411,38 @@ pub fn main() anyerror!void {
 
     // Parse the command and run it.
 
-    const cmd = args[1];
     if (mem.eql(u8, cmd, "query")) {
         return doQuery(allocator, &client);
     } else if (mem.eql(u8, cmd, "prepare")) {
-        const n = if (args.len > 1)
-            try std.fmt.parseInt(usize, args[2], 10)
+        const n = if (args.len >= 1)
+            try std.fmt.parseInt(usize, args[0], 10)
         else
             1;
 
         _ = try doPrepare(allocator, &client, n);
     } else if (mem.eql(u8, cmd, "insert")) {
-        const n = if (args.len > 1)
-            try std.fmt.parseInt(usize, args[2], 10)
+        const n = if (args.len >= 1)
+            try std.fmt.parseInt(usize, args[0], 10)
         else
             1;
 
         return doInsert(allocator, &client, n);
     } else if (mem.eql(u8, cmd, "prepare-then-exec")) {
-        if (args.len < 3) {
+        if (args.len < 1) {
             try std.fmt.format(stderr, "Usage: {s} prepared-then-exec <iterations>\n", .{args[0]});
             std.process.exit(1);
         }
 
-        const n = try std.fmt.parseInt(usize, args[2], 10);
+        const n = try std.fmt.parseInt(usize, args[0], 10);
 
         return doPrepareThenExec(allocator, &client, n);
     } else if (mem.eql(u8, cmd, "prepare-once-then-exec")) {
-        if (args.len < 3) {
+        if (args.len < 1) {
             try std.fmt.format(stderr, "Usage: {s} prepared-then-exec <iterations>\n", .{args[0]});
             std.process.exit(1);
         }
 
-        const n = try std.fmt.parseInt(usize, args[2], 10);
+        const n = try std.fmt.parseInt(usize, args[0], 10);
 
         return doPrepareOnceThenExec(allocator, &client, n);
     } else {

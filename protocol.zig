@@ -10,7 +10,223 @@ const event = @import("event.zig");
 const metadata = @import("metadata.zig");
 const QueryParameters = @import("QueryParameters.zig");
 
+const casstest = @import("casstest.zig");
 const testutils = @import("testutils.zig");
+
+const Frame = struct {
+    is_self_contained: bool,
+    payload: []const u8,
+};
+
+fn FrameReader(comptime ReaderType: type) type {
+    return struct {
+        const Self = @This();
+
+        reader: ReaderType,
+
+        const max_payload_size = 131071;
+        const initial_crc32_bytes = "\xFA\x2D\x55\xCA";
+
+        pub fn init(in: ReaderType) Self {
+            return Self{
+                .reader = in,
+            };
+        }
+
+        fn crc24(buf: []const u8) usize {
+            // This is adapted from https://github.com/apache/cassandra/blob/1bd4bcf4e561144497adc86e1b48480eab6171d4/src/java/org/apache/cassandra/net/Crc.java#L119-L135
+
+            const crc24_initial = 0x875060;
+            const crc24_polynomial = 0x1974F0B;
+
+            var crc: usize = crc24_initial;
+            for (buf) |b| {
+                crc ^= @as(usize, @intCast(b & 0xff)) << 16;
+
+                var i: usize = 0;
+                while (i < 8) : (i += 1) {
+                    crc <<= 1;
+                    if ((crc & 0x1000000) != 0) {
+                        crc ^= crc24_polynomial;
+                    }
+                }
+            }
+
+            return crc;
+        }
+
+        fn readUncompressed(self: *Self, allocator: mem.Allocator) !Frame {
+            const header_size = 6;
+            const trailer_size = 4;
+
+            // Read and parse header
+
+            const header = blk: {
+                var buf: [header_size]u8 = undefined;
+                const read = try self.reader.readAll(&buf);
+                if (read != header_size) {
+                    return error.UnexpectedEOF;
+                }
+
+                break :blk buf;
+            };
+
+            const first3b: u24 = mem.readInt(u24, header[0..3], .little);
+
+            const payload_length: u17 = @intCast(first3b & 0x1FFFF);
+            const is_self_contained = first3b & (1 << 17) != 0;
+
+            // std.debug.print("payload length: {d}\n", .{
+            //     payload_length,
+            // });
+
+            const header_crc24 = crc24(header[0..3]);
+            const expected_header_crc24 = @as(usize, @intCast(mem.readInt(u24, header[3..header_size], .little)));
+            if (header_crc24 != expected_header_crc24) {
+                return error.InvalidHeaderChecksum;
+            }
+
+            // Read payload and trailer
+
+            const payload_and_trailer = blk: {
+                const size = payload_length + trailer_size;
+
+                const payload_and_trailer = try allocator.alloc(u8, size);
+                const n = try self.reader.readAll(payload_and_trailer);
+                if (n != size) return error.UnexpectedEOF;
+
+                break :blk payload_and_trailer;
+            };
+
+            const payload = payload_and_trailer[0 .. payload_and_trailer.len - trailer_size];
+            const trailer = blk: {
+                var tmp: [4]u8 = undefined;
+                @memcpy(&tmp, payload_and_trailer[payload_and_trailer.len - trailer_size ..]);
+                break :blk tmp;
+            };
+
+            // std.debug.print("header: {s}, payload_and_trailer: {s}, is self contained: {}\n", .{
+            //     std.fmt.fmtSliceHexLower(&header),
+            //     std.fmt.fmtSliceHexLower(payload_and_trailer),
+            //     is_self_contained,
+            // });
+
+            std.debug.assert(self.reader.readByte() == error.EndOfStream);
+
+            // Verify payload CRC32
+
+            var hash = std.hash.Crc32.init();
+            hash.update(initial_crc32_bytes);
+            hash.update(payload);
+            const payload_crc32 = hash.final();
+
+            const expected_payload_crc32 = mem.readInt(u32, &trailer, .little);
+
+            if (payload_crc32 != expected_payload_crc32) {
+                return error.InvalidPayloadChecksum;
+            }
+
+            return Frame{
+                .payload = payload,
+                .is_self_contained = is_self_contained,
+            };
+        }
+    };
+}
+
+test "frame reader: QUERY message" {
+    var arena = testutils.arenaAllocator();
+    defer arena.deinit();
+
+    const data = @embedFile("testdata/query_frame_uncompressed.bin");
+    const frame = try readFrame(arena.allocator(), data);
+
+    try testing.expect(frame.is_self_contained);
+    try testing.expectEqual(@as(usize, 66), frame.payload.len);
+
+    const envelope = try readEnvelope(arena.allocator(), frame.payload);
+    try checkEnvelopeHeader(5, Opcode.Query, frame.payload.len, envelope.header);
+
+    var mr: MessageReader = undefined;
+    mr.reset(envelope.body);
+
+    const query_message = try QueryMessage.read(
+        arena.allocator(),
+        envelope.header.version,
+        &mr,
+    );
+
+    try testing.expectEqualStrings("select * from foobar.age_to_ids ;", query_message.query);
+    try testing.expectEqual(.One, query_message.query_parameters.consistency_level);
+    try testing.expect(query_message.query_parameters.values == null);
+}
+
+test "frame reader: RESULT message" {
+    var arena = testutils.arenaAllocator();
+    defer arena.deinit();
+
+    const data = @embedFile("testdata/result_frame_uncompressed.bin");
+    const frame = try readFrame(arena.allocator(), data);
+
+    try testing.expect(frame.is_self_contained);
+    try testing.expectEqual(@as(usize, 605), frame.payload.len);
+
+    const envelope = try readEnvelope(arena.allocator(), frame.payload);
+    try checkEnvelopeHeader(5, Opcode.Result, frame.payload.len, envelope.header);
+
+    var mr: MessageReader = undefined;
+    mr.reset(envelope.body);
+
+    const result_message = try ResultMessage.read(
+        arena.allocator(),
+        envelope.header.version,
+        &mr,
+    );
+
+    // The rows in the result message have the following columns.
+    // The order is important !
+    const MyRow = struct {
+        age: u32,
+        balance: std.math.big.int.Const,
+        ids: []u16,
+        name: []const u8,
+    };
+
+    const rows = try collectRows(
+        MyRow,
+        arena.allocator(),
+        result_message.result.Rows,
+    );
+    try testing.expectEqual(10, rows.items.len);
+
+    const checkRowData = struct {
+        fn do(expAge: usize, exp_balance_str: []const u8, exp_ids: []const u16, exp_name_opt: ?[]const u8, row: MyRow) !void {
+            try testing.expectEqual(expAge, row.age);
+
+            var buf: [1024]u8 = undefined;
+            var fba = std.heap.FixedBufferAllocator.init(&buf);
+
+            var exp_balance = try std.math.big.int.Managed.init(fba.allocator());
+            try exp_balance.setString(10, exp_balance_str);
+            try testing.expect(exp_balance.toConst().eql(row.balance));
+
+            try testing.expectEqualSlices(u16, exp_ids, row.ids);
+            const exp_name = exp_name_opt orelse "";
+            try testing.expectEqualStrings(exp_name, row.name);
+        }
+    }.do;
+
+    try checkRowData(50, "-350956306", &[_]u16{ 0, 2, 4, 8 }, null, rows.items[0]);
+    try checkRowData(10, "-350956306", &[_]u16{ 0, 2, 4, 8 }, null, rows.items[1]);
+    try checkRowData(60, "40502020", &[_]u16{ 0, 2, 4, 8 }, "Vincent 6", rows.items[2]);
+    try checkRowData(80, "40502020", &[_]u16{ 0, 2, 4, 8 }, "Vincent 8", rows.items[3]);
+    try checkRowData(30, "-350956306", &[_]u16{ 0, 2, 4, 8 }, null, rows.items[4]);
+    try checkRowData(0, "40502020", &[_]u16{ 0, 2, 4, 8 }, "Vincent 0", rows.items[5]);
+    try checkRowData(20, "40502020", &[_]u16{ 0, 2, 4, 8 }, "Vincent 2", rows.items[6]);
+    try checkRowData(40, "40502020", &[_]u16{ 0, 2, 4, 8 }, "Vincent 4", rows.items[7]);
+    try checkRowData(70, "-350956306", &[_]u16{ 0, 2, 4, 8 }, null, rows.items[8]);
+    try checkRowData(90, "-350956306", &[_]u16{ 0, 2, 4, 8 }, null, rows.items[9]);
+}
 
 pub const EnvelopeFlags = struct {
     pub const Compression: u8 = 0x01;
@@ -1562,13 +1778,12 @@ pub const RowData = struct {
     slice: []const ColumnData,
 };
 
-fn checkHeader(opcode: Opcode, data_len: usize, header: EnvelopeHeader) !void {
-    // We can only use v4 for now
-    try testing.expect(header.version.is(4));
+fn checkEnvelopeHeader(version: comptime_int, opcode: Opcode, input_len: usize, header: EnvelopeHeader) !void {
+    try testing.expect(header.version.is(version));
     // Don't care about the flags here
     // Don't care about the stream
     try testing.expectEqual(opcode, header.opcode);
-    try testing.expectEqual(@as(usize, header.body_len), data_len - EnvelopeHeader.Size);
+    try testing.expectEqual(input_len - EnvelopeHeader.Size, @as(usize, header.body_len));
 }
 
 test "envelope header: read and write" {
@@ -1780,9 +1995,9 @@ test "error message: invalid query, no keyspace specified" {
     defer arena.deinit();
 
     const data = "\x84\x00\x00\x02\x00\x00\x00\x00\x5e\x00\x00\x22\x00\x00\x58\x4e\x6f\x20\x6b\x65\x79\x73\x70\x61\x63\x65\x20\x68\x61\x73\x20\x62\x65\x65\x6e\x20\x73\x70\x65\x63\x69\x66\x69\x65\x64\x2e\x20\x55\x53\x45\x20\x61\x20\x6b\x65\x79\x73\x70\x61\x63\x65\x2c\x20\x6f\x72\x20\x65\x78\x70\x6c\x69\x63\x69\x74\x6c\x79\x20\x73\x70\x65\x63\x69\x66\x79\x20\x6b\x65\x79\x73\x70\x61\x63\x65\x2e\x74\x61\x62\x6c\x65\x6e\x61\x6d\x65";
-    const envelope = try testutils.readEnvelope(arena.allocator(), data);
+    const envelope = try readEnvelope(arena.allocator(), data);
 
-    try checkHeader(Opcode.Error, data.len, envelope.header);
+    try checkEnvelopeHeader(4, Opcode.Error, data.len, envelope.header);
 
     var mr: MessageReader = undefined;
     mr.reset(envelope.body);
@@ -1797,9 +2012,9 @@ test "error message: already exists" {
     defer arena.deinit();
 
     const data = "\x84\x00\x00\x23\x00\x00\x00\x00\x53\x00\x00\x24\x00\x00\x3e\x43\x61\x6e\x6e\x6f\x74\x20\x61\x64\x64\x20\x61\x6c\x72\x65\x61\x64\x79\x20\x65\x78\x69\x73\x74\x69\x6e\x67\x20\x74\x61\x62\x6c\x65\x20\x22\x68\x65\x6c\x6c\x6f\x22\x20\x74\x6f\x20\x6b\x65\x79\x73\x70\x61\x63\x65\x20\x22\x66\x6f\x6f\x62\x61\x72\x22\x00\x06\x66\x6f\x6f\x62\x61\x72\x00\x05\x68\x65\x6c\x6c\x6f";
-    const envelope = try testutils.readEnvelope(arena.allocator(), data);
+    const envelope = try readEnvelope(arena.allocator(), data);
 
-    try checkHeader(Opcode.Error, data.len, envelope.header);
+    try checkEnvelopeHeader(4, Opcode.Error, data.len, envelope.header);
 
     var mr: MessageReader = undefined;
     mr.reset(envelope.body);
@@ -1817,9 +2032,9 @@ test "error message: syntax error" {
     defer arena.deinit();
 
     const data = "\x84\x00\x00\x2f\x00\x00\x00\x00\x41\x00\x00\x20\x00\x00\x3b\x6c\x69\x6e\x65\x20\x32\x3a\x30\x20\x6d\x69\x73\x6d\x61\x74\x63\x68\x65\x64\x20\x69\x6e\x70\x75\x74\x20\x27\x3b\x27\x20\x65\x78\x70\x65\x63\x74\x69\x6e\x67\x20\x4b\x5f\x46\x52\x4f\x4d\x20\x28\x73\x65\x6c\x65\x63\x74\x2a\x5b\x3b\x5d\x29";
-    const envelope = try testutils.readEnvelope(arena.allocator(), data);
+    const envelope = try readEnvelope(arena.allocator(), data);
 
-    try checkHeader(Opcode.Error, data.len, envelope.header);
+    try checkEnvelopeHeader(4, Opcode.Error, data.len, envelope.header);
 
     var mr: MessageReader = undefined;
     mr.reset(envelope.body);
@@ -1839,9 +2054,9 @@ test "options message" {
     defer arena.deinit();
 
     const data = "\x04\x00\x00\x05\x05\x00\x00\x00\x00";
-    const envelope = try testutils.readEnvelope(arena.allocator(), data);
+    const envelope = try readEnvelope(arena.allocator(), data);
 
-    try checkHeader(Opcode.Options, data.len, envelope.header);
+    try checkEnvelopeHeader(4, Opcode.Options, data.len, envelope.header);
 }
 
 /// STARTUP is sent to a node to initialize a connection.
@@ -1916,9 +2131,9 @@ test "startup message" {
     // read
 
     const exp = "\x04\x00\x00\x00\x01\x00\x00\x00\x16\x00\x01\x00\x0b\x43\x51\x4c\x5f\x56\x45\x52\x53\x49\x4f\x4e\x00\x05\x33\x2e\x30\x2e\x30";
-    const envelope = try testutils.readEnvelope(arena.allocator(), exp);
+    const envelope = try readEnvelope(arena.allocator(), exp);
 
-    try checkHeader(Opcode.Startup, exp.len, envelope.header);
+    try checkEnvelopeHeader(4, Opcode.Startup, exp.len, envelope.header);
 
     var mr: MessageReader = undefined;
     mr.reset(envelope.body);
@@ -1929,7 +2144,7 @@ test "startup message" {
 
     // write
 
-    try testutils.expectSameEnvelope(StartupMessage, message, envelope.header, exp);
+    try expectSameEnvelope(StartupMessage, message, envelope.header, exp);
 }
 
 /// EXECUTE is sent to execute a prepared query.
@@ -1976,9 +2191,9 @@ test "execute message" {
     // read
 
     const exp = "\x04\x00\x01\x00\x0a\x00\x00\x00\x37\x00\x10\x97\x97\x95\x6d\xfe\xb2\x4c\x99\x86\x8e\xd3\x84\xff\x6f\xd9\x4c\x00\x04\x27\x00\x01\x00\x00\x00\x10\xeb\x11\xc9\x1e\xd8\xcc\x48\x4d\xaf\x55\xe9\x9f\x5c\xd9\xec\x4a\x00\x00\x13\x88\x00\x05\xa2\x41\x4c\x1b\x06\x4c";
-    const envelope = try testutils.readEnvelope(arena.allocator(), exp);
+    const envelope = try readEnvelope(arena.allocator(), exp);
 
-    try checkHeader(Opcode.Execute, exp.len, envelope.header);
+    try checkEnvelopeHeader(4, Opcode.Execute, exp.len, envelope.header);
 
     var mr: MessageReader = undefined;
     mr.reset(envelope.body);
@@ -2001,7 +2216,7 @@ test "execute message" {
 
     // write
 
-    try testutils.expectSameEnvelope(ExecuteMessage, message, envelope.header, exp);
+    try expectSameEnvelope(ExecuteMessage, message, envelope.header, exp);
 }
 
 /// AUTHENTICATE is sent by a node in response to a STARTUP message if authentication is required.
@@ -2067,9 +2282,9 @@ test "authenticate message" {
     // read
 
     const exp = "\x84\x00\x00\x00\x03\x00\x00\x00\x31\x00\x2f\x6f\x72\x67\x2e\x61\x70\x61\x63\x68\x65\x2e\x63\x61\x73\x73\x61\x6e\x64\x72\x61\x2e\x61\x75\x74\x68\x2e\x50\x61\x73\x73\x77\x6f\x72\x64\x41\x75\x74\x68\x65\x6e\x74\x69\x63\x61\x74\x6f\x72";
-    const envelope = try testutils.readEnvelope(arena.allocator(), exp);
+    const envelope = try readEnvelope(arena.allocator(), exp);
 
-    try checkHeader(Opcode.Authenticate, exp.len, envelope.header);
+    try checkEnvelopeHeader(4, Opcode.Authenticate, exp.len, envelope.header);
 
     var mr: MessageReader = undefined;
     mr.reset(envelope.body);
@@ -2089,9 +2304,9 @@ test "auth response message" {
     // read
 
     const exp = "\x04\x00\x00\x02\x0f\x00\x00\x00\x18\x00\x00\x00\x14\x00\x63\x61\x73\x73\x61\x6e\x64\x72\x61\x00\x63\x61\x73\x73\x61\x6e\x64\x72\x61";
-    const envelope = try testutils.readEnvelope(arena.allocator(), exp);
+    const envelope = try readEnvelope(arena.allocator(), exp);
 
-    try checkHeader(Opcode.AuthResponse, exp.len, envelope.header);
+    try checkEnvelopeHeader(4, Opcode.AuthResponse, exp.len, envelope.header);
 
     var mr: MessageReader = undefined;
     mr.reset(envelope.body);
@@ -2102,7 +2317,7 @@ test "auth response message" {
 
     // write
 
-    try testutils.expectSameEnvelope(AuthResponseMessage, message, envelope.header, exp);
+    try expectSameEnvelope(AuthResponseMessage, message, envelope.header, exp);
 }
 
 test "auth success message" {
@@ -2112,9 +2327,9 @@ test "auth success message" {
     // read
 
     const exp = "\x84\x00\x00\x02\x10\x00\x00\x00\x04\xff\xff\xff\xff";
-    const envelope = try testutils.readEnvelope(arena.allocator(), exp);
+    const envelope = try readEnvelope(arena.allocator(), exp);
 
-    try checkHeader(Opcode.AuthSuccess, exp.len, envelope.header);
+    try checkEnvelopeHeader(4, Opcode.AuthSuccess, exp.len, envelope.header);
 
     var mr: MessageReader = undefined;
     mr.reset(envelope.body);
@@ -2327,9 +2542,9 @@ test "batch message: query type string" {
     // read
 
     const exp = "\x04\x00\x00\xc0\x0d\x00\x00\x00\xcc\x00\x00\x03\x00\x00\x00\x00\x3b\x49\x4e\x53\x45\x52\x54\x20\x49\x4e\x54\x4f\x20\x66\x6f\x6f\x62\x61\x72\x2e\x75\x73\x65\x72\x28\x69\x64\x2c\x20\x6e\x61\x6d\x65\x29\x20\x76\x61\x6c\x75\x65\x73\x28\x75\x75\x69\x64\x28\x29\x2c\x20\x27\x76\x69\x6e\x63\x65\x6e\x74\x27\x29\x00\x00\x00\x00\x00\x00\x3b\x49\x4e\x53\x45\x52\x54\x20\x49\x4e\x54\x4f\x20\x66\x6f\x6f\x62\x61\x72\x2e\x75\x73\x65\x72\x28\x69\x64\x2c\x20\x6e\x61\x6d\x65\x29\x20\x76\x61\x6c\x75\x65\x73\x28\x75\x75\x69\x64\x28\x29\x2c\x20\x27\x76\x69\x6e\x63\x65\x6e\x74\x27\x29\x00\x00\x00\x00\x00\x00\x3b\x49\x4e\x53\x45\x52\x54\x20\x49\x4e\x54\x4f\x20\x66\x6f\x6f\x62\x61\x72\x2e\x75\x73\x65\x72\x28\x69\x64\x2c\x20\x6e\x61\x6d\x65\x29\x20\x76\x61\x6c\x75\x65\x73\x28\x75\x75\x69\x64\x28\x29\x2c\x20\x27\x76\x69\x6e\x63\x65\x6e\x74\x27\x29\x00\x00\x00\x00\x00";
-    const envelope = try testutils.readEnvelope(arena.allocator(), exp);
+    const envelope = try readEnvelope(arena.allocator(), exp);
 
-    try checkHeader(Opcode.Batch, exp.len, envelope.header);
+    try checkEnvelopeHeader(4, Opcode.Batch, exp.len, envelope.header);
 
     var mr: MessageReader = undefined;
     mr.reset(envelope.body);
@@ -2354,7 +2569,7 @@ test "batch message: query type string" {
 
     // write
 
-    try testutils.expectSameEnvelope(BatchMessage, message, envelope.header, exp);
+    try expectSameEnvelope(BatchMessage, message, envelope.header, exp);
 }
 
 test "batch message: query type prepared" {
@@ -2364,9 +2579,9 @@ test "batch message: query type prepared" {
     // read
 
     const exp = "\x04\x00\x01\x00\x0d\x00\x00\x00\xa2\x00\x00\x03\x01\x00\x10\x88\xb7\xd6\x81\x8b\x2d\x8d\x97\xfc\x41\xc1\x34\x7b\x27\xde\x65\x00\x02\x00\x00\x00\x10\x3a\x9a\xab\x41\x68\x24\x4a\xef\x9d\xf5\x72\xc7\x84\xab\xa2\x57\x00\x00\x00\x07\x56\x69\x6e\x63\x65\x6e\x74\x01\x00\x10\x88\xb7\xd6\x81\x8b\x2d\x8d\x97\xfc\x41\xc1\x34\x7b\x27\xde\x65\x00\x02\x00\x00\x00\x10\xed\x54\xb0\x6d\xcc\xb2\x43\x51\x96\x51\x74\x5e\xee\xae\xd2\xfe\x00\x00\x00\x07\x56\x69\x6e\x63\x65\x6e\x74\x01\x00\x10\x88\xb7\xd6\x81\x8b\x2d\x8d\x97\xfc\x41\xc1\x34\x7b\x27\xde\x65\x00\x02\x00\x00\x00\x10\x79\xdf\x8a\x28\x5a\x60\x47\x19\x9b\x42\x84\xea\x69\x10\x1a\xe6\x00\x00\x00\x07\x56\x69\x6e\x63\x65\x6e\x74\x00\x00\x00";
-    const envelope = try testutils.readEnvelope(arena.allocator(), exp);
+    const envelope = try readEnvelope(arena.allocator(), exp);
 
-    try checkHeader(Opcode.Batch, exp.len, envelope.header);
+    try checkEnvelopeHeader(4, Opcode.Batch, exp.len, envelope.header);
 
     var mr: MessageReader = undefined;
     mr.reset(envelope.body);
@@ -2407,7 +2622,7 @@ test "batch message: query type prepared" {
 
     // write
 
-    try testutils.expectSameEnvelope(BatchMessage, message, envelope.header, exp);
+    try expectSameEnvelope(BatchMessage, message, envelope.header, exp);
 }
 
 /// EVENT is an event pushed by the server.
@@ -2468,9 +2683,9 @@ test "event message: topology change" {
     // read
 
     const exp = "\x84\x00\xff\xff\x0c\x00\x00\x00\x24\x00\x0f\x54\x4f\x50\x4f\x4c\x4f\x47\x59\x5f\x43\x48\x41\x4e\x47\x45\x00\x08\x4e\x45\x57\x5f\x4e\x4f\x44\x45\x04\x7f\x00\x00\x04\x00\x00\x23\x52";
-    const envlope = try testutils.readEnvelope(arena.allocator(), exp);
+    const envlope = try readEnvelope(arena.allocator(), exp);
 
-    try checkHeader(Opcode.Event, exp.len, envlope.header);
+    try checkEnvelopeHeader(4, Opcode.Event, exp.len, envlope.header);
 
     var mr: MessageReader = undefined;
     mr.reset(envlope.body);
@@ -2490,9 +2705,9 @@ test "event message: status change" {
     defer arena.deinit();
 
     const data = "\x84\x00\xff\xff\x0c\x00\x00\x00\x1e\x00\x0d\x53\x54\x41\x54\x55\x53\x5f\x43\x48\x41\x4e\x47\x45\x00\x04\x44\x4f\x57\x4e\x04\x7f\x00\x00\x01\x00\x00\x23\x52";
-    const envelope = try testutils.readEnvelope(arena.allocator(), data);
+    const envelope = try readEnvelope(arena.allocator(), data);
 
-    try checkHeader(Opcode.Event, data.len, envelope.header);
+    try checkEnvelopeHeader(4, Opcode.Event, data.len, envelope.header);
 
     var mr: MessageReader = undefined;
     mr.reset(envelope.body);
@@ -2512,9 +2727,9 @@ test "event message: schema change/keyspace" {
     defer arena.deinit();
 
     const data = "\x84\x00\xff\xff\x0c\x00\x00\x00\x2a\x00\x0d\x53\x43\x48\x45\x4d\x41\x5f\x43\x48\x41\x4e\x47\x45\x00\x07\x43\x52\x45\x41\x54\x45\x44\x00\x08\x4b\x45\x59\x53\x50\x41\x43\x45\x00\x06\x62\x61\x72\x62\x61\x7a";
-    const envelope = try testutils.readEnvelope(arena.allocator(), data);
+    const envelope = try readEnvelope(arena.allocator(), data);
 
-    try checkHeader(Opcode.Event, data.len, envelope.header);
+    try checkEnvelopeHeader(4, Opcode.Event, data.len, envelope.header);
 
     var mr: MessageReader = undefined;
     mr.reset(envelope.body);
@@ -2537,9 +2752,9 @@ test "event message: schema change/table" {
     defer arena.deinit();
 
     const data = "\x84\x00\xff\xff\x0c\x00\x00\x00\x2e\x00\x0d\x53\x43\x48\x45\x4d\x41\x5f\x43\x48\x41\x4e\x47\x45\x00\x07\x43\x52\x45\x41\x54\x45\x44\x00\x05\x54\x41\x42\x4c\x45\x00\x06\x66\x6f\x6f\x62\x61\x72\x00\x05\x73\x61\x6c\x75\x74";
-    const envelope = try testutils.readEnvelope(arena.allocator(), data);
+    const envelope = try readEnvelope(arena.allocator(), data);
 
-    try checkHeader(Opcode.Event, data.len, envelope.header);
+    try checkEnvelopeHeader(4, Opcode.Event, data.len, envelope.header);
 
     var mr: MessageReader = undefined;
     mr.reset(envelope.body);
@@ -2562,9 +2777,9 @@ test "event message: schema change/function" {
     defer arena.deinit();
 
     const data = "\x84\x00\xff\xff\x0c\x00\x00\x00\x40\x00\x0d\x53\x43\x48\x45\x4d\x41\x5f\x43\x48\x41\x4e\x47\x45\x00\x07\x43\x52\x45\x41\x54\x45\x44\x00\x08\x46\x55\x4e\x43\x54\x49\x4f\x4e\x00\x06\x66\x6f\x6f\x62\x61\x72\x00\x0d\x73\x6f\x6d\x65\x5f\x66\x75\x6e\x63\x74\x69\x6f\x6e\x00\x01\x00\x03\x69\x6e\x74";
-    const envelope = try testutils.readEnvelope(arena.allocator(), data);
+    const envelope = try readEnvelope(arena.allocator(), data);
 
-    try checkHeader(Opcode.Event, data.len, envelope.header);
+    try checkEnvelopeHeader(4, Opcode.Event, data.len, envelope.header);
 
     var mr: MessageReader = undefined;
     mr.reset(envelope.body);
@@ -2637,9 +2852,9 @@ test "prepare message" {
     // read
 
     const exp = "\x04\x00\x00\xc0\x09\x00\x00\x00\x32\x00\x00\x00\x2e\x53\x45\x4c\x45\x43\x54\x20\x61\x67\x65\x2c\x20\x6e\x61\x6d\x65\x20\x66\x72\x6f\x6d\x20\x66\x6f\x6f\x62\x61\x72\x2e\x75\x73\x65\x72\x20\x77\x68\x65\x72\x65\x20\x69\x64\x20\x3d\x20\x3f";
-    const envelope = try testutils.readEnvelope(arena.allocator(), exp);
+    const envelope = try readEnvelope(arena.allocator(), exp);
 
-    try checkHeader(Opcode.Prepare, exp.len, envelope.header);
+    try checkEnvelopeHeader(4, Opcode.Prepare, exp.len, envelope.header);
 
     var mr: MessageReader = undefined;
     mr.reset(envelope.body);
@@ -2650,7 +2865,7 @@ test "prepare message" {
 
     // write
 
-    try testutils.expectSameEnvelope(PrepareMessage, message, envelope.header, exp);
+    try expectSameEnvelope(PrepareMessage, message, envelope.header, exp);
 }
 
 /// QUERY is sent to perform a CQL query.
@@ -2682,9 +2897,9 @@ test "query message: no values, no paging state" {
     // read
 
     const exp = "\x04\x00\x00\x08\x07\x00\x00\x00\x30\x00\x00\x00\x1b\x53\x45\x4c\x45\x43\x54\x20\x2a\x20\x46\x52\x4f\x4d\x20\x66\x6f\x6f\x62\x61\x72\x2e\x75\x73\x65\x72\x20\x3b\x00\x01\x34\x00\x00\x00\x64\x00\x08\x00\x05\xa2\x2c\xf0\x57\x3e\x3f";
-    const envelope = try testutils.readEnvelope(arena.allocator(), exp);
+    const envelope = try readEnvelope(arena.allocator(), exp);
 
-    try checkHeader(Opcode.Query, exp.len, envelope.header);
+    try checkEnvelopeHeader(4, Opcode.Query, exp.len, envelope.header);
 
     var mr: MessageReader = undefined;
     mr.reset(envelope.body);
@@ -2702,7 +2917,7 @@ test "query message: no values, no paging state" {
 
     // write
 
-    try testutils.expectSameEnvelope(QueryMessage, message, envelope.header, exp);
+    try expectSameEnvelope(QueryMessage, message, envelope.header, exp);
 }
 
 /// READY is sent by a node to indicate it is ready to process queries.
@@ -2715,9 +2930,9 @@ test "ready message" {
     defer arena.deinit();
 
     const data = "\x84\x00\x00\x02\x02\x00\x00\x00\x00";
-    const envelope = try testutils.readEnvelope(arena.allocator(), data);
+    const envelope = try readEnvelope(arena.allocator(), data);
 
-    try checkHeader(Opcode.Ready, data.len, envelope.header);
+    try checkEnvelopeHeader(4, Opcode.Ready, data.len, envelope.header);
 }
 
 /// REGISTER is sent to register this connection to receive some types of events.
@@ -2744,9 +2959,9 @@ test "register message" {
     // read
 
     const exp = "\x04\x00\x00\xc0\x0b\x00\x00\x00\x31\x00\x03\x00\x0f\x54\x4f\x50\x4f\x4c\x4f\x47\x59\x5f\x43\x48\x41\x4e\x47\x45\x00\x0d\x53\x54\x41\x54\x55\x53\x5f\x43\x48\x41\x4e\x47\x45\x00\x0d\x53\x43\x48\x45\x4d\x41\x5f\x43\x48\x41\x4e\x47\x45";
-    const envelope = try testutils.readEnvelope(arena.allocator(), exp);
+    const envelope = try readEnvelope(arena.allocator(), exp);
 
-    try checkHeader(Opcode.Register, exp.len, envelope.header);
+    try checkEnvelopeHeader(4, Opcode.Register, exp.len, envelope.header);
 
     var mr: MessageReader = undefined;
     mr.reset(envelope.body);
@@ -2759,7 +2974,7 @@ test "register message" {
 
     // write
 
-    try testutils.expectSameEnvelope(RegisterMessage, message, envelope.header, exp);
+    try expectSameEnvelope(RegisterMessage, message, envelope.header, exp);
 }
 
 pub const Result = union(ResultKind) {
@@ -2897,9 +3112,9 @@ test "result message: void" {
     defer arena.deinit();
 
     const data = "\x84\x00\x00\x9d\x08\x00\x00\x00\x04\x00\x00\x00\x01";
-    const envelope = try testutils.readEnvelope(arena.allocator(), data);
+    const envelope = try readEnvelope(arena.allocator(), data);
 
-    try checkHeader(Opcode.Result, data.len, envelope.header);
+    try checkEnvelopeHeader(4, Opcode.Result, data.len, envelope.header);
 
     var mr: MessageReader = undefined;
     mr.reset(envelope.body);
@@ -2913,9 +3128,9 @@ test "result message: rows" {
     defer arena.deinit();
 
     const data = "\x84\x00\x00\x20\x08\x00\x00\x00\xa2\x00\x00\x00\x02\x00\x00\x00\x01\x00\x00\x00\x03\x00\x06\x66\x6f\x6f\x62\x61\x72\x00\x04\x75\x73\x65\x72\x00\x02\x69\x64\x00\x0c\x00\x03\x61\x67\x65\x00\x14\x00\x04\x6e\x61\x6d\x65\x00\x0d\x00\x00\x00\x03\x00\x00\x00\x10\x35\x94\x43\xf3\xb7\xc4\x47\xb2\x8a\xb4\xe2\x42\x39\x79\x36\xf8\x00\x00\x00\x01\x00\x00\x00\x00\x08\x56\x69\x6e\x63\x65\x6e\x74\x30\x00\x00\x00\x10\xd7\x77\xd5\xd7\x58\xc0\x4d\x2b\x8c\xf9\xa3\x53\xfa\x8e\x6c\x96\x00\x00\x00\x01\x01\x00\x00\x00\x08\x56\x69\x6e\x63\x65\x6e\x74\x31\x00\x00\x00\x10\x94\xa4\x7b\xb2\x8c\xf7\x43\x3d\x97\x6e\x72\x74\xb3\xfd\xd3\x31\x00\x00\x00\x01\x02\x00\x00\x00\x08\x56\x69\x6e\x63\x65\x6e\x74\x32";
-    const envelope = try testutils.readEnvelope(arena.allocator(), data);
+    const envelope = try readEnvelope(arena.allocator(), data);
 
-    try checkHeader(Opcode.Result, data.len, envelope.header);
+    try checkEnvelopeHeader(4, Opcode.Result, data.len, envelope.header);
 
     var mr: MessageReader = undefined;
     mr.reset(envelope.body);
@@ -2968,9 +3183,9 @@ test "result message: rows, don't skip metadata" {
     defer arena.deinit();
 
     const data = "\x84\x00\x00\x00\x08\x00\x00\x02\x3a\x00\x00\x00\x02\x00\x00\x00\x01\x00\x00\x00\x03\x00\x06\x66\x6f\x6f\x62\x61\x72\x00\x04\x75\x73\x65\x72\x00\x02\x69\x64\x00\x0c\x00\x03\x61\x67\x65\x00\x00\x00\x28\x6f\x72\x67\x2e\x61\x70\x61\x63\x68\x65\x2e\x63\x61\x73\x73\x61\x6e\x64\x72\x61\x2e\x64\x62\x2e\x6d\x61\x72\x73\x68\x61\x6c\x2e\x42\x79\x74\x65\x54\x79\x70\x65\x00\x04\x6e\x61\x6d\x65\x00\x0d\x00\x00\x00\x0d\x00\x00\x00\x10\x35\x94\x43\xf3\xb7\xc4\x47\xb2\x8a\xb4\xe2\x42\x39\x79\x36\xf8\x00\x00\x00\x01\x00\x00\x00\x00\x08\x56\x69\x6e\x63\x65\x6e\x74\x30\x00\x00\x00\x10\x87\x0e\x45\x7f\x56\x4a\x4f\xd5\xb5\xd6\x4a\x48\x4b\xe0\x67\x67\x00\x00\x00\x01\x01\x00\x00\x00\x08\x56\x69\x6e\x63\x65\x6e\x74\x31\x00\x00\x00\x10\xc5\xb1\x12\xf4\x0d\xea\x4d\x22\x83\x5b\xe0\x25\xef\x69\x0c\xe1\x00\x00\x00\x01\x01\x00\x00\x00\x08\x56\x69\x6e\x63\x65\x6e\x74\x31\x00\x00\x00\x10\xd7\x77\xd5\xd7\x58\xc0\x4d\x2b\x8c\xf9\xa3\x53\xfa\x8e\x6c\x96\x00\x00\x00\x01\x01\x00\x00\x00\x08\x56\x69\x6e\x63\x65\x6e\x74\x31\x00\x00\x00\x10\x65\x54\x02\x89\x33\xe1\x42\x73\x82\xcc\x1c\xdb\x3d\x24\x5e\x40\x00\x00\x00\x01\x00\x00\x00\x00\x08\x56\x69\x6e\x63\x65\x6e\x74\x30\x00\x00\x00\x10\x6a\xd1\x07\x9d\x27\x23\x47\x76\x8b\x7f\x39\x4d\xe3\xb8\x97\xc5\x00\x00\x00\x01\x02\x00\x00\x00\x08\x56\x69\x6e\x63\x65\x6e\x74\x32\x00\x00\x00\x10\xe9\xef\xfe\xa6\xeb\xc5\x4d\xb9\xaf\xc7\xd7\xc0\x28\x43\x27\x40\x00\x00\x00\x01\x00\x00\x00\x00\x08\x56\x69\x6e\x63\x65\x6e\x74\x30\x00\x00\x00\x10\x96\xe6\xdd\x62\x14\xc9\x4e\x7c\xa1\x2f\x98\x5e\xe9\xe0\x91\x0d\x00\x00\x00\x01\x02\x00\x00\x00\x08\x56\x69\x6e\x63\x65\x6e\x74\x32\x00\x00\x00\x10\xef\xd5\x5a\x9b\xec\x7f\x4c\x5c\x89\xc3\x8c\xfa\x28\xf9\x6d\xfe\x00\x00\x00\x01\x00\x00\x00\x00\x08\x56\x69\x6e\x63\x65\x6e\x74\x30\x00\x00\x00\x10\x94\xa4\x7b\xb2\x8c\xf7\x43\x3d\x97\x6e\x72\x74\xb3\xfd\xd3\x31\x00\x00\x00\x01\x02\x00\x00\x00\x08\x56\x69\x6e\x63\x65\x6e\x74\x32\x00\x00\x00\x10\xe6\x02\xc7\x47\xbf\xca\x44\xbc\x9d\xc6\x6b\x04\x0f\xb7\x15\xed\x00\x00\x00\x01\x78\x00\x00\x00\x04\x48\x61\x68\x61\x00\x00\x00\x10\xac\x5e\xcc\xa8\x8e\xa1\x42\x2f\x86\xe6\xa0\x93\xbe\xd2\x73\x22\x00\x00\x00\x01\x02\x00\x00\x00\x08\x56\x69\x6e\x63\x65\x6e\x74\x32\x00\x00\x00\x10\xbe\x90\x37\x66\x31\xe5\x43\x93\xbc\x99\x43\xd3\x69\xf8\xe6\xba\x00\x00\x00\x01\x01\x00\x00\x00\x08\x56\x69\x6e\x63\x65\x6e\x74\x31";
-    const envelope = try testutils.readEnvelope(arena.allocator(), data);
+    const envelope = try readEnvelope(arena.allocator(), data);
 
-    try checkHeader(Opcode.Result, data.len, envelope.header);
+    try checkEnvelopeHeader(4, Opcode.Result, data.len, envelope.header);
 
     var mr: MessageReader = undefined;
     mr.reset(envelope.body);
@@ -3013,9 +3228,9 @@ test "result message: rows, list of uuid" {
     defer arena.deinit();
 
     const data = "\x84\x00\x00\x00\x08\x00\x00\x00\x58\x00\x00\x00\x02\x00\x00\x00\x01\x00\x00\x00\x02\x00\x06\x66\x6f\x6f\x62\x61\x72\x00\x0a\x61\x67\x65\x5f\x74\x6f\x5f\x69\x64\x73\x00\x03\x61\x67\x65\x00\x09\x00\x03\x69\x64\x73\x00\x20\x00\x0c\x00\x00\x00\x01\x00\x00\x00\x04\x00\x00\x00\x78\x00\x00\x00\x18\x00\x00\x00\x01\x00\x00\x00\x10\xe6\x02\xc7\x47\xbf\xca\x44\xbc\x9d\xc6\x6b\x04\x0f\xb7\x15\xed";
-    const envelope = try testutils.readEnvelope(arena.allocator(), data);
+    const envelope = try readEnvelope(arena.allocator(), data);
 
-    try checkHeader(Opcode.Result, data.len, envelope.header);
+    try checkEnvelopeHeader(4, Opcode.Result, data.len, envelope.header);
 
     var mr: MessageReader = undefined;
     mr.reset(envelope.body);
@@ -3054,9 +3269,9 @@ test "result message: set keyspace" {
     defer arena.deinit();
 
     const data = "\x84\x00\x00\x77\x08\x00\x00\x00\x0c\x00\x00\x00\x03\x00\x06\x66\x6f\x6f\x62\x61\x72";
-    const envelope = try testutils.readEnvelope(arena.allocator(), data);
+    const envelope = try readEnvelope(arena.allocator(), data);
 
-    try checkHeader(Opcode.Result, data.len, envelope.header);
+    try checkEnvelopeHeader(4, Opcode.Result, data.len, envelope.header);
 
     var mr: MessageReader = undefined;
     mr.reset(envelope.body);
@@ -3071,9 +3286,9 @@ test "result message: prepared insert" {
     defer arena.deinit();
 
     const data = "\x84\x00\x00\x80\x08\x00\x00\x00\x4f\x00\x00\x00\x04\x00\x10\x63\x7c\x1c\x1f\xd0\x13\x4a\xb8\xfc\x94\xca\x67\xf2\x88\xb2\xa3\x00\x00\x00\x01\x00\x00\x00\x03\x00\x00\x00\x01\x00\x00\x00\x06\x66\x6f\x6f\x62\x61\x72\x00\x04\x75\x73\x65\x72\x00\x02\x69\x64\x00\x0c\x00\x03\x61\x67\x65\x00\x14\x00\x04\x6e\x61\x6d\x65\x00\x0d\x00\x00\x00\x04\x00\x00\x00\x00";
-    const envelope = try testutils.readEnvelope(arena.allocator(), data);
+    const envelope = try readEnvelope(arena.allocator(), data);
 
-    try checkHeader(Opcode.Result, data.len, envelope.header);
+    try checkEnvelopeHeader(4, Opcode.Result, data.len, envelope.header);
 
     var mr: MessageReader = undefined;
     mr.reset(envelope.body);
@@ -3116,9 +3331,9 @@ test "result message: prepared select" {
     defer arena.deinit();
 
     const data = "\x84\x00\x00\xc0\x08\x00\x00\x00\x63\x00\x00\x00\x04\x00\x10\x3b\x2e\x8d\x03\x43\xf4\x3b\xfc\xad\xa1\x78\x9c\x27\x0e\xcf\xee\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x06\x66\x6f\x6f\x62\x61\x72\x00\x04\x75\x73\x65\x72\x00\x02\x69\x64\x00\x0c\x00\x00\x00\x01\x00\x00\x00\x03\x00\x06\x66\x6f\x6f\x62\x61\x72\x00\x04\x75\x73\x65\x72\x00\x02\x69\x64\x00\x0c\x00\x03\x61\x67\x65\x00\x14\x00\x04\x6e\x61\x6d\x65\x00\x0d";
-    const envelope = try testutils.readEnvelope(arena.allocator(), data);
+    const envelope = try readEnvelope(arena.allocator(), data);
 
-    try checkHeader(Opcode.Result, data.len, envelope.header);
+    try checkEnvelopeHeader(4, Opcode.Result, data.len, envelope.header);
 
     var mr: MessageReader = undefined;
     mr.reset(envelope.body);
@@ -3228,9 +3443,9 @@ test "supported message" {
     // read
 
     const exp = "\x84\x00\x00\x09\x06\x00\x00\x00\x60\x00\x03\x00\x11\x50\x52\x4f\x54\x4f\x43\x4f\x4c\x5f\x56\x45\x52\x53\x49\x4f\x4e\x53\x00\x03\x00\x04\x33\x2f\x76\x33\x00\x04\x34\x2f\x76\x34\x00\x09\x35\x2f\x76\x35\x2d\x62\x65\x74\x61\x00\x0b\x43\x4f\x4d\x50\x52\x45\x53\x53\x49\x4f\x4e\x00\x02\x00\x06\x73\x6e\x61\x70\x70\x79\x00\x03\x6c\x7a\x34\x00\x0b\x43\x51\x4c\x5f\x56\x45\x52\x53\x49\x4f\x4e\x00\x01\x00\x05\x33\x2e\x34\x2e\x34";
-    const envelope = try testutils.readEnvelope(arena.allocator(), exp);
+    const envelope = try readEnvelope(arena.allocator(), exp);
 
-    try checkHeader(Opcode.Supported, exp.len, envelope.header);
+    try checkEnvelopeHeader(4, Opcode.Supported, exp.len, envelope.header);
 
     var mr: MessageReader = undefined;
     mr.reset(envelope.body);
@@ -3247,4 +3462,111 @@ test "supported message" {
     try testing.expectEqual(@as(usize, 2), message.compression_algorithms.len);
     try testing.expectEqual(CompressionAlgorithm.Snappy, message.compression_algorithms[0]);
     try testing.expectEqual(CompressionAlgorithm.LZ4, message.compression_algorithms[1]);
+}
+
+/// Reads an enevelope from the provided buffer.
+/// Only intended to be used for tests.
+fn readEnvelope(_allocator: mem.Allocator, data: []const u8) !Envelope {
+    var source = io.StreamSource{ .const_buffer = io.fixedBufferStream(data) };
+    const reader = source.reader();
+
+    var fr = EnvelopeReader(@TypeOf(reader)).init(reader);
+
+    return fr.read(_allocator);
+}
+
+/// Reads a frame from the provided buffer.
+/// Only intended to be used for tests.
+fn readFrame(_allocator: mem.Allocator, data: []const u8) !Frame {
+    var source = io.StreamSource{ .const_buffer = io.fixedBufferStream(data) };
+    const reader = source.reader();
+
+    var fr = FrameReader(@TypeOf(reader)).init(reader);
+
+    return fr.readUncompressed(_allocator);
+}
+
+fn expectSameEnvelope(comptime T: type, fr: T, header: EnvelopeHeader, exp: []const u8) !void {
+    var arena = testutils.arenaAllocator();
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    // Write message body
+    var mw = try MessageWriter.init(allocator);
+
+    const write_fn = @typeInfo(@TypeOf(T.write));
+    switch (write_fn) {
+        .Fn => |info| {
+            if (info.params.len == 2) {
+                try fr.write(&mw);
+            } else if (info.params.len == 3) {
+                try fr.write(header.version, &mw);
+            }
+        },
+        else => unreachable,
+    }
+
+    // Write envelope
+    const envelope = Envelope{
+        .header = header,
+        .body = mw.getWritten(),
+    };
+
+    var buf2: [1024]u8 = undefined;
+    var source = io.StreamSource{ .buffer = io.fixedBufferStream(&buf2) };
+    const writer = source.writer();
+    var fw = EnvelopeWriter(@TypeOf(writer)).init(writer);
+
+    try fw.write(envelope);
+
+    if (!std.mem.eql(u8, exp, source.buffer.getWritten())) {
+        testutils.printHRBytes("\n==> exp   : {s}\n", exp, .{});
+        testutils.printHRBytes("==> source: {s}\n", source.buffer.getWritten(), .{});
+        std.debug.panic("envelopes are different\n", .{});
+    }
+}
+
+fn collectRows(comptime T: type, allocator: mem.Allocator, rows: Rows) !std.ArrayList(T) {
+    var result = std.ArrayList(T).init(allocator);
+
+    const Iterator = @import("iterator.zig").Iterator;
+    var iter = Iterator.init(rows.metadata, rows.data);
+
+    while (true) {
+        var row_arena = std.heap.ArenaAllocator.init(allocator);
+        errdefer row_arena.deinit();
+
+        var row: T = undefined;
+
+        // We want iteration diagnostics in case of failures.
+        var iter_diags = Iterator.ScanOptions.Diagnostics{};
+        const iter_options = Iterator.ScanOptions{
+            .diags = &iter_diags,
+        };
+
+        const scanned = iter.scan(row_arena.allocator(), iter_options, &row) catch |err| switch (err) {
+            error.IncompatibleMetadata => blk: {
+                const im = iter_diags.incompatible_metadata;
+                const it = im.incompatible_types;
+                if (it.cql_type_name != null and it.native_type_name != null) {
+                    std.debug.panic("metadata incompatible. CQL type {?s} can't be scanned into native type {?s}\n", .{
+                        it.cql_type_name, it.native_type_name,
+                    });
+                } else {
+                    std.debug.panic("metadata incompatible. columns in result: {d} fields in struct: {d}\n", .{
+                        im.metadata_columns, im.struct_fields,
+                    });
+                }
+                break :blk false;
+            },
+            else => return err,
+        };
+        if (!scanned) {
+            break;
+        }
+
+        try result.append(row);
+    }
+
+    return result;
 }

@@ -17,18 +17,19 @@ pub const DDL = [_][]const u8{
     \\ CREATE KEYSPACE IF NOT EXISTS foobar WITH replication = {'class': 'SimpleStrategy', 'replication_factor': 1};
     ,
     \\ CREATE TABLE IF NOT EXISTS foobar.age_to_ids(
-    \\ 	age int,
-    \\ 	name text,
-    \\ 	ids set<tinyint>,
-    \\ 	balance varint,
-    \\ 	PRIMARY KEY ((age))
+    \\   age int,
+    \\   name text,
+    \\   ids set<tinyint>,
+    \\   balance varint,
+    \\   PRIMARY KEY ((age))
     \\ );
     ,
     \\ CREATE TABLE IF NOT EXISTS foobar.user(
-    \\ 	id bigint,
-    \\ 	secondary_id int,
-    \\ 	PRIMARY KEY ((id), secondary_id)
+    \\   id bigint,
+    \\   secondary_id int,
+    \\   PRIMARY KEY ((id), secondary_id)
     \\ );
+    ,
 };
 
 pub const Truncate = [_][]const u8{
