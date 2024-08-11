@@ -91,11 +91,14 @@ fn FrameReader(comptime ReaderType: type) type {
             const n = try self.reader.readAll(res);
             if (n != size) return error.UnexpectedEOF;
 
-            return .{ .payload = res[0 .. res.len - trailer_size], .trailer = blk: {
-                var tmp: [4]u8 = undefined;
-                @memcpy(&tmp, res[res.len - trailer_size ..]);
-                break :blk tmp;
-            } };
+            return .{
+                .payload = res[0 .. res.len - trailer_size],
+                .trailer = blk: {
+                    var tmp: [4]u8 = undefined;
+                    @memcpy(&tmp, res[res.len - trailer_size ..]);
+                    break :blk tmp;
+                },
+            };
         }
 
         fn readUncompressed(self: *Self, allocator: mem.Allocator) !Frame {
