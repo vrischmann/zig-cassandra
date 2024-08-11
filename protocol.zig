@@ -84,6 +84,14 @@ fn FrameReader(comptime ReaderType: type) type {
             trailer: [4]u8,
         };
 
+        fn readHeader(self: *Self, comptime N: comptime_int) ![N]u8 {
+            var buf: [N]u8 = undefined;
+            const n = try self.reader.readAll(&buf);
+            if (n != N) return error.UnexpectedEOF;
+
+            return buf;
+        }
+
         fn readPayloadAndTrailer(self: *Self, allocator: mem.Allocator, payload_length: usize) !PayloadAndTrailer {
             const size = payload_length + trailer_size;
 
@@ -106,18 +114,9 @@ fn FrameReader(comptime ReaderType: type) type {
 
             // Read and parse header
 
-            const header = blk: {
-                var buf: [header_size]u8 = undefined;
-                const n = try self.reader.readAll(&buf);
-                if (n != header_size) {
-                    return error.UnexpectedEOF;
-                }
-
-                break :blk buf;
-            };
+            const header = try self.readHeader(header_size);
 
             const first3b: u24 = mem.readInt(u24, header[0..3], .little);
-
             const payload_length: u17 = @intCast(first3b & 0x1FFFF);
             const is_self_contained = first3b & (1 << 17) != 0;
 
@@ -151,15 +150,7 @@ fn FrameReader(comptime ReaderType: type) type {
 
             // Read and parse header
 
-            const header = blk: {
-                var buf: [header_size]u8 = undefined;
-                const n = try self.reader.readAll(&buf);
-                if (n != header_size) {
-                    return error.UnexpectedEOF;
-                }
-
-                break :blk buf;
-            };
+            const header = try self.readHeader(header_size);
 
             const first5b: u40 = mem.readInt(u40, header[0..5], .little);
             const compressed_length: u17 = @intCast(first5b & 0x1FFFF);
