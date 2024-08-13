@@ -4,13 +4,6 @@ const mem = std.mem;
 
 const protocol = @import("protocol.zig");
 const Iterator = @import("iterator.zig");
-// const Frame = protocol.Frame;
-// const FrameReader = protocol.FrameReader;
-// const EnvelopeHeader = protocol.EnvelopeHeader;
-// const Envelope = protocol.Envelope;
-// const EnvelopeReader = protocol.EnvelopeReader;
-// const EnvelopeWriter = protocol.EnvelopeWriter;
-// const MessageWriter = protocol.MessageWriter;
 
 pub fn printHRBytes(comptime fmt: []const u8, exp: []const u8, args: anytype) void {
     const hextable = "0123456789abcdef";
