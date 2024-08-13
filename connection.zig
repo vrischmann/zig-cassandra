@@ -386,7 +386,8 @@ pub const Connection = struct {
 
             switch (compression) {
                 .LZ4 => {
-                    const decompressed_data = try lz4.decompress(allocator, envelope.body);
+                    // TODO(vincent): this is ugly
+                    const decompressed_data = try lz4.decompress(allocator, envelope.body, envelope.body.len * 3);
                     envelope.body = decompressed_data;
                 },
                 .Snappy => {
