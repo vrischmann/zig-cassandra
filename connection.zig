@@ -169,8 +169,7 @@ pub const Connection = struct {
         try self.writeMessage(
             fba.allocator(),
             .Options,
-            protocol.OptionsMessage,
-            .{},
+            protocol.OptionsMessage{},
             .{
                 .protocol_version = self.options.protocol_version,
                 .compression = null,
@@ -193,7 +192,6 @@ pub const Connection = struct {
         try self.writeMessage(
             fba.allocator(),
             .Startup,
-            protocol.StartupMessage,
             protocol.StartupMessage{
                 .cql_version = self.negotiated_state.cql_version,
                 .compression = self.options.compression,
@@ -234,7 +232,6 @@ pub const Connection = struct {
             try self.writeMessage(
                 allocator,
                 .AuthResponse,
-                protocol.AuthResponseMessage,
                 protocol.AuthResponseMessage{
                     .token = token,
                 },
@@ -278,7 +275,9 @@ pub const Connection = struct {
     /// Additionally this method takes care of compression if enabled.
     ///
     /// This method is not thread safe.
-    pub fn writeMessage(self: *Self, allocator: mem.Allocator, opcode: Opcode, comptime MessageType: type, message: MessageType, options: WriteMessageOptions) !void {
+    pub fn writeMessage(self: *Self, allocator: mem.Allocator, opcode: Opcode, message: anytype, options: WriteMessageOptions) !void {
+        const MessageType = @TypeOf(message);
+
         self.message_writer.reset();
 
         // Prepare the envelope

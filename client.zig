@@ -193,7 +193,6 @@ pub const Client = struct {
             try self.connection.writeMessage(
                 allocator,
                 .Prepare,
-                PrepareMessage,
                 PrepareMessage{
                     .query = query_string,
                     .keyspace = null,
@@ -279,7 +278,6 @@ pub const Client = struct {
             try self.connection.writeMessage(
                 allocator,
                 .Query,
-                QueryMessage,
                 QueryMessage{
                     .query = query_string,
                     .query_parameters = query_parameters,
@@ -373,7 +371,6 @@ pub const Client = struct {
             try self.connection.writeMessage(
                 allocator,
                 .Execute,
-                ExecuteMessage,
                 ExecuteMessage{
                     .query_id = query_id,
                     .result_metadata_id = ps_result_metadata_id,
