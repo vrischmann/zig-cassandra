@@ -6,6 +6,8 @@ const net = std.net;
 const os = std.os;
 const testing = std.testing;
 
+const assert = std.debug.assert;
+
 const lz4 = @import("lz4");
 
 const event = @import("event.zig");
@@ -44,7 +46,7 @@ fn FrameReader(comptime ReaderType: type) type {
         fn crc24(input: anytype) usize {
             // Don't use @sizeOf because it contains a padding byte
             const Size = @typeInfo(@TypeOf(input)).Int.bits / 8;
-            comptime std.debug.assert(Size > 0 and Size < 9);
+            comptime assert(Size > 0 and Size < 9);
 
             // This is adapted from https://github.com/apache/cassandra/blob/1bd4bcf4e561144497adc86e1b48480eab6171d4/src/java/org/apache/cassandra/net/Crc.java#L119-L135
 
@@ -123,7 +125,6 @@ fn FrameReader(comptime ReaderType: type) type {
             const header_size = 6;
 
             // Read and parse header
-
             const header = try self.readHeader(header_size);
 
             const first3b: u24 = mem.readInt(u24, header[0..3], .little);
@@ -135,9 +136,8 @@ fn FrameReader(comptime ReaderType: type) type {
             if (computed_crc24 != expected_crc24) return error.InvalidHeaderChecksum;
 
             // Read payload and trailer
-
             const payload_and_trailer = try self.readPayloadAndTrailer(allocator, payload_length);
-            std.debug.assert(self.reader.readByte() == error.EndOfStream);
+            assert(self.reader.readByte() == error.EndOfStream);
 
             // Verify payload CRC32
             try computeAndVerifyCRC32(payload_and_trailer);
@@ -152,7 +152,6 @@ fn FrameReader(comptime ReaderType: type) type {
             const header_size = 8;
 
             // Read and parse header
-
             const header = try self.readHeader(header_size);
 
             const first5b: u40 = mem.readInt(u40, header[0..5], .little);
@@ -165,9 +164,8 @@ fn FrameReader(comptime ReaderType: type) type {
             if (computed_crc24 != expected_crc24) return error.InvalidHeaderChecksum;
 
             // Read payload and trailer
-
             const payload_and_trailer = try self.readPayloadAndTrailer(allocator, compressed_length);
-            std.debug.assert(self.reader.readByte() == error.EndOfStream);
+            assert(self.reader.readByte() == error.EndOfStream);
 
             // Verify compressed payload CRC32
             try computeAndVerifyCRC32(payload_and_trailer);
@@ -177,8 +175,6 @@ fn FrameReader(comptime ReaderType: type) type {
                 payload_and_trailer.payload
             else
                 try lz4.decompress(allocator, payload_and_trailer.payload, @as(usize, @intCast(uncompressed_length)));
-
-            //
 
             return Frame{
                 .payload = payload,
@@ -1116,7 +1112,7 @@ pub const MessageReader = struct {
     pub fn readUnsignedVint(self: *Self, comptime IntType: type) !IntType {
         const bits = switch (@typeInfo(IntType)) {
             .Int => |info| blk: {
-                comptime std.debug.assert(info.bits >= 16);
+                comptime assert(info.bits >= 16);
                 break :blk info.bits;
             },
             else => unreachable,
@@ -1147,8 +1143,8 @@ pub const MessageReader = struct {
     pub fn readVint(self: *Self, comptime IntType: type) !IntType {
         const bits = switch (@typeInfo(IntType)) {
             .Int => |info| blk: {
-                comptime std.debug.assert(info.signedness == .signed);
-                comptime std.debug.assert(info.bits >= 16);
+                comptime assert(info.signedness == .signed);
+                comptime assert(info.bits >= 16);
 
                 break :blk info.bits;
             },
@@ -1601,7 +1597,7 @@ pub const MessageWriter = struct {
     pub fn writeUnsignedVint(self: *Self, n: anytype) !void {
         switch (@typeInfo(@TypeOf(n))) {
             .Int => |info| {
-                comptime std.debug.assert(info.signedness == .unsigned);
+                comptime assert(info.signedness == .unsigned);
             },
             else => unreachable,
         }
@@ -1636,8 +1632,8 @@ pub const MessageWriter = struct {
     pub fn writeVint(self: *Self, n: anytype) !void {
         const bits = switch (@typeInfo(@TypeOf(n))) {
             .Int => |info| blk: {
-                comptime std.debug.assert(info.bits == 32 or info.bits == 64);
-                comptime std.debug.assert(info.signedness == .signed);
+                comptime assert(info.bits == 32 or info.bits == 64);
+                comptime assert(info.signedness == .signed);
 
                 break :blk info.bits;
             },
