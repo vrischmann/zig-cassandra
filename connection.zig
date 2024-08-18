@@ -5,12 +5,16 @@ const io = std.io;
 const log = std.log;
 const mem = std.mem;
 const net = std.net;
+const debug = std.debug;
 
 const protocol = @import("protocol.zig");
 
+const Frame = protocol.Frame;
+const FrameFormat = protocol.FrameFormat;
+
+const Envelope = protocol.Envelope;
 const EnvelopeFlags = protocol.EnvelopeFlags;
 const EnvelopeHeader = protocol.EnvelopeHeader;
-const Envelope = protocol.Envelope;
 const EnvelopeReader = protocol.EnvelopeReader;
 const EnvelopeWriter = protocol.EnvelopeWriter;
 
@@ -86,8 +90,9 @@ pub const Connection = struct {
     const BufferedReaderType = io.BufferedReader(4096, std.net.Stream.Reader);
     const BufferedWriterType = io.BufferedWriter(4096, std.net.Stream.Writer);
 
+    // TODO(vincent): we probably don't need the reader and writer abstractions here.
     const EnvelopeReaderType = EnvelopeReader(BufferedReaderType.Reader);
-    const EnvelopeWriterType = EnvelopeWriter(BufferedWriterType.Writer);
+    const EnvelopeWriterType = EnvelopeWriter(std.ArrayList(u8).Writer);
 
     /// Contains the state that is negotiated with a node as part of the handshake.
     const NegotiatedState = struct {
@@ -97,13 +102,19 @@ pub const Connection = struct {
     allocator: mem.Allocator,
     options: InitOptions,
 
+    framing: struct {
+        enabled: bool = false,
+        format: FrameFormat = undefined,
+    },
+
     socket: std.net.Stream,
 
     buffered_reader: BufferedReaderType,
     buffered_writer: BufferedWriterType,
 
-    /// Helpers types needed to decode the CQL protocol.
+    /// Helpers types needed to encode and decode the CQL protocol.
     envelope_reader: EnvelopeReaderType,
+    envelope_writer_buffer: std.ArrayList(u8),
     envelope_writer: EnvelopeWriterType,
     message_reader: MessageReader,
     message_writer: MessageWriter,
@@ -122,7 +133,8 @@ pub const Connection = struct {
         self.buffered_writer = BufferedWriterType{ .unbuffered_writer = self.socket.writer() };
 
         self.envelope_reader = EnvelopeReaderType.init(self.buffered_reader.reader());
-        self.envelope_writer = EnvelopeWriterType.init(self.buffered_writer.writer());
+        self.envelope_writer_buffer = std.ArrayList(u8).init(allocator);
+        self.envelope_writer = EnvelopeWriterType.init(self.envelope_writer_buffer.writer());
 
         MessageReader.reset(&self.message_reader, "");
         // TODO(vincent): don't use the root allocator here, limit how much memory we can use
@@ -136,6 +148,7 @@ pub const Connection = struct {
 
     pub fn deinit(self: *Self) void {
         self.socket.close();
+        self.envelope_writer_buffer.deinit();
         self.message_writer.deinit();
     }
 
@@ -278,7 +291,10 @@ pub const Connection = struct {
 
         self.message_writer.reset();
 
+        //
         // Prepare the envelope
+        //
+
         var envelope = Envelope{
             .header = EnvelopeHeader{
                 .version = options.protocol_version,
@@ -315,27 +331,45 @@ pub const Connection = struct {
             envelope.body = written;
 
             // Compress the body if we can use it.
-            if (options.compression) |compression| {
-                switch (compression) {
-                    .LZ4 => {
-                        const compressed_data = try lz4.compress(allocator, written);
+            // Only relevant for Protocol <= v4, Protocol v5 doest compression using the framing format.
+            if (options.protocol_version.isAtMost(4)) {
+                if (options.compression) |compression| {
+                    switch (compression) {
+                        .LZ4 => {
+                            const compressed_data = try lz4.compress(allocator, written);
 
-                        envelope.header.flags |= EnvelopeFlags.Compression;
-                        envelope.header.body_len = @intCast(compressed_data.len);
-                        envelope.body = compressed_data;
-                    },
-                    .Snappy => {
-                        const compressed_data = try snappy.compress(allocator, written);
+                            envelope.header.flags |= EnvelopeFlags.Compression;
+                            envelope.header.body_len = @intCast(compressed_data.len);
+                            envelope.body = compressed_data;
+                        },
+                        .Snappy => {
+                            const compressed_data = try snappy.compress(allocator, written);
 
-                        envelope.header.flags |= EnvelopeFlags.Compression;
-                        envelope.header.body_len = @intCast(compressed_data.len);
-                        envelope.body = compressed_data;
-                    },
+                            envelope.header.flags |= EnvelopeFlags.Compression;
+                            envelope.header.body_len = @intCast(compressed_data.len);
+                            envelope.body = compressed_data;
+                        },
+                    }
                 }
             }
         }
-
         try self.envelope_writer.write(envelope);
+
+        //
+        // Write a frame if protocol v5
+        // Write the envelope directly otherwise
+        //
+
+        if (options.protocol_version.isAtLeast(5)) {
+            // TODO(vincent): implement framing
+            debug.panic("frame writer not implemented", .{});
+        } else {
+            const data = try self.envelope_writer_buffer.toOwnedSlice();
+            defer self.allocator.free(data);
+
+            _ = try self.buffered_writer.write(data);
+        }
+
         try self.buffered_writer.flush();
     }
 

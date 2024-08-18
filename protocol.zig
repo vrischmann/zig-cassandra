@@ -23,12 +23,12 @@ const QueryParameters = @import("QueryParameters.zig");
 //
 // See §2 in native_protocol_v5.spec.
 
-const FrameFormat = enum {
+pub const FrameFormat = enum {
     compressed,
     uncompressed,
 };
 
-const Frame = struct {
+pub const Frame = struct {
     /// Indicates that the payload includes one or more complete envelopes and can be fully processed immediately.
     is_self_contained: bool,
     /// The frame payload, the content depends on `is_self_contained`:
@@ -714,6 +714,10 @@ pub const ProtocolVersion = packed struct {
     pub fn isAtLeast(self: Self, comptime version: comptime_int) bool {
         const tmp = self.version & 0x7;
         return tmp >= version;
+    }
+    pub fn isAtMost(self: Self, comptime version: comptime_int) bool {
+        const tmp = self.version & 0x7;
+        return tmp <= version;
     }
     pub fn isRequest(self: Self) bool {
         return self.version & 0x0f == self.version;
