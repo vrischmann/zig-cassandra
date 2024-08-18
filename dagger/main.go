@@ -116,8 +116,11 @@ func (m *ZigCassandra) Test(ctx context.Context,
 	// +optional
 	// +default="linux/amd64"
 	platform dagger.Platform,
+	// +optional
+	// +default="5.0-jammy"
+	cassandraVersion string,
 ) (string, error) {
-	cassandraSvc := m.Cassandra(ctx, "4.1")
+	cassandraSvc := m.Cassandra(ctx, cassandraVersion)
 
 	zigCtr, err := m.Zig(ctx, platform)
 	if err != nil {
