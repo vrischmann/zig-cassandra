@@ -192,7 +192,7 @@ pub const Client = struct {
         {
             try self.connection.writeMessage(
                 allocator,
-                .Prepare,
+                .prepare,
                 PrepareMessage{
                     .query = query_string,
                     .keyspace = null,
@@ -208,7 +208,7 @@ pub const Client = struct {
             .message_allocator = self.allocator,
         });
         switch (read_message) {
-            .Result => |result_message| switch (result_message.result) {
+            .result => |result_message| switch (result_message.result) {
                 .Prepared => |prepared| {
                     // Store the metadata for later use with `execute`.
 
@@ -228,7 +228,7 @@ pub const Client = struct {
                 },
                 else => return error.InvalidServerResponse,
             },
-            .Error => |err| {
+            .@"error" => |err| {
                 diags.message = err.message;
                 return error.QueryPreparationFailed;
             },
@@ -277,7 +277,7 @@ pub const Client = struct {
         {
             try self.connection.writeMessage(
                 allocator,
-                .Query,
+                .query,
                 QueryMessage{
                     .query = query_string,
                     .query_parameters = query_parameters,
@@ -291,7 +291,7 @@ pub const Client = struct {
 
         // Read either RESULT or ERROR
         return switch (try self.connection.readMessage(allocator, .{})) {
-            .Result => |result_message| {
+            .result => |result_message| {
                 return switch (result_message.result) {
                     .Rows => |rows| blk: {
                         break :blk Iterator.init(rows.metadata, rows.data);
@@ -299,7 +299,7 @@ pub const Client = struct {
                     else => null,
                 };
             },
-            .Error => |err| {
+            .@"error" => |err| {
                 diags.message = err.message;
                 return error.QueryExecutionFailed;
             },
@@ -370,7 +370,7 @@ pub const Client = struct {
         {
             try self.connection.writeMessage(
                 allocator,
-                .Execute,
+                .execute,
                 ExecuteMessage{
                     .query_id = query_id,
                     .result_metadata_id = ps_result_metadata_id,
@@ -385,7 +385,7 @@ pub const Client = struct {
 
         // Read either RESULT or ERROR
         return switch (try self.connection.readMessage(allocator, .{})) {
-            .Result => |result_message| {
+            .result => |result_message| {
                 return switch (result_message.result) {
                     .Rows => |rows| blk: {
                         const metadata = if (rows.metadata.column_specs.len > 0)
@@ -398,7 +398,7 @@ pub const Client = struct {
                     else => null,
                 };
             },
-            .Error => |err| {
+            .@"error" => |err| {
                 diags.message = err.message;
                 return error.QueryExecutionFailed;
             },

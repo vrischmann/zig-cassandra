@@ -40,22 +40,22 @@ const lz4 = @import("lz4");
 const snappy = @import("snappy");
 
 pub const Message = union(Opcode) {
-    Error: ErrorMessage,
-    Startup: StartupMessage,
-    Ready: ReadyMessage,
-    Authenticate: AuthenticateMessage,
-    Options: void,
-    Supported: SupportedMessage,
-    Query: QueryMessage,
-    Result: ResultMessage,
-    Prepare: PrepareMessage,
-    Execute: ExecuteMessage,
-    Register: void,
-    Event: EventMessage,
-    Batch: BatchMessage,
-    AuthChallenge: AuthChallengeMessage,
-    AuthResponse: AuthResponseMessage,
-    AuthSuccess: AuthSuccessMessage,
+    @"error": ErrorMessage,
+    startup: StartupMessage,
+    ready: ReadyMessage,
+    authenticate: AuthenticateMessage,
+    options: void,
+    supported: SupportedMessage,
+    query: QueryMessage,
+    result: ResultMessage,
+    prepare: PrepareMessage,
+    execute: ExecuteMessage,
+    register: void,
+    event: EventMessage,
+    batch: BatchMessage,
+    auth_challenge: AuthChallengeMessage,
+    auth_response: AuthResponseMessage,
+    auth_success: AuthSuccessMessage,
 };
 
 pub const Connection = struct {
@@ -168,7 +168,7 @@ pub const Connection = struct {
 
         try self.writeMessage(
             fba.allocator(),
-            .Options,
+            .options,
             protocol.OptionsMessage{},
             .{
                 .protocol_version = self.options.protocol_version,
@@ -178,8 +178,8 @@ pub const Connection = struct {
 
         fba.reset();
         switch (try self.readMessage(fba.allocator(), .{})) {
-            .Supported => |fr| self.negotiated_state.cql_version = fr.cql_versions[0],
-            .Error => |err| {
+            .supported => |fr| self.negotiated_state.cql_version = fr.cql_versions[0],
+            .@"error" => |err| {
                 diags.message = err.message;
                 return error.HandshakeFailed;
             },
@@ -191,7 +191,7 @@ pub const Connection = struct {
         fba.reset();
         try self.writeMessage(
             fba.allocator(),
-            .Startup,
+            .startup,
             protocol.StartupMessage{
                 .cql_version = self.negotiated_state.cql_version,
                 .compression = self.options.compression,
@@ -202,11 +202,11 @@ pub const Connection = struct {
             },
         );
         switch (try self.readMessage(fba.allocator(), .{})) {
-            .Ready => return,
-            .Authenticate => |fr| {
+            .ready => return,
+            .authenticate => |fr| {
                 try self.authenticate(fba.allocator(), diags, fr.authenticator);
             },
-            .Error => |err| {
+            .@"error" => |err| {
                 diags.message = err.message;
                 return error.HandshakeFailed;
             },
@@ -231,7 +231,7 @@ pub const Connection = struct {
 
             try self.writeMessage(
                 allocator,
-                .AuthResponse,
+                .auth_response,
                 protocol.AuthResponseMessage{
                     .token = token,
                 },
@@ -244,9 +244,9 @@ pub const Connection = struct {
 
         // Read either AUTH_CHALLENGE, AUTH_SUCCESS or ERROR
         switch (try self.readMessage(allocator, .{})) {
-            .AuthChallenge => unreachable,
-            .AuthSuccess => return,
-            .Error => |err| {
+            .auth_challenge => unreachable,
+            .auth_success => return,
+            .@"error" => |err| {
                 diags.message = err.message;
                 return error.AuthenticationFailed;
             },
@@ -261,9 +261,7 @@ pub const Connection = struct {
 
     /// writeMessage writes a single message to the TCP connection.
     ///
-    /// A message can be:
-    /// * an anonymous struct with just a .opcode field (therefore no message body).
-    /// * an anonymous struct with a .opcode field and a .body field.
+    /// A message can be
     ///
     /// If the .body field is present, it must me a type implementing either of the following write function:
     ///
@@ -362,17 +360,17 @@ pub const Connection = struct {
             allocator;
 
         return switch (envelope.header.opcode) {
-            .Error => Message{ .Error = try ErrorMessage.read(message_allocator, &self.message_reader) },
-            .Startup => Message{ .Startup = try StartupMessage.read(message_allocator, &self.message_reader) },
-            .Ready => Message{ .Ready = ReadyMessage{} },
-            .Options => Message{ .Options = {} },
-            .Supported => Message{ .Supported = try SupportedMessage.read(message_allocator, &self.message_reader) },
-            .Result => Message{ .Result = try ResultMessage.read(message_allocator, self.options.protocol_version, &self.message_reader) },
-            .Register => Message{ .Register = {} },
-            .Event => Message{ .Event = try EventMessage.read(message_allocator, &self.message_reader) },
-            .Authenticate => Message{ .Authenticate = try AuthenticateMessage.read(message_allocator, &self.message_reader) },
-            .AuthChallenge => Message{ .AuthChallenge = try AuthChallengeMessage.read(message_allocator, &self.message_reader) },
-            .AuthSuccess => Message{ .AuthSuccess = try AuthSuccessMessage.read(message_allocator, &self.message_reader) },
+            .@"error" => Message{ .@"error" = try ErrorMessage.read(message_allocator, &self.message_reader) },
+            .startup => Message{ .startup = try StartupMessage.read(message_allocator, &self.message_reader) },
+            .ready => Message{ .ready = ReadyMessage{} },
+            .options => Message{ .options = {} },
+            .supported => Message{ .supported = try SupportedMessage.read(message_allocator, &self.message_reader) },
+            .result => Message{ .result = try ResultMessage.read(message_allocator, self.options.protocol_version, &self.message_reader) },
+            .register => Message{ .register = {} },
+            .event => Message{ .event = try EventMessage.read(message_allocator, &self.message_reader) },
+            .authenticate => Message{ .authenticate = try AuthenticateMessage.read(message_allocator, &self.message_reader) },
+            .auth_challenge => Message{ .auth_challenge = try AuthChallengeMessage.read(message_allocator, &self.message_reader) },
+            .auth_success => Message{ .auth_success = try AuthSuccessMessage.read(message_allocator, &self.message_reader) },
             else => std.debug.panic("invalid read message {}\n", .{envelope.header.opcode}),
         };
     }
