@@ -73,32 +73,6 @@ pub const Frame = struct {
         return crc;
     }
 
-    pub const ReadError = error{
-        UnexpectedEOF,
-        InvalidPayloadChecksum,
-        InvalidHeaderChecksum,
-    } || mem.Allocator.Error || std.posix.ReadError || lz4.DecompressError;
-
-    pub const ReadResult = struct {
-        frame: Frame,
-        consumed: usize,
-    };
-
-    /// Try to read a frame contained in the `data` slice.
-    ///
-    /// If there's not enough data or if the input data is corrupted somehow, an error is returned.
-    /// Otherwise a result containing both the frame and the number of bytes consumed is returned.
-    pub fn read(allocator: mem.Allocator, data: []const u8, format: Format) Frame.ReadError!ReadResult {
-        // TODO(vincent): do we really need the reader abstraction here ?
-        var source = io.StreamSource{ .const_buffer = io.fixedBufferStream(data) };
-        const reader = source.reader();
-
-        switch (format) {
-            .compressed => return readCompressed(allocator, reader),
-            .uncompressed => return readUncompressed(allocator, reader),
-        }
-    }
-
     const PayloadAndTrailer = struct {
         payload: []const u8,
         trailer: [4]u8,
@@ -148,7 +122,33 @@ pub const Frame = struct {
         }
     }
 
-    fn readUncompressed(allocator: mem.Allocator, reader: anytype) Frame.ReadError!ReadResult {
+    pub const DecodeError = error{
+        UnexpectedEOF,
+        InvalidPayloadChecksum,
+        InvalidHeaderChecksum,
+    } || mem.Allocator.Error || std.posix.ReadError || lz4.DecompressError;
+
+    pub const DecodeResult = struct {
+        frame: Frame,
+        consumed: usize,
+    };
+
+    /// Try to decode a frame contained in the `data` slice.
+    ///
+    /// If there's not enough data or if the input data is corrupted somehow, an error is returned.
+    /// Otherwise a result containing both the frame and the number of bytes consumed is returned.
+    pub fn decode(allocator: mem.Allocator, data: []const u8, format: Format) Frame.DecodeError!DecodeResult {
+        // TODO(vincent): do we really need the reader abstraction here ?
+        var source = io.StreamSource{ .const_buffer = io.fixedBufferStream(data) };
+        const reader = source.reader();
+
+        switch (format) {
+            .compressed => return decodeCompressed(allocator, reader),
+            .uncompressed => return decodeUncompressed(allocator, reader),
+        }
+    }
+
+    fn decodeUncompressed(allocator: mem.Allocator, reader: anytype) Frame.DecodeError!DecodeResult {
         // Read and parse header
         const header_data = try readHeader(reader, uncompressed_header_size);
 
@@ -177,7 +177,7 @@ pub const Frame = struct {
         };
     }
 
-    fn readCompressed(allocator: mem.Allocator, reader: anytype) Frame.ReadError!ReadResult {
+    fn decodeCompressed(allocator: mem.Allocator, reader: anytype) Frame.DecodeError!DecodeResult {
         // Read and parse header
         const header = try readHeader(reader, compressed_header_size);
 
@@ -287,7 +287,7 @@ test "frame reader: QUERY message" {
     };
 
     inline for (testCases) |tc| {
-        const result = try Frame.read(arena.allocator(), tc.data, tc.format);
+        const result = try Frame.decode(arena.allocator(), tc.data, tc.format);
 
         const frame = result.frame;
         try testing.expectEqual(@as(usize, tc.data.len), result.consumed);
@@ -326,13 +326,13 @@ test "frame reader: QUERY message incomplete" {
     const test_data = frame_data ++ [_]u8{'z'} ** 2000;
     const test_format: Frame.Format = .compressed;
 
-    const tmp1 = Frame.read(arena.allocator(), test_data[0..1], test_format);
+    const tmp1 = Frame.decode(arena.allocator(), test_data[0..1], test_format);
     try testing.expectError(error.UnexpectedEOF, tmp1);
 
-    const tmp2 = Frame.read(arena.allocator(), test_data[0..10], test_format);
+    const tmp2 = Frame.decode(arena.allocator(), test_data[0..10], test_format);
     try testing.expectError(error.UnexpectedEOF, tmp2);
 
-    const result = try Frame.read(arena.allocator(), test_data, test_format);
+    const result = try Frame.decode(arena.allocator(), test_data, test_format);
 
     //
 
@@ -394,7 +394,7 @@ test "frame reader: RESULT message" {
     // Uncompressed frame
     {
         const data = @embedFile("testdata/result_frame_uncompressed.bin");
-        const result = try Frame.read(arena.allocator(), data, .uncompressed);
+        const result = try Frame.decode(arena.allocator(), data, .uncompressed);
 
         const frame = result.frame;
         try testing.expectEqual(@as(usize, data.len), result.consumed);
@@ -434,7 +434,7 @@ test "frame reader: RESULT message" {
     // Compressed frame
     {
         const data = @embedFile("testdata/result_frame_compressed.bin");
-        const result = try Frame.read(arena.allocator(), data, .compressed);
+        const result = try Frame.decode(arena.allocator(), data, .compressed);
 
         const frame = result.frame;
         try testing.expectEqual(@as(usize, data.len), result.consumed);
@@ -508,7 +508,7 @@ test "frame write: PREPARE message" {
     // Decode then verify
 
     {
-        const result = try Frame.read(arena.allocator(), frame.payload, .uncompressed);
+        const result = try Frame.decode(arena.allocator(), frame.payload, .uncompressed);
 
         const envelope = try testReadEnvelope(arena.allocator(), result.frame.payload);
         try checkEnvelopeHeader(5, Opcode.prepare, result.frame.payload.len, envelope.header);
