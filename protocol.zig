@@ -23,11 +23,6 @@ const QueryParameters = @import("QueryParameters.zig");
 //
 // See §2 in native_protocol_v5.spec.
 
-pub const FrameFormat = enum {
-    compressed,
-    uncompressed,
-};
-
 pub const Frame = struct {
     /// Indicates that the payload includes one or more complete envelopes and can be fully processed immediately.
     is_self_contained: bool,
@@ -36,9 +31,16 @@ pub const Frame = struct {
     /// * if not self contained, the payload is one part of a large envelope
     payload: []const u8,
 
+    const uncompressed_header_size = 6;
+    const compressed_header_size = 8;
     const trailer_size = 4;
     const max_payload_size = 131071;
     const initial_crc32_bytes = "\xFA\x2D\x55\xCA";
+
+    pub const Format = enum {
+        compressed,
+        uncompressed,
+    };
 
     fn crc24(input: anytype) usize {
         // Don't use @sizeOf because it contains a padding byte
@@ -86,7 +88,7 @@ pub const Frame = struct {
     ///
     /// If there's not enough data or if the input data is corrupted somehow, an error is returned.
     /// Otherwise a result containing both the frame and the number of bytes consumed is returned.
-    pub fn read(allocator: mem.Allocator, data: []const u8, format: FrameFormat) Frame.ReadError!ReadResult {
+    pub fn read(allocator: mem.Allocator, data: []const u8, format: Format) Frame.ReadError!ReadResult {
         // TODO(vincent): do we really need the reader abstraction here ?
         var source = io.StreamSource{ .const_buffer = io.fixedBufferStream(data) };
         const reader = source.reader();
@@ -131,29 +133,34 @@ pub const Frame = struct {
         };
     }
 
-    fn computeAndVerifyCRC32(payload_and_trailer: PayloadAndTrailer) !void {
+    fn computeCR32(payload: []const u8) u32 {
         var hash = std.hash.Crc32.init();
         hash.update(initial_crc32_bytes);
-        hash.update(payload_and_trailer.payload);
-        const computed_crc32 = hash.final();
+        hash.update(payload);
+        return hash.final();
+    }
 
+    fn computeAndVerifyCRC32(payload_and_trailer: PayloadAndTrailer) !void {
+        const computed_crc32 = computeCR32(payload_and_trailer.payload);
         const expected_crc32 = mem.readInt(u32, &payload_and_trailer.trailer, .little);
-        if (computed_crc32 != expected_crc32) return error.InvalidPayloadChecksum;
+        if (computed_crc32 != expected_crc32) {
+            return error.InvalidPayloadChecksum;
+        }
     }
 
     fn readUncompressed(allocator: mem.Allocator, reader: anytype) Frame.ReadError!ReadResult {
-        const header_size = 6;
-
         // Read and parse header
-        const header = try readHeader(reader, header_size);
+        const header_data = try readHeader(reader, uncompressed_header_size);
 
-        const first3b: u24 = mem.readInt(u24, header[0..3], .little);
-        const payload_length: u17 = @intCast(first3b & 0x1FFFF);
-        const is_self_contained = first3b & (1 << 17) != 0;
+        const header3b: u24 = mem.readInt(u24, header_data[0..3], .little);
+        const header_expected_crc = @as(usize, @intCast(mem.readInt(u24, header_data[3..uncompressed_header_size], .little)));
 
-        const computed_crc24 = crc24(first3b);
-        const expected_crc24 = @as(usize, @intCast(mem.readInt(u24, header[3..header_size], .little)));
-        if (computed_crc24 != expected_crc24) return error.InvalidHeaderChecksum;
+        const payload_length: u17 = @intCast(header3b & 0x1FFFF);
+        const is_self_contained = header3b & (1 << 17) != 0;
+        const computed_header_crc = crc24(header3b);
+        if (computed_header_crc != header_expected_crc) {
+            return error.InvalidHeaderChecksum;
+        }
 
         // Read payload and trailer
         const payload_and_trailer = try readPayloadAndTrailer(reader, allocator, payload_length);
@@ -166,24 +173,25 @@ pub const Frame = struct {
                 .payload = payload_and_trailer.payload,
                 .is_self_contained = is_self_contained,
             },
-            .consumed = header_size + payload_and_trailer.length(),
+            .consumed = uncompressed_header_size + payload_and_trailer.length(),
         };
     }
 
     fn readCompressed(allocator: mem.Allocator, reader: anytype) Frame.ReadError!ReadResult {
-        const header_size = 8;
-
         // Read and parse header
-        const header = try readHeader(reader, header_size);
+        const header = try readHeader(reader, compressed_header_size);
 
-        const first5b: u40 = mem.readInt(u40, header[0..5], .little);
-        const compressed_length: u17 = @intCast(first5b & 0x1FFFF);
-        const uncompressed_length: u17 = @intCast(first5b >> 17 & 0x1FFFF);
-        const is_self_contained = first5b & (1 << 34) != 0;
+        const header5b: u40 = mem.readInt(u40, header[0..5], .little);
+        const header_expected_crc = @as(usize, @intCast(mem.readInt(u24, header[5..compressed_header_size], .little)));
 
-        const computed_crc24 = crc24(first5b);
-        const expected_crc24 = @as(usize, @intCast(mem.readInt(u24, header[5..header_size], .little)));
-        if (computed_crc24 != expected_crc24) return error.InvalidHeaderChecksum;
+        const compressed_length: u17 = @intCast(header5b & 0x1FFFF);
+        const uncompressed_length: u17 = @intCast(header5b >> 17 & 0x1FFFF);
+        const is_self_contained = header5b & (1 << 34) != 0;
+
+        const computed_header_crc = crc24(header5b);
+        if (computed_header_crc != header_expected_crc) {
+            return error.InvalidHeaderChecksum;
+        }
 
         // Read payload and trailer
         const payload_and_trailer = try readPayloadAndTrailer(reader, allocator, compressed_length);
@@ -202,8 +210,59 @@ pub const Frame = struct {
                 .payload = payload,
                 .is_self_contained = is_self_contained,
             },
-            .consumed = header_size + payload_and_trailer.length(),
+            .consumed = compressed_header_size + payload_and_trailer.length(),
         };
+    }
+
+    const EncodeError = error{
+        PayloadTooBig,
+    } || mem.Allocator.Error;
+
+    fn encode(allocator: mem.Allocator, payload: []const u8, is_self_contained: bool, format: Format) Frame.EncodeError!Frame {
+        switch (format) {
+            .uncompressed => return encodeUncompressed(allocator, payload, is_self_contained),
+            .compressed => return encodeCompressed(allocator, payload, is_self_contained),
+        }
+    }
+
+    fn encodeUncompressed(allocator: mem.Allocator, payload: []const u8, is_self_contained: bool) Frame.EncodeError!Frame {
+        if (payload.len > max_payload_size) return error.PayloadTooBig;
+
+        // Create header
+        var header3b: u24 = @as(u17, @intCast(payload.len));
+        if (is_self_contained) {
+            header3b |= 1 << 17;
+        }
+        const header_crc24 = crc24(header3b);
+
+        var buf: [uncompressed_header_size]u8 = undefined;
+        mem.writeInt(u24, buf[0..3], header3b, .little);
+        mem.writeInt(u24, buf[3..uncompressed_header_size], @truncate(header_crc24), .little);
+
+        const header_data = buf[0..];
+
+        // Compute trailer
+        const payload_crc32 = computeCR32(payload);
+
+        // Finally build the frame
+        var frame_data = try std.ArrayList(u8).initCapacity(allocator, uncompressed_header_size + payload.len + trailer_size);
+        defer frame_data.deinit();
+
+        try frame_data.appendSlice(header_data);
+        try frame_data.appendSlice(payload);
+        try frame_data.writer().writeInt(u32, payload_crc32, .little);
+
+        return .{
+            .payload = try frame_data.toOwnedSlice(),
+            .is_self_contained = is_self_contained,
+        };
+    }
+
+    fn encodeCompressed(allocator: mem.Allocator, payload: []const u8, is_self_contained: bool) Frame.EncodeError!Frame {
+        _ = allocator;
+        _ = payload;
+        _ = is_self_contained;
+        return error.OutOfMemory;
     }
 };
 
@@ -213,7 +272,7 @@ test "frame reader: QUERY message" {
 
     const TestCase = struct {
         data: []const u8,
-        format: FrameFormat,
+        format: Frame.Format,
     };
 
     const testCases = &[_]TestCase{
@@ -265,7 +324,7 @@ test "frame reader: QUERY message incomplete" {
 
     const frame_data = @embedFile("testdata/query_frame_compressed.bin");
     const test_data = frame_data ++ [_]u8{'z'} ** 2000;
-    const test_format: FrameFormat = .compressed;
+    const test_format: Frame.Format = .compressed;
 
     const tmp1 = Frame.read(arena.allocator(), test_data[0..1], test_format);
     try testing.expectError(error.UnexpectedEOF, tmp1);
@@ -399,6 +458,72 @@ test "frame reader: RESULT message" {
             result_message.result.Rows,
         );
         try testing.expectEqual(100, rows.items.len);
+    }
+}
+
+test "frame write: PREPARE message" {
+    var arena = testutils.arenaAllocator();
+    defer arena.deinit();
+
+    const protocol_version = try ProtocolVersion.init(5);
+
+    // Encode
+
+    const frame = blk: {
+        // Write the message to a buffer
+        const message = PrepareMessage{
+            .query = "SELECT 1 FROM foobar",
+            .keyspace = "hello",
+        };
+
+        var mw = try MessageWriter.init(arena.allocator());
+        try message.write(protocol_version, &mw);
+
+        const message_data = mw.getWritten();
+
+        // Create and write the envelope to a buffer
+        const envelope = Envelope{
+            .header = EnvelopeHeader{
+                .version = protocol_version,
+                .flags = 0,
+                .stream = 0,
+                .opcode = .prepare,
+                .body_len = @intCast(message_data.len),
+            },
+            .body = message_data,
+        };
+
+        var envelope_writer_buffer = std.ArrayList(u8).init(arena.allocator());
+        var envelope_writer = EnvelopeWriter(std.ArrayList(u8).Writer).init(envelope_writer_buffer.writer());
+
+        try envelope_writer.write(envelope);
+
+        // Write the frame to a buffer
+        const frame_payload = try envelope_writer_buffer.toOwnedSlice();
+        const frame = try Frame.encode(arena.allocator(), frame_payload, true, .uncompressed);
+
+        break :blk frame;
+    };
+
+    // Decode then verify
+
+    {
+        const result = try Frame.read(arena.allocator(), frame.payload, .uncompressed);
+
+        const envelope = try testReadEnvelope(arena.allocator(), result.frame.payload);
+        try checkEnvelopeHeader(5, Opcode.prepare, result.frame.payload.len, envelope.header);
+
+        var mr: MessageReader = undefined;
+        mr.reset(envelope.body);
+
+        const prepare_message = try PrepareMessage.read(
+            arena.allocator(),
+            envelope.header.version,
+            &mr,
+        );
+
+        try testing.expectEqualStrings("SELECT 1 FROM foobar", prepare_message.query);
+        try testing.expectEqualStrings("hello", prepare_message.keyspace.?);
     }
 }
 
