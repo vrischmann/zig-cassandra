@@ -138,13 +138,11 @@ pub const Frame = struct {
     /// If there's not enough data or if the input data is corrupted somehow, an error is returned.
     /// Otherwise a result containing both the frame and the number of bytes consumed is returned.
     pub fn decode(allocator: mem.Allocator, data: []const u8, format: Format) Frame.DecodeError!DecodeResult {
-        // TODO(vincent): do we really need the reader abstraction here ?
-        var source = io.StreamSource{ .const_buffer = io.fixedBufferStream(data) };
-        const reader = source.reader();
+        var fbs = io.fixedBufferStream(data);
 
         switch (format) {
-            .compressed => return decodeCompressed(allocator, reader),
-            .uncompressed => return decodeUncompressed(allocator, reader),
+            .compressed => return decodeCompressed(allocator, fbs.reader()),
+            .uncompressed => return decodeUncompressed(allocator, fbs.reader()),
         }
     }
 
@@ -3754,20 +3752,10 @@ test "supported message" {
 /// Reads an enevelope from the provided buffer.
 /// Only intended to be used for tests.
 fn testReadEnvelope(allocator: mem.Allocator, data: []const u8) !Envelope {
-    var source = io.StreamSource{ .const_buffer = io.fixedBufferStream(data) };
-    const reader = source.reader();
+    var fbs = io.fixedBufferStream(data);
 
-    return Envelope.read(allocator, reader);
+    return Envelope.read(allocator, fbs.reader());
 }
-
-/// Reads a frame from the provided buffer.
-/// Only intended to be used for tests.
-// fn testReadFrame(_allocator: mem.Allocator, data: []const u8, format: FrameFormat) !Frame {
-//     var source = io.StreamSource{ .const_buffer = io.fixedBufferStream(data) };
-//     const reader = source.reader();
-//
-//     return frame.read(_allocator, reader, format);
-// }
 
 fn expectSameEnvelope(comptime T: type, fr: T, header: EnvelopeHeader, exp: []const u8) !void {
     var arena = testutils.arenaAllocator();
@@ -3796,15 +3784,15 @@ fn expectSameEnvelope(comptime T: type, fr: T, header: EnvelopeHeader, exp: []co
     };
 
     var buf2: [1024]u8 = undefined;
-    var source = io.StreamSource{ .buffer = io.fixedBufferStream(&buf2) };
-    const writer = source.writer();
+    var fbs2 = io.fixedBufferStream(&buf2);
+    const writer = fbs2.writer();
     var fw = EnvelopeWriter(@TypeOf(writer)).init(writer);
 
     try fw.write(envelope);
 
-    if (!std.mem.eql(u8, exp, source.buffer.getWritten())) {
+    if (!std.mem.eql(u8, exp, fbs2.getWritten())) {
         testutils.printHRBytes("\n==> exp   : {s}\n", exp, .{});
-        testutils.printHRBytes("==> source: {s}\n", source.buffer.getWritten(), .{});
+        testutils.printHRBytes("==> source: {s}\n", fbs2.getWritten(), .{});
         std.debug.panic("envelopes are different\n", .{});
     }
 }
