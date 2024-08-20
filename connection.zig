@@ -10,7 +10,6 @@ const debug = std.debug;
 const protocol = @import("protocol.zig");
 
 const Frame = protocol.Frame;
-const FrameFormat = protocol.FrameFormat;
 
 const Envelope = protocol.Envelope;
 const EnvelopeFlags = protocol.EnvelopeFlags;
@@ -104,7 +103,7 @@ pub const Connection = struct {
 
     framing: struct {
         enabled: bool = false,
-        format: FrameFormat = undefined,
+        format: Frame.Format = undefined,
     },
 
     socket: std.net.Stream,
@@ -183,10 +182,7 @@ pub const Connection = struct {
             fba.allocator(),
             .options,
             protocol.OptionsMessage{},
-            .{
-                .protocol_version = self.options.protocol_version,
-                .compression = null,
-            },
+            .{},
         );
 
         fba.reset();
@@ -209,10 +205,7 @@ pub const Connection = struct {
                 .cql_version = self.negotiated_state.cql_version,
                 .compression = self.options.compression,
             },
-            .{
-                .protocol_version = self.options.protocol_version,
-                .compression = self.options.compression,
-            },
+            .{},
         );
         switch (try self.readMessage(fba.allocator(), .{})) {
             .ready => return,
@@ -248,10 +241,7 @@ pub const Connection = struct {
                 protocol.AuthResponseMessage{
                     .token = token,
                 },
-                .{
-                    .protocol_version = self.options.protocol_version,
-                    .compression = self.options.compression,
-                },
+                .{},
             );
         }
 
@@ -267,10 +257,7 @@ pub const Connection = struct {
         }
     }
 
-    const WriteMessageOptions = struct {
-        protocol_version: ProtocolVersion,
-        compression: ?CompressionAlgorithm,
-    };
+    const WriteMessageOptions = struct {};
 
     /// writeMessage writes a single message to the TCP connection.
     ///
@@ -286,7 +273,7 @@ pub const Connection = struct {
     /// Additionally this method takes care of compression if enabled.
     ///
     /// This method is not thread safe.
-    pub fn writeMessage(self: *Self, allocator: mem.Allocator, opcode: Opcode, message: anytype, options: WriteMessageOptions) !void {
+    pub fn writeMessage(self: *Self, allocator: mem.Allocator, opcode: Opcode, message: anytype, _: WriteMessageOptions) !void {
         const MessageType = @TypeOf(message);
 
         self.message_writer.reset();
@@ -297,7 +284,7 @@ pub const Connection = struct {
 
         var envelope = Envelope{
             .header = EnvelopeHeader{
-                .version = options.protocol_version,
+                .version = self.options.protocol_version,
                 .flags = 0,
                 .stream = 0,
                 .opcode = opcode,
@@ -306,7 +293,7 @@ pub const Connection = struct {
             .body = &[_]u8{},
         };
 
-        if (options.protocol_version.is(5)) {
+        if (self.options.protocol_version.is(5)) {
             envelope.header.flags |= EnvelopeFlags.UseBeta;
         }
 
@@ -315,7 +302,7 @@ pub const Connection = struct {
             switch (@typeInfo(@TypeOf(MessageType.write))) {
                 .Fn => |info| {
                     if (info.params.len == 3) {
-                        try message.write(options.protocol_version, &self.message_writer);
+                        try message.write(self.options.protocol_version, &self.message_writer);
                     } else {
                         try message.write(&self.message_writer);
                     }
@@ -332,8 +319,8 @@ pub const Connection = struct {
 
             // Compress the body if we can use it.
             // Only relevant for Protocol <= v4, Protocol v5 doest compression using the framing format.
-            if (options.protocol_version.isAtMost(4)) {
-                if (options.compression) |compression| {
+            if (self.options.protocol_version.isAtMost(4)) {
+                if (self.options.compression) |compression| {
                     switch (compression) {
                         .LZ4 => {
                             const compressed_data = try lz4.compress(allocator, written);
@@ -360,7 +347,7 @@ pub const Connection = struct {
         // Write the envelope directly otherwise
         //
 
-        if (options.protocol_version.isAtLeast(5)) {
+        if (self.options.protocol_version.isAtLeast(5)) {
             // TODO(vincent): implement framing
             debug.panic("frame writer not implemented", .{});
         } else {

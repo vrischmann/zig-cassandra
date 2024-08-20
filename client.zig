@@ -197,10 +197,7 @@ pub const Client = struct {
                     .query = query_string,
                     .keyspace = null,
                 },
-                .{
-                    .protocol_version = self.connection.options.protocol_version,
-                    .compression = self.connection.options.compression,
-                },
+                .{},
             );
         }
 
@@ -282,10 +279,7 @@ pub const Client = struct {
                     .query = query_string,
                     .query_parameters = query_parameters,
                 },
-                .{
-                    .protocol_version = self.connection.options.protocol_version,
-                    .compression = self.connection.options.compression,
-                },
+                .{},
             );
         }
 
@@ -376,10 +370,7 @@ pub const Client = struct {
                     .result_metadata_id = ps_result_metadata_id,
                     .query_parameters = query_parameters,
                 },
-                .{
-                    .protocol_version = self.connection.options.protocol_version,
-                    .compression = self.connection.options.compression,
-                },
+                .{},
             );
         }
 
