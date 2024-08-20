@@ -546,7 +546,7 @@ pub const EnvelopeHeader = packed struct {
     opcode: Opcode,
     body_len: u32,
 
-    const Size = 9;
+    const size = 9;
 };
 
 pub const Envelope = struct {
@@ -571,10 +571,10 @@ pub fn EnvelopeReader(comptime ReaderType: type) type {
         }
 
         pub fn read(self: *Self, allocator: mem.Allocator) !Envelope {
-            var buf: [EnvelopeHeader.Size]u8 = undefined;
+            var buf: [EnvelopeHeader.size]u8 = undefined;
 
             const n_header_read = try self.reader.readAll(&buf);
-            if (n_header_read != EnvelopeHeader.Size) {
+            if (n_header_read != EnvelopeHeader.size) {
                 return error.UnexpectedEOF;
             }
 
@@ -615,7 +615,7 @@ pub fn EnvelopeWriter(comptime WriterType: type) type {
         }
 
         pub fn write(self: *Self, envelope: Envelope) !void {
-            var buf: [EnvelopeHeader.Size]u8 = undefined;
+            var buf: [EnvelopeHeader.size]u8 = undefined;
 
             buf[0] = envelope.header.version.version;
             buf[1] = envelope.header.flags;
@@ -2090,7 +2090,7 @@ fn checkEnvelopeHeader(version: comptime_int, opcode: Opcode, input_len: usize, 
     // Don't care about the flags here
     // Don't care about the stream
     try testing.expectEqual(opcode, header.opcode);
-    try testing.expectEqual(input_len - EnvelopeHeader.Size, @as(usize, header.body_len));
+    try testing.expectEqual(input_len - EnvelopeHeader.size, @as(usize, header.body_len));
 }
 
 test "envelope header: read and write" {
@@ -2112,7 +2112,7 @@ test "envelope header: read and write" {
     try testing.expectEqual(@as(i16, 215), header.stream);
     try testing.expectEqual(Opcode.options, header.opcode);
     try testing.expectEqual(@as(u32, 0), header.body_len);
-    try testing.expectEqual(@as(usize, 0), exp.len - EnvelopeHeader.Size);
+    try testing.expectEqual(@as(usize, 0), exp.len - EnvelopeHeader.size);
 }
 
 //
