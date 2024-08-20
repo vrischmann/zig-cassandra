@@ -18,7 +18,7 @@ const QueryParameters = @import("QueryParameters.zig");
 
 // Framing format
 //
-// The most level "unit" of data that can be read or written.
+// The most low level "unit" of data that can be read or written.
 // This is specific to protocol v5 !
 //
 // See §2 in native_protocol_v5.spec.
