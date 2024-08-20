@@ -556,51 +556,37 @@ pub const Envelope = struct {
     pub fn deinit(self: @This(), allocator: mem.Allocator) void {
         allocator.free(self.body);
     }
+
+    pub fn read(allocator: mem.Allocator, reader: anytype) !Envelope {
+        var buf: [EnvelopeHeader.size]u8 = undefined;
+
+        const n_header_read = try reader.readAll(&buf);
+        if (n_header_read != EnvelopeHeader.size) {
+            return error.UnexpectedEOF;
+        }
+
+        const header = EnvelopeHeader{
+            .version = ProtocolVersion{ .version = buf[0] },
+            .flags = buf[1],
+            .stream = mem.readInt(i16, @ptrCast(buf[2..4]), .big),
+            .opcode = @enumFromInt(buf[4]),
+            .body_len = mem.readInt(u32, @ptrCast(buf[5..9]), .big),
+        };
+
+        const len = @as(usize, header.body_len);
+
+        const body = try allocator.alloc(u8, len);
+        const n_read = try reader.readAll(body);
+        if (n_read != len) {
+            return error.UnexpectedEOF;
+        }
+
+        return Envelope{
+            .header = header,
+            .body = body,
+        };
+    }
 };
-
-pub fn EnvelopeReader(comptime ReaderType: type) type {
-    return struct {
-        const Self = @This();
-
-        reader: ReaderType,
-
-        pub fn init(in: ReaderType) Self {
-            return Self{
-                .reader = in,
-            };
-        }
-
-        pub fn read(self: *Self, allocator: mem.Allocator) !Envelope {
-            var buf: [EnvelopeHeader.size]u8 = undefined;
-
-            const n_header_read = try self.reader.readAll(&buf);
-            if (n_header_read != EnvelopeHeader.size) {
-                return error.UnexpectedEOF;
-            }
-
-            const header = EnvelopeHeader{
-                .version = ProtocolVersion{ .version = buf[0] },
-                .flags = buf[1],
-                .stream = mem.readInt(i16, @ptrCast(buf[2..4]), .big),
-                .opcode = @enumFromInt(buf[4]),
-                .body_len = mem.readInt(u32, @ptrCast(buf[5..9]), .big),
-            };
-
-            const len = @as(usize, header.body_len);
-
-            const body = try allocator.alloc(u8, len);
-            const n_read = try self.reader.readAll(body);
-            if (n_read != len) {
-                return error.UnexpectedEOF;
-            }
-
-            return Envelope{
-                .header = header,
-                .body = body,
-            };
-        }
-    };
-}
 
 pub fn EnvelopeWriter(comptime WriterType: type) type {
     return struct {
@@ -2099,11 +2085,7 @@ test "envelope header: read and write" {
 
     // deserialize the header
 
-    const reader = fbs.reader();
-
-    var envelope_reader = EnvelopeReader(@TypeOf(reader)).init(reader);
-
-    const envelope = try envelope_reader.read(testing.allocator);
+    const envelope = try Envelope.read(testing.allocator, fbs.reader());
     const header = envelope.header;
 
     try testing.expect(header.version.is(4));
@@ -3771,13 +3753,11 @@ test "supported message" {
 
 /// Reads an enevelope from the provided buffer.
 /// Only intended to be used for tests.
-fn testReadEnvelope(_allocator: mem.Allocator, data: []const u8) !Envelope {
+fn testReadEnvelope(allocator: mem.Allocator, data: []const u8) !Envelope {
     var source = io.StreamSource{ .const_buffer = io.fixedBufferStream(data) };
     const reader = source.reader();
 
-    var fr = EnvelopeReader(@TypeOf(reader)).init(reader);
-
-    return fr.read(_allocator);
+    return Envelope.read(allocator, reader);
 }
 
 /// Reads a frame from the provided buffer.

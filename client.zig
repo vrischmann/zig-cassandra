@@ -201,7 +201,7 @@ pub const Client = struct {
             );
         }
 
-        const read_message = try self.connection.readMessage(allocator, .{
+        const read_message = try self.connection.nextMessage(allocator, .{
             .message_allocator = self.allocator,
         });
         switch (read_message) {
@@ -284,7 +284,7 @@ pub const Client = struct {
         }
 
         // Read either RESULT or ERROR
-        return switch (try self.connection.readMessage(allocator, .{})) {
+        return switch (try self.connection.nextMessage(allocator, .{})) {
             .result => |result_message| {
                 return switch (result_message.result) {
                     .Rows => |rows| blk: {
@@ -375,7 +375,7 @@ pub const Client = struct {
         }
 
         // Read either RESULT or ERROR
-        return switch (try self.connection.readMessage(allocator, .{})) {
+        return switch (try self.connection.nextMessage(allocator, .{})) {
             .result => |result_message| {
                 return switch (result_message.result) {
                     .Rows => |rows| blk: {

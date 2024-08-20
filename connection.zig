@@ -14,7 +14,6 @@ const Frame = protocol.Frame;
 const Envelope = protocol.Envelope;
 const EnvelopeFlags = protocol.EnvelopeFlags;
 const EnvelopeHeader = protocol.EnvelopeHeader;
-const EnvelopeReader = protocol.EnvelopeReader;
 const EnvelopeWriter = protocol.EnvelopeWriter;
 
 const CQLVersion = protocol.CQLVersion;
@@ -90,7 +89,6 @@ pub const Connection = struct {
     const BufferedWriterType = io.BufferedWriter(4096, std.net.Stream.Writer);
 
     // TODO(vincent): we probably don't need the reader and writer abstractions here.
-    const EnvelopeReaderType = EnvelopeReader(BufferedReaderType.Reader);
     const EnvelopeWriterType = EnvelopeWriter(std.ArrayList(u8).Writer);
 
     /// Contains the state that is negotiated with a node as part of the handshake.
@@ -101,25 +99,23 @@ pub const Connection = struct {
     allocator: mem.Allocator,
     options: InitOptions,
 
-    framing: struct {
-        enabled: bool = false,
-        format: Frame.Format = undefined,
-    },
-
     socket: std.net.Stream,
 
     buffered_reader: BufferedReaderType,
     buffered_writer: BufferedWriterType,
 
     /// Helpers types needed to encode and decode the CQL protocol.
-    envelope_reader: EnvelopeReaderType,
     envelope_writer_buffer: std.ArrayList(u8),
     envelope_writer: EnvelopeWriterType,
     message_reader: MessageReader,
     message_writer: MessageWriter,
 
-    // Negotiated with the server
+    // connection state
     negotiated_state: NegotiatedState,
+    framing: struct {
+        enabled: bool = false,
+        format: Frame.Format = undefined,
+    },
 
     pub fn initIp4(self: *Self, allocator: mem.Allocator, seed_address: net.Address, options: InitOptions) !void {
         self.allocator = allocator;
@@ -131,7 +127,6 @@ pub const Connection = struct {
         self.buffered_reader = BufferedReaderType{ .unbuffered_reader = self.socket.reader() };
         self.buffered_writer = BufferedWriterType{ .unbuffered_writer = self.socket.writer() };
 
-        self.envelope_reader = EnvelopeReaderType.init(self.buffered_reader.reader());
         self.envelope_writer_buffer = std.ArrayList(u8).init(allocator);
         self.envelope_writer = EnvelopeWriterType.init(self.envelope_writer_buffer.writer());
 
@@ -186,7 +181,7 @@ pub const Connection = struct {
         );
 
         fba.reset();
-        switch (try self.readMessage(fba.allocator(), .{})) {
+        switch (try self.nextMessage(fba.allocator(), .{})) {
             .supported => |fr| self.negotiated_state.cql_version = fr.cql_versions[0],
             .@"error" => |err| {
                 diags.message = err.message;
@@ -207,7 +202,7 @@ pub const Connection = struct {
             },
             .{},
         );
-        switch (try self.readMessage(fba.allocator(), .{})) {
+        switch (try self.nextMessage(fba.allocator(), .{})) {
             .ready => return,
             .authenticate => |fr| {
                 try self.authenticate(fba.allocator(), diags, fr.authenticator);
@@ -246,7 +241,7 @@ pub const Connection = struct {
         }
 
         // Read either AUTH_CHALLENGE, AUTH_SUCCESS or ERROR
-        switch (try self.readMessage(allocator, .{})) {
+        switch (try self.nextMessage(allocator, .{})) {
             .auth_challenge => unreachable,
             .auth_success => return,
             .@"error" => |err| {
@@ -362,42 +357,70 @@ pub const Connection = struct {
 
     pub const ReadMessageOptions = struct {
         /// If set the message will be allocated using this allocator instead of the allocator
-        /// passed in `readMessage`.
+        /// passed in `nextMessage`.
         ///
         /// This is useful if you want the message to have a different lifecycle, for example
         /// if you need to store the message in a list or a map.
         message_allocator: ?mem.Allocator = null,
     };
 
-    pub fn readMessage(self: *Self, allocator: mem.Allocator, options: ReadMessageOptions) !Message {
+    pub fn nextMessage(self: *Self, allocator: mem.Allocator, options: ReadMessageOptions) !Message {
+        var messages = try self.readMessages(allocator, options);
+        defer messages.deinit();
+
+        debug.assert(messages.items.len == 1);
+
+        return messages.pop();
+    }
+
+    fn readMessages(self: *Self, allocator: mem.Allocator, options: ReadMessageOptions) !std.ArrayList(Message) {
+        var result = std.ArrayList(Message).init(allocator);
+
+        if (self.options.protocol_version.isAtMost(4)) {
+            try self.readMessageV4(allocator, options, &result);
+        } else if (self.options.protocol_version.isAtLeast(5)) {
+            try self.readMessageV4(allocator, options, &result);
+        }
+
+        return result;
+    }
+
+    fn readMessagesV5(self: *Self, allocator: mem.Allocator, options: ReadMessageOptions, messages: *std.ArrayList(Message)) !void {
+        const buffer = blk: {
+            var buf: [256 * 1024]u8 = undefined;
+            const n = try self.buffered_reader.read(&buf);
+            if (n <= 0) {
+                return error.UnexpectedEOF;
+            }
+            break :blk buf[0..n];
+        };
+
+        const result = try Frame.decode(allocator, buffer, self.framing.format);
+        debug.assert(result.consumed == buffer.len);
+        debug.assert(result.frame.is_self_contained);
+        debug.assert(result.frame.payload.len > 0);
+
+        var fbs = io.StreamSource{ .const_buffer = io.fixedBufferStream(result.frame.payload) };
+        const envelope = try Envelope.read(allocator, fbs.reader());
+
+        const message = try self.decodeMessage(options.message_allocator orelse allocator, envelope);
+
+        try messages.append(message);
+    }
+
+    fn readMessageV4(self: *Self, allocator: mem.Allocator, options: ReadMessageOptions, messages: *std.ArrayList(Message)) !void {
         const envelope = try self.readEnvelope(allocator);
         defer envelope.deinit(allocator);
 
         self.message_reader.reset(envelope.body);
 
-        const message_allocator = if (options.message_allocator) |message_allocator|
-            message_allocator
-        else
-            allocator;
+        const message = try self.decodeMessage(options.message_allocator orelse allocator, envelope);
 
-        return switch (envelope.header.opcode) {
-            .@"error" => Message{ .@"error" = try ErrorMessage.read(message_allocator, &self.message_reader) },
-            .startup => Message{ .startup = try StartupMessage.read(message_allocator, &self.message_reader) },
-            .ready => Message{ .ready = ReadyMessage{} },
-            .options => Message{ .options = {} },
-            .supported => Message{ .supported = try SupportedMessage.read(message_allocator, &self.message_reader) },
-            .result => Message{ .result = try ResultMessage.read(message_allocator, self.options.protocol_version, &self.message_reader) },
-            .register => Message{ .register = {} },
-            .event => Message{ .event = try EventMessage.read(message_allocator, &self.message_reader) },
-            .authenticate => Message{ .authenticate = try AuthenticateMessage.read(message_allocator, &self.message_reader) },
-            .auth_challenge => Message{ .auth_challenge = try AuthChallengeMessage.read(message_allocator, &self.message_reader) },
-            .auth_success => Message{ .auth_success = try AuthSuccessMessage.read(message_allocator, &self.message_reader) },
-            else => std.debug.panic("invalid read message {}\n", .{envelope.header.opcode}),
-        };
+        try messages.append(message);
     }
 
     fn readEnvelope(self: *Self, allocator: mem.Allocator) !Envelope {
-        var envelope = try self.envelope_reader.read(allocator);
+        var envelope = try Envelope.read(allocator, self.buffered_reader.reader());
 
         if (envelope.header.flags & EnvelopeFlags.Compression == EnvelopeFlags.Compression) {
             const compression = self.options.compression orelse return error.InvalidCompressedFrame;
@@ -416,5 +439,24 @@ pub const Connection = struct {
         }
 
         return envelope;
+    }
+
+    fn decodeMessage(self: *Self, message_allocator: mem.Allocator, envelope: Envelope) !Message {
+        const message = switch (envelope.header.opcode) {
+            .@"error" => Message{ .@"error" = try ErrorMessage.read(message_allocator, &self.message_reader) },
+            .startup => Message{ .startup = try StartupMessage.read(message_allocator, &self.message_reader) },
+            .ready => Message{ .ready = ReadyMessage{} },
+            .options => Message{ .options = {} },
+            .supported => Message{ .supported = try SupportedMessage.read(message_allocator, &self.message_reader) },
+            .result => Message{ .result = try ResultMessage.read(message_allocator, self.options.protocol_version, &self.message_reader) },
+            .register => Message{ .register = {} },
+            .event => Message{ .event = try EventMessage.read(message_allocator, &self.message_reader) },
+            .authenticate => Message{ .authenticate = try AuthenticateMessage.read(message_allocator, &self.message_reader) },
+            .auth_challenge => Message{ .auth_challenge = try AuthChallengeMessage.read(message_allocator, &self.message_reader) },
+            .auth_success => Message{ .auth_success = try AuthSuccessMessage.read(message_allocator, &self.message_reader) },
+            else => std.debug.panic("invalid read message {}\n", .{envelope.header.opcode}),
+        };
+
+        return message;
     }
 };
