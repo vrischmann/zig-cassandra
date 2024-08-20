@@ -169,7 +169,7 @@ pub const Connection = struct {
         //      |-------------------------->|
         //      |                           |
         var buffer: [4096]u8 = undefined;
-        var fba = std.heap.FixedBufferAllocator.init(&buffer);
+        var fba = heap.FixedBufferAllocator.init(&buffer);
 
         // Write OPTIONS, expect SUPPORTED
 
