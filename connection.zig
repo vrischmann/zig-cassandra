@@ -213,6 +213,12 @@ pub const Connection = struct {
             },
             else => return error.InvalidServerResponse,
         }
+
+        // Enable framing if protocol v5
+        if (self.options.protocol_version.isAtLeast(5)) {
+            self.framing.enabled = true;
+            self.framing.format = .uncompressed; // TODO(vincent): use compression
+        }
     }
 
     fn authenticate(self: *Self, allocator: mem.Allocator, diags: *InitOptions.Diagnostics, _: []const u8) !void {
