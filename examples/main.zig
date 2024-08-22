@@ -360,7 +360,8 @@ pub fn main() anyerror!void {
     // such as the protocol version, if compression is enabled, etc.
 
     var init_options = cassandra.Connection.InitOptions{};
-    init_options.protocol_version = cassandra.ProtocolVersion{ .version = try findArg(u8, args, "protocol_version", 4) };
+    // init_options.protocol_version = cassandra.ProtocolVersion{ .version = try findArg(u8, args, "protocol_version", 4) };
+    init_options.protocol_version = try cassandra.ProtocolVersion.init(5);
     init_options.compression = blk: {
         const tmp = try findArg(?[]const u8, args, "compression", null);
         if (tmp == null) break :blk null;

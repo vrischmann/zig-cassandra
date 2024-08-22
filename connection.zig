@@ -202,6 +202,13 @@ pub const Connection = struct {
             },
             .{},
         );
+
+        // At this point the server expects framing if we're using the v5 protocol
+        if (self.options.protocol_version.isAtLeast(5)) {
+            self.framing.enabled = true;
+            self.framing.format = .uncompressed; // TODO(vincent): use compression
+        }
+
         switch (try self.nextMessage(fba.allocator(), .{})) {
             .ready => return,
             .authenticate => |fr| {
@@ -212,12 +219,6 @@ pub const Connection = struct {
                 return error.HandshakeFailed;
             },
             else => return error.InvalidServerResponse,
-        }
-
-        // Enable framing if protocol v5
-        if (self.options.protocol_version.isAtLeast(5)) {
-            self.framing.enabled = true;
-            self.framing.format = .uncompressed; // TODO(vincent): use compression
         }
     }
 
@@ -348,16 +349,15 @@ pub const Connection = struct {
         // Write the envelope directly otherwise
         //
 
-        if (self.options.protocol_version.isAtLeast(5)) {
-            // TODO(vincent): implement framing
-            debug.panic("frame writer not implemented", .{});
-        } else {
-            const data = try self.envelope_writer_buffer.toOwnedSlice();
-            defer self.allocator.free(data);
+        const envelope_data = try self.envelope_writer_buffer.toOwnedSlice();
+        defer self.allocator.free(envelope_data);
 
-            _ = try self.buffered_writer.write(data);
-        }
+        const final_payload = if (self.framing.enabled)
+            try Frame.encode(allocator, envelope_data, true, .uncompressed)
+        else
+            envelope_data;
 
+        _ = try self.buffered_writer.write(final_payload);
         try self.buffered_writer.flush();
     }
 
@@ -382,9 +382,9 @@ pub const Connection = struct {
     fn readMessages(self: *Self, allocator: mem.Allocator, options: ReadMessageOptions) !std.ArrayList(Message) {
         var result = std.ArrayList(Message).init(allocator);
 
-        if (self.options.protocol_version.isAtMost(4)) {
-            try self.readMessageV4(allocator, options, &result);
-        } else if (self.options.protocol_version.isAtLeast(5)) {
+        if (self.framing.enabled) {
+            try self.readMessagesV5(allocator, options, &result);
+        } else {
             try self.readMessageV4(allocator, options, &result);
         }
 

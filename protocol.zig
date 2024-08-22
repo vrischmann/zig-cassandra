@@ -216,14 +216,14 @@ pub const Frame = struct {
         PayloadTooBig,
     } || mem.Allocator.Error;
 
-    fn encode(allocator: mem.Allocator, payload: []const u8, is_self_contained: bool, format: Format) Frame.EncodeError!Frame {
+    pub fn encode(allocator: mem.Allocator, payload: []const u8, is_self_contained: bool, format: Format) Frame.EncodeError![]const u8 {
         switch (format) {
             .uncompressed => return encodeUncompressed(allocator, payload, is_self_contained),
             .compressed => return encodeCompressed(allocator, payload, is_self_contained),
         }
     }
 
-    fn encodeUncompressed(allocator: mem.Allocator, payload: []const u8, is_self_contained: bool) Frame.EncodeError!Frame {
+    fn encodeUncompressed(allocator: mem.Allocator, payload: []const u8, is_self_contained: bool) Frame.EncodeError![]const u8 {
         if (payload.len > max_payload_size) return error.PayloadTooBig;
 
         // Create header
@@ -250,13 +250,10 @@ pub const Frame = struct {
         try frame_data.appendSlice(payload);
         try frame_data.writer().writeInt(u32, payload_crc32, .little);
 
-        return .{
-            .payload = try frame_data.toOwnedSlice(),
-            .is_self_contained = is_self_contained,
-        };
+        return frame_data.toOwnedSlice();
     }
 
-    fn encodeCompressed(allocator: mem.Allocator, payload: []const u8, is_self_contained: bool) Frame.EncodeError!Frame {
+    fn encodeCompressed(allocator: mem.Allocator, payload: []const u8, is_self_contained: bool) Frame.EncodeError![]const u8 {
         _ = allocator;
         _ = payload;
         _ = is_self_contained;
