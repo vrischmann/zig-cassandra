@@ -503,7 +503,7 @@ test "frame write: PREPARE message" {
     // Decode then verify
 
     {
-        const result = try Frame.decode(arena.allocator(), frame.payload, .uncompressed);
+        const result = try Frame.decode(arena.allocator(), frame, .uncompressed);
 
         const envelope = try testReadEnvelope(arena.allocator(), result.frame.payload);
         try checkEnvelopeHeader(5, Opcode.prepare, result.frame.payload.len, envelope.header);
