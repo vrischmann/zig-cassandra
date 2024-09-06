@@ -554,7 +554,7 @@ test "option id array list" {
 /// unless absolutely necessary in the case of arrays.
 /// Think of a way to communicate that.
 fn computeValues(allocator: mem.Allocator, values: ?*std.ArrayList(Value), options: ?*OptionIDArrayList, args: anytype) !void {
-    if (@typeInfo(@TypeOf(args)) != .Struct) {
+    if (@typeInfo(@TypeOf(args)) != .@"struct") {
         @compileError("Expected tuple or struct argument, found " ++ @typeName(args) ++ " of type " ++ @tagName(@typeInfo(args)));
     }
 
@@ -565,7 +565,7 @@ fn computeValues(allocator: mem.Allocator, values: ?*std.ArrayList(Value), optio
     var dummy_opts = OptionIDArrayList{};
     const opts = options orelse &dummy_opts;
 
-    inline for (@typeInfo(@TypeOf(args)).Struct.fields) |struct_field| {
+    inline for (@typeInfo(@TypeOf(args)).@"struct".fields) |struct_field| {
         const Type = struct_field.type;
 
         const arg = @field(args, struct_field.name);
@@ -586,26 +586,26 @@ fn resolveOption(comptime Type: type) OptionID {
 
     const type_info = @typeInfo(Type);
     switch (type_info) {
-        .Bool => return .Boolean,
-        .Int => |_| switch (Type) {
+        .bool => return .Boolean,
+        .int => |_| switch (Type) {
             i8, u8 => return .Tinyint,
             i16, u16 => return .Smallint,
             i32, u32 => return .Int,
             i64, u64 => return .Bigint,
             else => @compileError("field type " ++ @typeName(Type) ++ " is not compatible with CQL"),
         },
-        .Float => |_| switch (Type) {
+        .float => |_| switch (Type) {
             f32 => return .Float,
             f64 => return .Double,
             else => @compileError("field type " ++ @typeName(Type) ++ " is not compatible with CQL"),
         },
-        .Pointer => |pointer| switch (pointer.size) {
+        .pointer => |pointer| switch (pointer.size) {
             .One => {
                 return resolveOption(pointer.child);
             },
             else => @compileError("invalid pointer size " ++ @tagName(pointer.size)),
         },
-        .Optional => |optional| {
+        .optional => |optional| {
             return resolveOption(optional.child);
         },
         else => @compileError("field type " ++ @typeName(Type) ++ " not handled yet (type id: " ++ @tagName(type_info) ++ ")"),
@@ -656,7 +656,7 @@ fn computeSingleValue(allocator: mem.Allocator, values: *std.ArrayList(Value), o
     }
 
     switch (type_info) {
-        .Bool => {
+        .bool => {
             var buf = try allocator.alloc(u8, 1);
             errdefer allocator.free(buf);
 
@@ -666,7 +666,7 @@ fn computeSingleValue(allocator: mem.Allocator, values: *std.ArrayList(Value), o
             value = Value{ .Set = buf };
             try values.append(value);
         },
-        .Int => |info| {
+        .int => |info| {
             try options.append(resolveOption(Type));
 
             const buf = try allocator.alloc(u8, info.bits / 8);
@@ -677,7 +677,7 @@ fn computeSingleValue(allocator: mem.Allocator, values: *std.ArrayList(Value), o
             value = Value{ .Set = buf };
             try values.append(value);
         },
-        .Float => |info| {
+        .float => |info| {
             try options.append(resolveOption(Type));
 
             const buf = try allocator.alloc(u8, info.bits / 8);
@@ -689,7 +689,7 @@ fn computeSingleValue(allocator: mem.Allocator, values: *std.ArrayList(Value), o
             value = Value{ .Set = buf };
             try values.append(value);
         },
-        .Pointer => |pointer| switch (pointer.size) {
+        .pointer => |pointer| switch (pointer.size) {
             .One => {
                 try computeValues(allocator, values, options, .{arg.*});
                 return;
@@ -707,7 +707,7 @@ fn computeSingleValue(allocator: mem.Allocator, values: *std.ArrayList(Value), o
             },
             else => @compileError("invalid pointer size " ++ @tagName(pointer.size)),
         },
-        .Array => |_| {
+        .array => |_| {
 
             // Otherwise it's a list or a set, encode a new list of values.
             var inner_values = std.ArrayList(Value).init(allocator);
@@ -719,7 +719,7 @@ fn computeSingleValue(allocator: mem.Allocator, values: *std.ArrayList(Value), o
             value = Value{ .Set = try serializeValues(allocator, try inner_values.toOwnedSlice()) };
             try values.append(value);
         },
-        .Optional => |optional| {
+        .optional => |optional| {
             if (arg) |a| {
                 try computeSingleValue(allocator, values, options, optional.child, a);
             } else {

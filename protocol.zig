@@ -44,7 +44,7 @@ pub const Frame = struct {
 
     fn crc24(input: anytype) usize {
         // Don't use @sizeOf because it contains a padding byte
-        const Size = @typeInfo(@TypeOf(input)).Int.bits / 8;
+        const Size = @typeInfo(@TypeOf(input)).int.bits / 8;
         comptime assert(Size > 0 and Size < 9);
 
         // This is adapted from https://github.com/apache/cassandra/blob/1bd4bcf4e561144497adc86e1b48480eab6171d4/src/java/org/apache/cassandra/net/Crc.java#L119-L135
@@ -1303,7 +1303,7 @@ pub const MessageReader = struct {
 
     pub fn readUnsignedVint(self: *Self, comptime IntType: type) !IntType {
         const bits = switch (@typeInfo(IntType)) {
-            .Int => |info| blk: {
+            .int => |info| blk: {
                 comptime assert(info.bits >= 16);
                 break :blk info.bits;
             },
@@ -1334,7 +1334,7 @@ pub const MessageReader = struct {
 
     pub fn readVint(self: *Self, comptime IntType: type) !IntType {
         const bits = switch (@typeInfo(IntType)) {
-            .Int => |info| blk: {
+            .int => |info| blk: {
                 comptime assert(info.signedness == .signed);
                 comptime assert(info.bits >= 16);
 
@@ -1716,7 +1716,7 @@ pub const MessageWriter = struct {
 
     /// Write either a short, a int or a long to the buffer.
     pub fn writeInt(self: *Self, comptime T: type, value: T) !void {
-        var buf: [(@typeInfo(T).Int.bits + 7) / 8]u8 = undefined;
+        var buf: [(@typeInfo(T).int.bits + 7) / 8]u8 = undefined;
         mem.writeInt(T, &buf, value, .big);
 
         return self.wbuf.appendSlice(&buf);
@@ -1788,7 +1788,7 @@ pub const MessageWriter = struct {
 
     pub fn writeUnsignedVint(self: *Self, n: anytype) !void {
         switch (@typeInfo(@TypeOf(n))) {
-            .Int => |info| {
+            .int => |info| {
                 comptime assert(info.signedness == .unsigned);
             },
             else => unreachable,
@@ -1823,7 +1823,7 @@ pub const MessageWriter = struct {
 
     pub fn writeVint(self: *Self, n: anytype) !void {
         const bits = switch (@typeInfo(@TypeOf(n))) {
-            .Int => |info| blk: {
+            .int => |info| blk: {
                 comptime assert(info.bits == 32 or info.bits == 64);
                 comptime assert(info.signedness == .signed);
 
@@ -3764,7 +3764,7 @@ fn expectSameEnvelope(comptime T: type, fr: T, header: EnvelopeHeader, exp: []co
 
     const write_fn = @typeInfo(@TypeOf(T.write));
     switch (write_fn) {
-        .Fn => |info| {
+        .@"fn" => |info| {
             if (info.params.len == 2) {
                 try fr.write(&mw);
             } else if (info.params.len == 3) {

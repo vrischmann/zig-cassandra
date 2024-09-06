@@ -5,7 +5,7 @@ const testing = std.testing;
 
 const assert = std.debug.assert;
 
-const limb_bits = @typeInfo(big.Limb).Int.bits;
+const limb_bits = @typeInfo(big.Limb).int.bits;
 const limb_bytes = limb_bits / 8;
 
 /// fromRawBytes decodes a big.int from the data provided.

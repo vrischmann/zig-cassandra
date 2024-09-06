@@ -74,10 +74,10 @@ pub const Iterator = struct {
         var diags = options.diags orelse &dummy_diags;
 
         const child = switch (@typeInfo(@TypeOf(args))) {
-            .Pointer => |info| info.child,
+            .pointer => |info| info.child,
             else => @compileError("Expected a pointer to a tuple or struct, found " ++ @typeName(@TypeOf(args))),
         };
-        if (@typeInfo(child) != .Struct) {
+        if (@typeInfo(child) != .@"struct") {
             @compileError("Expected tuple or struct argument, found " ++ @typeName(child) ++ " of type " ++ @tagName(@typeInfo(child)));
         }
 
@@ -85,13 +85,13 @@ pub const Iterator = struct {
             return false;
         }
 
-        if (self.metadata.column_specs.len != @typeInfo(child).Struct.fields.len) {
+        if (self.metadata.column_specs.len != @typeInfo(child).@"struct".fields.len) {
             diags.incompatible_metadata.metadata_columns = self.metadata.column_specs.len;
-            diags.incompatible_metadata.struct_fields = @typeInfo(child).Struct.fields.len;
+            diags.incompatible_metadata.struct_fields = @typeInfo(child).@"struct".fields.len;
             return error.IncompatibleMetadata;
         }
 
-        inline for (@typeInfo(child).Struct.fields, 0..) |struct_field, i| {
+        inline for (@typeInfo(child).@"struct".fields, 0..) |struct_field, i| {
             const column_spec = self.metadata.column_specs[i];
             const column_data = self.rows[self.pos].slice[i];
 
@@ -117,9 +117,9 @@ pub const Iterator = struct {
         // TODO(vincent): handle union
 
         switch (type_info) {
-            .Int => return try self.readInt(diags, column_spec, column_data, Type),
-            .Float => return try self.readFloat(diags, column_spec, column_data, Type),
-            .Pointer => |pointer| switch (pointer.size) {
+            .int => return try self.readInt(diags, column_spec, column_data, Type),
+            .float => return try self.readFloat(diags, column_spec, column_data, Type),
+            .pointer => |pointer| switch (pointer.size) {
                 .One => {
                     return try self.readType(allocator, diags, column_spec, column_data, @TypeOf(pointer.child));
                 },
@@ -128,15 +128,15 @@ pub const Iterator = struct {
                 },
                 else => @compileError("invalid pointer size " ++ @tagName(pointer.size)),
             },
-            .Struct => return try self.readStruct(allocator, diags, column_spec, column_data, Type),
-            .Array => return try self.readArray(diags, column_spec, column_data, Type),
+            .@"struct" => return try self.readStruct(allocator, diags, column_spec, column_data, Type),
+            .array => return try self.readArray(diags, column_spec, column_data, Type),
             else => @compileError("field type " ++ @typeName(Type) ++ " not handled yet"),
         }
     }
 
     fn readFloatFromSlice(comptime Type: type, slice: []const u8) Type {
         // Compute the number of bytes needed for the float type we're trying to read.
-        const len = comptime @divExact(@typeInfo(Type).Float.bits, 8);
+        const len = comptime @divExact(@typeInfo(Type).float.bits, 8);
 
         std.debug.assert(slice.len <= len);
 
@@ -155,7 +155,7 @@ pub const Iterator = struct {
 
     fn readIntFromSlice(comptime Type: type, slice: []const u8) Type {
         // Compute the number of bytes needed for the integer type we're trying to read.
-        const len = comptime @divExact(@typeInfo(Type).Int.bits, 8);
+        const len = comptime @divExact(@typeInfo(Type).int.bits, 8);
 
         std.debug.assert(slice.len <= len);
 
@@ -328,7 +328,7 @@ pub const Iterator = struct {
     fn readSlice(self: *Self, allocator: mem.Allocator, diags: *Diags, column_spec: ColumnSpec, column_data: []const u8, comptime Type: type) !Type {
         const type_info = @typeInfo(Type);
         const ChildType = std.meta.Elem(Type);
-        if (@typeInfo(ChildType) == .Array) {
+        if (@typeInfo(ChildType) == .array) {
             @compileError("cannot read a slice of arrays, use a slice instead as the element type");
         }
 
@@ -337,7 +337,7 @@ pub const Iterator = struct {
         // Special case the u8 type because it's used for strings.
         // We can simply reuse the column data slice for this so make sure the
         // user uses a []const u8 in its struct.
-        if (type_info.Pointer.is_const and ChildType == u8) {
+        if (type_info.pointer.is_const and ChildType == u8) {
             var slice: Type = undefined;
 
             switch (id) {
@@ -357,15 +357,15 @@ pub const Iterator = struct {
         switch (ChildType) {
             u8, i8, u16, i16, u32, i32, i64, u64 => {
                 const NonConstType = @Type(std.builtin.Type{
-                    .Pointer = .{
+                    .pointer = .{
                         .size = .Slice,
                         .is_const = false,
-                        .is_volatile = type_info.Pointer.is_volatile,
-                        .alignment = type_info.Pointer.alignment,
-                        .address_space = type_info.Pointer.address_space,
+                        .is_volatile = type_info.pointer.is_volatile,
+                        .alignment = type_info.pointer.alignment,
+                        .address_space = type_info.pointer.address_space,
                         .child = ChildType,
-                        .is_allowzero = type_info.Pointer.is_allowzero,
-                        .sentinel = type_info.Pointer.sentinel,
+                        .is_allowzero = type_info.pointer.is_allowzero,
+                        .sentinel = type_info.pointer.sentinel,
                     },
                 });
 
