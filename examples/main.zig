@@ -331,7 +331,7 @@ fn findArg(comptime T: type, args: []const []const u8, key: []const u8, default:
 pub const std_options = .{
     .log_level = .debug,
     .log_scope_levels = &[_]std.log.ScopeLevel{
-        .{ .scope = .connection, .level = .err },
+        .{ .scope = .connection, .level = .debug },
     },
 };
 
@@ -341,19 +341,19 @@ pub fn main() anyerror!void {
 
     const allocator = gpa.allocator();
 
-    const stderr = std.io.getStdErr().writer();
+    // const stderr = std.io.getStdErr().writer();
 
-    const all_args = try std.process.argsAlloc(allocator);
-    defer std.process.argsFree(allocator, all_args);
-
-    if (all_args.len <= 1) {
-        try stderr.writeAll("expected command argument\n\n");
-        try stderr.writeAll(usage);
-        std.process.exit(1);
-    }
-
-    const cmd = all_args[1];
-    const args = all_args[2..];
+    // const all_args = try std.process.argsAlloc(allocator);
+    // defer std.process.argsFree(allocator, all_args);
+    //
+    // if (all_args.len <= 1) {
+    //     try stderr.writeAll("expected command argument\n\n");
+    //     try stderr.writeAll(usage);
+    //     std.process.exit(1);
+    // }
+    //
+    // const cmd = all_args[1];
+    // const args = all_args[2..];
 
     //
     // Connect to the seed node
@@ -362,99 +362,16 @@ pub fn main() anyerror!void {
     // Define the seed node we will connect to. We use localhost:9042.
     const address = net.Address.initIp4([_]u8{ 127, 0, 0, 1 }, 9042);
 
-    // The struct InitOptions can be used to control some aspects of the CQL client,
-    // such as the protocol version, if compression is enabled, etc.
+    const connection = try cassandra.Connection.init(allocator, address);
+    defer connection.deinit(allocator);
 
-    var init_options = cassandra.Connection.InitOptions{};
-    // init_options.protocol_version = cassandra.ProtocolVersion{ .version = try findArg(u8, args, "protocol_version", 4) };
-    init_options.protocol_version = try cassandra.ProtocolVersion.init(5);
-    init_options.compression = blk: {
-        const tmp = try findArg(?[]const u8, args, "compression", null);
-        if (tmp == null) break :blk null;
-        break :blk try cassandra.CompressionAlgorithm.fromString(tmp.?);
-    };
-    init_options.username = "cassandra";
-    init_options.password = "cassandra";
+    var connections = std.AutoArrayHashMap(std.posix.fd_t, cassandra.Connection).init(allocator);
+    defer connections.deinit();
 
-    // Additionally a Diagnostics struct can be provided.
-    // If initialization fails for some reason, this struct will be populated.
-    var init_diags = cassandra.Connection.InitOptions.Diagnostics{};
-    init_options.diags = &init_diags;
+    try connections.put(@intCast(connection.socket), connection);
 
-    var connection: cassandra.Connection = undefined;
-    connection.initIp4(allocator, address, init_options) catch |err| switch (err) {
-        error.NoUsername, error.NoPassword => {
-            std.debug.panic("the server requires authentication, please set the username and password", .{});
-        },
-        error.AuthenticationFailed => {
-            std.debug.panic("server authentication failed, error was: {s}", .{init_diags.message});
-        },
-        error.HandshakeFailed => {
-            std.debug.panic("server handshake failed, error was: {s}", .{init_diags.message});
-        },
-        else => return err,
-    };
+    var event_loop = cassandra.EventLoop{};
+    try event_loop.register(@intCast(connection.socket), std.posix.POLL.OUT);
 
-    //
-    // Connection established, create the client and do the thing.
-    //
-
-    var client = cassandra.Client.initWithConnection(allocator, &connection, .{});
-    defer client.deinit();
-
-    // Try to create the keyspace and table.
-    {
-        var arena = std.heap.ArenaAllocator.init(allocator);
-        defer arena.deinit();
-
-        var options = cassandra.Client.QueryOptions{};
-        var diags = cassandra.Client.QueryOptions.Diagnostics{};
-        options.diags = &diags;
-
-        inline for (casstest.DDL) |query| {
-            _ = try client.query(arena.allocator(), options, query, .{});
-        }
-    }
-
-    // Parse the command and run it.
-
-    if (mem.eql(u8, cmd, "query")) {
-        return doQuery(allocator, &client);
-    } else if (mem.eql(u8, cmd, "prepare")) {
-        const n = if (args.len >= 1)
-            try std.fmt.parseInt(usize, args[0], 10)
-        else
-            1;
-
-        _ = try doPrepare(allocator, &client, n);
-    } else if (mem.eql(u8, cmd, "insert")) {
-        const n = if (args.len >= 1)
-            try std.fmt.parseInt(usize, args[0], 10)
-        else
-            1;
-
-        return doInsert(allocator, &client, n);
-    } else if (mem.eql(u8, cmd, "prepare-then-exec")) {
-        if (args.len < 1) {
-            try std.fmt.format(stderr, "Usage: {s} prepared-then-exec <iterations>\n", .{args[0]});
-            std.process.exit(1);
-        }
-
-        const n = try std.fmt.parseInt(usize, args[0], 10);
-
-        return doPrepareThenExec(allocator, &client, n);
-    } else if (mem.eql(u8, cmd, "prepare-once-then-exec")) {
-        if (args.len < 1) {
-            try std.fmt.format(stderr, "Usage: {s} prepared-then-exec <iterations>\n", .{args[0]});
-            std.process.exit(1);
-        }
-
-        const n = try std.fmt.parseInt(usize, args[0], 10);
-
-        return doPrepareOnceThenExec(allocator, &client, n);
-    } else {
-        try stderr.writeAll("expected command argument\n\n");
-        try stderr.writeAll(usage);
-        std.process.exit(1);
-    }
+    try event_loop.run(&connections);
 }
