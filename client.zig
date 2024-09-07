@@ -176,7 +176,7 @@ pub const Client = struct {
 
         comptime {
             const bind_markers = countBindMarkers(query_string);
-            const fields = @typeInfo(@TypeOf(args)).Struct.fields.len;
+            const fields = @typeInfo(@TypeOf(args)).@"struct".fields.len;
 
             if (bind_markers != fields) {
                 @compileLog("number of arguments = ", fields);
@@ -243,7 +243,7 @@ pub const Client = struct {
 
         comptime {
             const bind_markers = countBindMarkers(query_string);
-            const fields = @typeInfo(@TypeOf(args)).Struct.fields.len;
+            const fields = @typeInfo(@TypeOf(args)).@"struct".fields.len;
 
             if (bind_markers != fields) {
                 @compileLog("number of arguments = ", fields);

@@ -302,7 +302,7 @@ pub const Connection = struct {
         if (std.meta.hasMethod(MessageType, "write")) {
             // Encode body
             switch (@typeInfo(@TypeOf(MessageType.write))) {
-                .Fn => |info| {
+                .@"fn" => |info| {
                     if (info.params.len == 3) {
                         try message.write(self.options.protocol_version, &self.message_writer);
                     } else {

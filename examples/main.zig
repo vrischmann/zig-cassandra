@@ -291,12 +291,12 @@ const usage =
 
 fn parseArg(comptime T: type, arg: []const u8) !T {
     switch (@typeInfo(T)) {
-        .Int => return std.fmt.parseInt(T, arg, 10),
-        .Optional => |p| {
+        .int => return std.fmt.parseInt(T, arg, 10),
+        .optional => |p| {
             if (arg.len == 0) return null;
             return try parseArg(p.child, arg);
         },
-        .Pointer => |p| {
+        .pointer => |p| {
             switch (p.size) {
                 .Slice => {
                     if (p.child == u8) return arg;
