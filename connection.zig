@@ -1,11 +1,11 @@
 const build_options = @import("build_options");
 const std = @import("std");
+const debug = std.debug;
 const heap = std.heap;
 const io = std.io;
-const log = std.log;
 const mem = std.mem;
 const net = std.net;
-const debug = std.debug;
+const posix = std.posix;
 
 const protocol = @import("protocol.zig");
 
@@ -59,6 +59,8 @@ pub const Message = union(Opcode) {
     auth_response: AuthResponseMessage,
     auth_success: AuthSuccessMessage,
 };
+
+const log = std.log.scoped(.connection);
 
 pub const Connection = struct {
     const Self = @This();
@@ -115,7 +117,7 @@ pub const Connection = struct {
     framing: struct {
         enabled: bool = false,
         format: Frame.Format = undefined,
-    },
+    } = .{},
 
     pub fn initIp4(self: *Self, allocator: mem.Allocator, seed_address: net.Address, options: InitOptions) !void {
         self.allocator = allocator;
@@ -123,6 +125,17 @@ pub const Connection = struct {
 
         self.socket = try net.tcpConnectToAddress(seed_address);
         errdefer self.socket.close();
+
+        {
+            const nonblock = 1;
+            const sock_flags = posix.SOCK.STREAM | nonblock | posix.SOCK.CLOEXEC;
+            const sockfd = try posix.socket(seed_address.any.family, sock_flags, posix.IPPROTO.TCP);
+            errdefer net.Stream.close(.{ .handle = sockfd });
+
+            try posix.connect(sockfd, &seed_address.any, seed_address.getOsSockLen());
+
+            self.socket = net.Stream{ .handle = sockfd };
+        }
 
         self.buffered_reader = BufferedReaderType{ .unbuffered_reader = self.socket.reader() };
         self.buffered_writer = BufferedWriterType{ .unbuffered_writer = self.socket.writer() };
@@ -203,14 +216,14 @@ pub const Connection = struct {
             .{},
         );
 
-        // At this point the server expects framing if we're using the v5 protocol
-        if (self.options.protocol_version.isAtLeast(5)) {
-            self.framing.enabled = true;
-            self.framing.format = .uncompressed; // TODO(vincent): use compression
-        }
-
         switch (try self.nextMessage(fba.allocator(), .{})) {
-            .ready => return,
+            .ready => {
+                // At this point the server expects framing if we're using the v5 protocol
+                if (self.options.protocol_version.isAtLeast(5)) {
+                    self.framing.enabled = true;
+                    self.framing.format = .uncompressed; // TODO(vincent): use compression
+                }
+            },
             .authenticate => |fr| {
                 try self.authenticate(fba.allocator(), diags, fr.authenticator);
             },
@@ -392,17 +405,7 @@ pub const Connection = struct {
     }
 
     fn readMessagesV5(self: *Self, allocator: mem.Allocator, options: ReadMessageOptions, messages: *std.ArrayList(Message)) !void {
-        const buffer = blk: {
-            var buf: [256 * 1024]u8 = undefined;
-            const n = try self.buffered_reader.read(&buf);
-            if (n <= 0) {
-                return error.UnexpectedEOF;
-            }
-            break :blk buf[0..n];
-        };
-
-        const result = try Frame.decode(allocator, buffer, self.framing.format);
-        debug.assert(result.consumed == buffer.len);
+        const result = try Frame.read(allocator, self.buffered_reader.reader(), self.framing.format);
         debug.assert(result.frame.is_self_contained);
         debug.assert(result.frame.payload.len > 0);
 
@@ -417,8 +420,6 @@ pub const Connection = struct {
     fn readMessageV4(self: *Self, allocator: mem.Allocator, options: ReadMessageOptions, messages: *std.ArrayList(Message)) !void {
         const envelope = try self.readEnvelope(allocator);
         defer envelope.deinit(allocator);
-
-        self.message_reader.reset(envelope.body);
 
         const message = try self.decodeMessage(options.message_allocator orelse allocator, envelope);
 
@@ -448,6 +449,8 @@ pub const Connection = struct {
     }
 
     fn decodeMessage(self: *Self, message_allocator: mem.Allocator, envelope: Envelope) !Message {
+        self.message_reader.reset(envelope.body);
+
         const message = switch (envelope.header.opcode) {
             .@"error" => Message{ .@"error" = try ErrorMessage.read(message_allocator, &self.message_reader) },
             .startup => Message{ .startup = try StartupMessage.read(message_allocator, &self.message_reader) },

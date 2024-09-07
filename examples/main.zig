@@ -1,12 +1,13 @@
 const std = @import("std");
 const heap = std.heap;
-const log = std.log;
 const mem = std.mem;
 const net = std.net;
 const big = std.math.big;
 
 const cassandra = @import("cassandra");
 const casstest = @import("../casstest.zig");
+
+const log = std.log.scoped(.main);
 
 /// Runs a single SELECT reading all data from the age_to_ids table.
 ///
@@ -270,7 +271,7 @@ fn iterate(allocator: mem.Allocator, iter: *cassandra.Iterator) !usize {
 
         const ids = IDs{ .slice = row.ids };
 
-        std.debug.print("age: {} id: {} name: {s} balance: {}\n", .{ row.age, ids, row.name, row.balance });
+        log.debug("age: {} id: {} name: {s} balance: {}", .{ row.age, ids, row.name, row.balance });
     }
 
     return count;
@@ -327,7 +328,12 @@ fn findArg(comptime T: type, args: []const []const u8, key: []const u8, default:
     return default;
 }
 
-pub const log_level: log.Level = .debug;
+pub const std_options = .{
+    .log_level = .debug,
+    .log_scope_levels = &[_]std.log.ScopeLevel{
+        .{ .scope = .connection, .level = .err },
+    },
+};
 
 pub fn main() anyerror!void {
     var gpa = heap.GeneralPurposeAllocator(.{}){};

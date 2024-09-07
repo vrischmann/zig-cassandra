@@ -4,7 +4,6 @@ const std = @import("std");
 const big = std.math.big;
 const heap = std.heap;
 const io = std.io;
-const log = std.log;
 const mem = std.mem;
 const net = std.net;
 const testing = std.testing;

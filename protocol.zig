@@ -146,6 +146,18 @@ pub const Frame = struct {
         }
     }
 
+    pub const ReadError = error{} || DecodeError;
+
+    /// Try to read a frame from the reader.
+    ///
+    /// NOTE(vincent): this will change once we stop using synchronous read calls
+    pub fn read(allocator: mem.Allocator, reader: anytype, format: Format) Frame.ReadError!DecodeResult {
+        switch (format) {
+            .compressed => return decodeCompressed(allocator, reader),
+            .uncompressed => return decodeUncompressed(allocator, reader),
+        }
+    }
+
     fn decodeUncompressed(allocator: mem.Allocator, reader: anytype) Frame.DecodeError!DecodeResult {
         // Read and parse header
         const header_data = try readHeader(reader, uncompressed_header_size);
