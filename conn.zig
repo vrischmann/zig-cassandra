@@ -66,16 +66,19 @@ pub const Connection = struct {
     pub const InitOptions = struct {
         /// the protocl version to use.
         protocol_version: ProtocolVersion = ProtocolVersion{ .version = @as(u8, 4) },
+
+        /// The compression algorithm to use if possible.
+        compression: ?CompressionAlgorithm = null,
     };
 
     allocator: mem.Allocator,
-    options: InitOptions,
+    options: InitOptions = .{},
 
-    socket: posix.socket_t,
+    socket: posix.socket_t = undefined,
 
     read_buffer: []u8,
-    read_start: usize,
-    read_end: usize,
+    read_start: usize = 0,
+    read_end: usize = 0,
 
     write_buffer: std.ArrayList(u8),
 
@@ -87,21 +90,29 @@ pub const Connection = struct {
     framing: struct {
         enabled: bool = false,
         format: Frame.Format = .compressed,
-    },
+    } = .{},
+
+    state: enum {
+        handshake,
+        nominal,
+    } = undefined,
+    handshake_stage: protocol.Opcode = undefined,
+
+    /// Contains the state that is negotiated with a node as part of the handshake.
+    negotiated_state: struct {
+        cql_version: CQLVersion = CQLVersion.fromString("3.0.0") catch unreachable,
+        compression: ?CompressionAlgorithm = null,
+    } = .{},
 
     pub fn init(allocator: mem.Allocator, options: InitOptions) !Connection {
         return Connection{
             .allocator = allocator,
             .options = options,
-            .socket = undefined,
             .read_buffer = try allocator.alloc(u8, 8192),
-            .read_start = 0,
-            .read_end = 0,
             .write_buffer = try std.ArrayList(u8).initCapacity(allocator, 16384),
             .message_writer = try MessageWriter.init(allocator),
             .message_reader = MessageReader.init(),
             .envelope_buffer = try std.ArrayList(u8).initCapacity(allocator, 8192),
-            .framing = .{},
         };
     }
 
@@ -126,6 +137,8 @@ pub const Connection = struct {
             break :blk sockfd;
         };
 
+        self.state = .handshake;
+        self.handshake_stage = .options;
         try self.appendMessage(.options, protocol.OptionsMessage{});
     }
 
@@ -215,7 +228,7 @@ pub const Connection = struct {
         try self.write_buffer.appendSlice(final_payload);
     }
 
-    fn onRead(self: *Connection) !void {
+    fn onRead(self: *Connection, pfd: *posix.pollfd) !void {
         var result = std.ArrayList(Message).init(self.allocator);
 
         const read_buffer = self.read_buffer[self.read_start..self.read_end];
@@ -234,6 +247,48 @@ pub const Connection = struct {
         if (remaining_to_read == 0) {
             self.read_start = 0;
             self.read_end = 0;
+        }
+
+        // Process messages
+
+        if (result.items.len <= 0) return;
+
+        switch (self.state) {
+            .handshake => {
+                debug.assert(result.items.len == 1);
+
+                const message = result.items[0];
+
+                switch (message) {
+                    .supported => |msg| {
+                        debug.assert(self.handshake_stage == .options);
+                        log.info("got SUPPORTED (compression: {s}), sending STARTUP", .{msg.compression_algorithms});
+
+                        if (msg.cql_versions.len > 0) {
+                            self.negotiated_state.cql_version = msg.cql_versions[0];
+                        }
+                        for (msg.compression_algorithms) |compression_algorithm| {
+                            if (compression_algorithm == .LZ4) {
+                                self.negotiated_state.compression = .LZ4;
+                            }
+                        }
+
+                        self.handshake_stage = .startup;
+                        try self.appendMessage(.startup, protocol.StartupMessage{
+                            .cql_version = self.negotiated_state.cql_version,
+                            .compression = self.negotiated_state.compression,
+                        });
+                        pfd.events |= posix.POLL.OUT;
+                    },
+                    .ready => {
+                        debug.assert(self.handshake_stage == .startup);
+                        log.info("got READY", .{});
+                    },
+                    else => log.info("got message: {}", .{message}),
+                }
+            },
+
+            .nominal => {},
         }
     }
 
@@ -356,7 +411,7 @@ pub const EventLoop = struct {
                     log.info("read {} bytes from fd {}", .{ read, pfd.fd });
                     connection.read_end += read;
 
-                    try connection.onRead();
+                    try connection.onRead(pfd);
                 }
             }
 

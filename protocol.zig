@@ -1,4 +1,6 @@
 const std = @import("std");
+const debug = std.debug;
+const fmt = std.fmt;
 const heap = std.heap;
 const io = std.io;
 const mem = std.mem;
@@ -944,11 +946,11 @@ pub const CompressionAlgorithm = enum {
         }
     }
 
-    pub fn toString(self: @This()) []const u8 {
-        return switch (self) {
-            .LZ4 => "lz4",
-            .Snappy => "snappy",
-        };
+    pub fn format(self: CompressionAlgorithm, comptime _: []const u8, _: fmt.FormatOptions, writer: anytype) !void {
+        switch (self) {
+            .LZ4 => try writer.writeAll("lz4"),
+            .Snappy => try writer.writeAll("snappy"),
+        }
     }
 };
 
