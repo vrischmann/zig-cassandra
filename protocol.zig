@@ -560,8 +560,40 @@ pub const Envelope = struct {
     header: EnvelopeHeader,
     body: []const u8,
 
-    pub fn deinit(self: @This(), allocator: mem.Allocator) void {
-        allocator.free(self.body);
+    // pub fn deinit(self: @This(), allocator: mem.Allocator) void {
+    //     allocator.free(self.body);
+    // }
+
+    const DecodeResult = struct {
+        envelope: Envelope,
+        consumed: usize,
+    };
+
+    pub fn decode(data: []const u8) !DecodeResult {
+        if (data.len < EnvelopeHeader.size) {
+            return error.UnexpectedEOF;
+        }
+
+        const header = EnvelopeHeader{
+            .version = ProtocolVersion{ .version = data[0] },
+            .flags = data[1],
+            .stream = mem.readInt(i16, @ptrCast(data[2..4]), .big),
+            .opcode = @enumFromInt(data[4]),
+            .body_len = mem.readInt(u32, @ptrCast(data[5..9]), .big),
+        };
+
+        const remaining = data[EnvelopeHeader.size..];
+        if (remaining.len != header.body_len) {
+            return error.UnexpectedEOF;
+        }
+
+        return .{
+            .envelope = .{
+                .header = header,
+                .body = remaining,
+            },
+            .consumed = EnvelopeHeader.size + remaining.len,
+        };
     }
 
     pub fn read(allocator: mem.Allocator, reader: anytype) !Envelope {
@@ -620,6 +652,12 @@ pub fn EnvelopeWriter(comptime WriterType: type) type {
             try self.writer.writeAll(envelope.body);
         }
     };
+}
+
+pub fn writeEnvelope(envelope: Envelope, buffer: *std.ArrayList(u8)) !void {
+    // TODO(vincent): temporary
+    var writer = EnvelopeWriter(std.ArrayList(u8).Writer).init(buffer.writer());
+    try writer.write(envelope);
 }
 
 //
@@ -1203,6 +1241,13 @@ pub const MessageReader = struct {
 
     buffer: io.FixedBufferStream([]const u8),
     reader: io.FixedBufferStream([]const u8).Reader,
+
+    pub fn init() MessageReader {
+        var self: MessageReader = undefined;
+        self.reset("");
+
+        return self;
+    }
 
     pub fn reset(self: *Self, buf: []const u8) void {
         self.buffer = io.fixedBufferStream(buf);

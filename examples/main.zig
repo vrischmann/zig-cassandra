@@ -362,8 +362,12 @@ pub fn main() anyerror!void {
     // Define the seed node we will connect to. We use localhost:9042.
     const address = net.Address.initIp4([_]u8{ 127, 0, 0, 1 }, 9042);
 
-    const connection = try cassandra.Connection.init(allocator, address);
-    defer connection.deinit(allocator);
+    var connection = try cassandra.Connection.init(allocator, .{
+        .protocol_version = try cassandra.ProtocolVersion.init(5),
+    });
+    defer connection.deinit();
+
+    try connection.connect(address);
 
     var connections = std.AutoArrayHashMap(std.posix.fd_t, cassandra.Connection).init(allocator);
     defer connections.deinit();
