@@ -96,13 +96,19 @@ pub const Connection = struct {
         handshake,
         nominal,
     } = undefined,
-    handshake_stage: protocol.Opcode = undefined,
+    handshake: union(enum) {
+        opcode: protocol.Opcode,
+        done,
+    } = undefined,
 
     /// Contains the state that is negotiated with a node as part of the handshake.
     negotiated_state: struct {
         cql_version: CQLVersion = CQLVersion.fromString("3.0.0") catch unreachable,
         compression: ?CompressionAlgorithm = null,
     } = .{},
+
+    /// The protocol version to use.
+    protocol_version: ProtocolVersion,
 
     pub fn init(allocator: mem.Allocator, options: InitOptions) !Connection {
         return Connection{
@@ -113,6 +119,7 @@ pub const Connection = struct {
             .message_writer = try MessageWriter.init(allocator),
             .message_reader = MessageReader.init(),
             .envelope_buffer = try std.ArrayList(u8).initCapacity(allocator, 8192),
+            .protocol_version = options.protocol_version,
         };
     }
 
@@ -138,7 +145,7 @@ pub const Connection = struct {
         };
 
         self.state = .handshake;
-        self.handshake_stage = .options;
+        self.handshake = .{ .opcode = .options };
         try self.appendMessage(.options, protocol.OptionsMessage{});
     }
 
@@ -153,7 +160,7 @@ pub const Connection = struct {
 
         var envelope = Envelope{
             .header = EnvelopeHeader{
-                .version = self.options.protocol_version,
+                .version = self.protocol_version,
                 .flags = 0,
                 .stream = 0,
                 .opcode = opcode,
@@ -162,7 +169,7 @@ pub const Connection = struct {
             .body = &[_]u8{},
         };
 
-        if (self.options.protocol_version.is(5)) {
+        if (self.protocol_version.is(5)) {
             envelope.header.flags |= EnvelopeFlags.UseBeta;
         }
 
@@ -171,7 +178,7 @@ pub const Connection = struct {
             switch (@typeInfo(@TypeOf(MessageType.write))) {
                 .@"fn" => |info| {
                     if (info.params.len == 3) {
-                        try message.write(self.options.protocol_version, &self.message_writer);
+                        try message.write(self.protocol_version, &self.message_writer);
                     } else {
                         try message.write(&self.message_writer);
                     }
@@ -187,8 +194,8 @@ pub const Connection = struct {
             envelope.body = written;
 
             // Compress the body if we can use it.
-            // Only relevant for Protocol <= v4, Protocol v5 doest compression using the framing format.
-            if (self.options.protocol_version.isAtMost(4)) {
+            // Only relevant for Protocol <= v4, Protocol v5 does compression using the framing format.
+            if (self.protocol_version.isAtMost(4)) {
                 if (self.options.compression) |compression| {
                     switch (compression) {
                         .LZ4 => {
@@ -261,19 +268,30 @@ pub const Connection = struct {
 
                 switch (message) {
                     .supported => |msg| {
-                        debug.assert(self.handshake_stage == .options);
+                        debug.assert(self.handshake.opcode == .options);
                         log.info("got SUPPORTED (compression: {s}), sending STARTUP", .{msg.compression_algorithms});
 
-                        if (msg.cql_versions.len > 0) {
-                            self.negotiated_state.cql_version = msg.cql_versions[0];
-                        }
+                        debug.assert(msg.protocol_versions.len > 0);
+
+                        for (msg.protocol_versions) |protocol_version| {
+                            if (protocol_version.eql(self.protocol_version)) {
+                                break;
+                            }
+                        } else return error.UnsupportedProtocolVersion;
+
+                        for (msg.cql_versions) |cql_version| {
+                            if (cql_version.major == 3 and cql_version.minor == 0 and cql_version.patch == 0) {
+                                break;
+                            }
+                        } else return error.UnsupportedCQLVersion;
+
                         for (msg.compression_algorithms) |compression_algorithm| {
                             if (compression_algorithm == .LZ4) {
                                 self.negotiated_state.compression = .LZ4;
                             }
                         }
 
-                        self.handshake_stage = .startup;
+                        self.handshake = .{ .opcode = .startup };
                         try self.appendMessage(.startup, protocol.StartupMessage{
                             .cql_version = self.negotiated_state.cql_version,
                             .compression = self.negotiated_state.compression,
@@ -281,14 +299,20 @@ pub const Connection = struct {
                         pfd.events |= posix.POLL.OUT;
                     },
                     .ready => {
-                        debug.assert(self.handshake_stage == .startup);
+                        debug.assert(self.handshake.opcode == .startup);
+
                         log.info("got READY", .{});
+
+                        self.handshake = .done;
+                        if (self.protocol_version.isAtLeast(5)) self.framing.enabled = true;
                     },
                     else => log.info("got message: {}", .{message}),
                 }
             },
 
-            .nominal => {},
+            .nominal => {
+                log.info("nominal", .{});
+            },
         }
     }
 
@@ -339,13 +363,24 @@ pub const Connection = struct {
 };
 
 pub const EventLoop = struct {
-    running: bool = true,
+    const Timer = struct {
+        used: bool,
+        deadline_ns: i128,
+        data: *anyopaque,
+        cb: *const fn (data: *anyopaque) anyerror!void,
+    };
 
+    running: bool = true,
     pfds: [32]posix.pollfd = [_]posix.pollfd{.{
         .fd = 0,
         .events = 0,
         .revents = 0,
     }} ** 32,
+
+    timers: [32]Timer = undefined,
+
+    /// The current timestamp with a nanosecond resolution
+    now: i128 = 0,
 
     pub fn register(self: *EventLoop, fd: posix.fd_t, events: i16) !void {
         for (&self.pfds) |*pfd| {
@@ -359,8 +394,43 @@ pub const EventLoop = struct {
         }
     }
 
+    pub fn addTimer(self: *EventLoop, data: *anyopaque, cb: *const fn (data: *anyopaque) anyerror!void, duration_ns: u64) !void {
+        debug.assert(duration_ns >= 1);
+
+        for (&self.timers) |*timer| {
+            if (!timer.used) {
+                timer.used = true;
+                timer.data = data;
+                timer.cb = cb;
+                timer.deadline_ns = time.nanoTimestamp() + @as(i128, @intCast(duration_ns));
+                return;
+            }
+        } else {
+            return error.NoAvailableSlot;
+        }
+    }
+
     pub fn run(self: *EventLoop, connections: *std.AutoArrayHashMap(posix.fd_t, Connection)) !void {
         while (self.running) {
+            self.now = time.nanoTimestamp();
+
+            // Execute timers
+
+            for (&self.timers, 0..) |*timer, i| {
+                if (!timer.used) continue;
+
+                if (self.now >= timer.deadline_ns) {
+                    log.debug("timer {} is ready to fire", .{i});
+
+                    try timer.cb(timer.data);
+
+                    timer.* = undefined;
+                    timer.used = false;
+                }
+            }
+
+            // Poll for events
+
             const n = try posix.poll(&self.pfds, 1 * time.ms_per_s);
             log.debug("poll, n: {}", .{n});
 
@@ -414,8 +484,6 @@ pub const EventLoop = struct {
                     try connection.onRead(pfd);
                 }
             }
-
-            // std.time.sleep(1 * time.ns_per_s);
         }
     }
 };

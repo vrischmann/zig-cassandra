@@ -1,6 +1,7 @@
 const std = @import("std");
 const heap = std.heap;
 const mem = std.mem;
+const time = std.time;
 const net = std.net;
 const big = std.math.big;
 
@@ -335,6 +336,12 @@ pub const std_options = .{
     },
 };
 
+fn executeQueryCallback(data: *anyopaque) anyerror!void {
+    const connection: *cassandra.Connection = @ptrCast(@alignCast(data));
+
+    log.info("executing query on {*}", .{connection});
+}
+
 pub fn main() anyerror!void {
     var gpa = heap.GeneralPurposeAllocator(.{}){};
     defer std.debug.assert(gpa.deinit() == .ok);
@@ -376,6 +383,8 @@ pub fn main() anyerror!void {
 
     var event_loop = cassandra.EventLoop{};
     try event_loop.register(@intCast(connection.socket), std.posix.POLL.OUT);
+
+    // try event_loop.addTimer(&connection, executeQueryCallback, 3 * time.ns_per_s);
 
     try event_loop.run(&connections);
 }

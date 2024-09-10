@@ -548,7 +548,7 @@ pub const EnvelopeFlags = struct {
     pub const UseBeta: u8 = 0x10;
 };
 
-pub const EnvelopeHeader = packed struct {
+pub const EnvelopeHeader = struct {
     version: ProtocolVersion,
     flags: u8,
     stream: i16,
@@ -851,7 +851,7 @@ pub const CQLVersion = struct {
     }
 };
 
-pub const ProtocolVersion = packed struct {
+pub const ProtocolVersion = struct {
     const Self = @This();
 
     version: u8,
@@ -882,6 +882,10 @@ pub const ProtocolVersion = packed struct {
     }
     pub fn isResponse(self: Self) bool {
         return self.version & 0xf0 == 0x80;
+    }
+
+    pub fn eql(self: Self, other: Self) bool {
+        return self.version == other.version;
     }
 
     pub fn fromString(s: []const u8) !ProtocolVersion {
