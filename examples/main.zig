@@ -386,5 +386,7 @@ pub fn main() anyerror!void {
 
     // try event_loop.addTimer(&connection, executeQueryCallback, 3 * time.ns_per_s);
 
-    try event_loop.run(&connections);
+    event_loop.run(&connections) catch |err| {
+        log.err("event loop run failed, err: {}", .{err});
+    };
 }

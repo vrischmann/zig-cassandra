@@ -394,6 +394,23 @@ pub const EventLoop = struct {
         }
     }
 
+    pub fn unregister(self: *EventLoop, fd: posix.fd_t) void {
+        debug.assert(fd > 0);
+
+        for (&self.pfds) |*pfd| {
+            if (pfd.fd == fd) {
+                pfd.fd = 0;
+                pfd.events = 0;
+                pfd.revents = 0;
+
+                log.info("lol", .{});
+                return;
+            }
+        } else {
+            debug.panic("fd {} not registered", .{fd});
+        }
+    }
+
     pub fn addTimer(self: *EventLoop, data: *anyopaque, cb: *const fn (data: *anyopaque) anyerror!void, duration_ns: u64) !void {
         debug.assert(duration_ns >= 1);
 
@@ -410,80 +427,99 @@ pub const EventLoop = struct {
         }
     }
 
+    fn executeTimers(self: *EventLoop) !void {
+        for (&self.timers, 0..) |*timer, i| {
+            if (!timer.used) continue;
+
+            if (self.now >= timer.deadline_ns) {
+                log.debug("timer {} is ready to fire", .{i});
+
+                try timer.cb(timer.data);
+
+                timer.* = undefined;
+                timer.used = false;
+            }
+        }
+    }
+
+    fn pollForEvents(self: *EventLoop, connections: *std.AutoArrayHashMap(posix.fd_t, Connection)) !void {
+        const n = try posix.poll(&self.pfds, 1 * time.ms_per_s);
+        log.debug("poll, n: {}", .{n});
+
+        for (&self.pfds, 0..) |*pfd, i| {
+            if (i >= n) break;
+
+            log.info("pfd: {any}, i: {}", .{ pfd.*, i });
+
+            const entry = connections.getEntry(pfd.fd).?;
+            var connection = entry.value_ptr;
+
+            if (pfd.revents & posix.POLL.OUT != 0) {
+                pfd.events &= ~@as(i16, posix.POLL.OUT);
+
+                log.info("fd {} writable", .{pfd.fd});
+
+                if (connection.write_buffer.items.len > 0) {
+                    // Try to write. If we can't write, fail.
+                    // TODO(vincent): handle WouldBlock ?
+
+                    const written = posix.write(connection.socket, connection.write_buffer.items) catch |err| {
+                        log.err("unable to write to socket {}, got err: {}", .{ connection.socket, err });
+
+                        self.unregister(connection.socket);
+
+                        connection.deinit();
+                        const removed = connections.swapRemove(connection.socket);
+                        debug.assert(removed);
+
+                        continue;
+                    };
+
+                    try connection.write_buffer.replaceRange(0, written, "");
+
+                    log.info("written {} bytes to fd {}", .{ written, pfd.fd });
+
+                    if (connection.write_buffer.items.len > 0) {
+                        // More data to write
+                        pfd.events = posix.POLL.OUT;
+                    } else {
+                        connection.write_buffer.clearRetainingCapacity();
+
+                        // No more data to write, start reading
+                        pfd.events = posix.POLL.IN;
+                    }
+                }
+            }
+
+            if (pfd.revents & posix.POLL.IN != 0) {
+                pfd.events &= ~@as(i16, posix.POLL.IN);
+
+                log.info("fd {} readable", .{pfd.fd});
+
+                const buffer = connection.read_buffer[connection.read_end..];
+                const read = posix.read(connection.socket, buffer) catch |err| switch (err) {
+                    error.WouldBlock => {
+                        log.info("nothing to read", .{});
+                        continue;
+                    },
+                    else => return err,
+                };
+                if (read <= 0) return error.EndOfStream;
+
+                log.info("read {} bytes from fd {}", .{ read, pfd.fd });
+                connection.read_end += read;
+
+                try connection.onRead(pfd);
+            }
+        }
+    }
+
     pub fn run(self: *EventLoop, connections: *std.AutoArrayHashMap(posix.fd_t, Connection)) !void {
         while (self.running) {
             self.now = time.nanoTimestamp();
 
-            // Execute timers
-
-            for (&self.timers, 0..) |*timer, i| {
-                if (!timer.used) continue;
-
-                if (self.now >= timer.deadline_ns) {
-                    log.debug("timer {} is ready to fire", .{i});
-
-                    try timer.cb(timer.data);
-
-                    timer.* = undefined;
-                    timer.used = false;
-                }
-            }
-
-            // Poll for events
-
-            const n = try posix.poll(&self.pfds, 1 * time.ms_per_s);
-            log.debug("poll, n: {}", .{n});
-
-            for (&self.pfds, 0..) |*pfd, i| {
-                if (i >= n) break;
-
-                const entry = connections.getEntry(pfd.fd).?;
-                var connection = entry.value_ptr;
-
-                if (pfd.revents & posix.POLL.OUT != 0) {
-                    pfd.events &= ~@as(i16, posix.POLL.OUT);
-
-                    log.info("fd {} writable", .{pfd.fd});
-
-                    if (connection.write_buffer.items.len > 0) {
-                        const written = try posix.write(connection.socket, connection.write_buffer.items);
-                        try connection.write_buffer.replaceRange(0, written, "");
-
-                        log.info("written {} bytes to fd {}", .{ written, pfd.fd });
-
-                        if (connection.write_buffer.items.len > 0) {
-                            // More data to write
-                            pfd.events = posix.POLL.OUT;
-                        } else {
-                            connection.write_buffer.clearRetainingCapacity();
-
-                            // No more data to write, start reading
-                            pfd.events = posix.POLL.IN;
-                        }
-                    }
-                }
-
-                if (pfd.revents & posix.POLL.IN != 0) {
-                    pfd.events &= ~@as(i16, posix.POLL.IN);
-
-                    log.info("fd {} readable", .{pfd.fd});
-
-                    const buffer = connection.read_buffer[connection.read_end..];
-                    const read = posix.read(connection.socket, buffer) catch |err| switch (err) {
-                        error.WouldBlock => {
-                            log.info("nothing to read", .{});
-                            continue;
-                        },
-                        else => return err,
-                    };
-                    if (read <= 0) return error.EndOfStream;
-
-                    log.info("read {} bytes from fd {}", .{ read, pfd.fd });
-                    connection.read_end += read;
-
-                    try connection.onRead(pfd);
-                }
-            }
+            try self.executeTimers();
+            try self.pollForEvents(connections);
         }
     }
 };
