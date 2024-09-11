@@ -366,19 +366,32 @@ pub fn main() anyerror!void {
     _ = address;
 
     var ring = try cassandra.Ring.init(allocator);
+    defer ring.deinit();
 
-    var context: u64 = undefined;
-    ring.socket(
-        u64,
-        &context,
+    var context: u64 = 0;
+    for (0..100) |i| {
+        log.info("creating socket, {}", .{i});
 
-        posix.AF.INET,
-        os.SOCK.STREAM,
+        try ring.createSocket(
+            u64,
+            &context,
 
-        struct {
-            fn do(ctx: *u64, res: i32) anyerror!void {
-                log.info("(context: {}); socket created: {}", .{ ctx.*, res });
-            }
-        }.do,
-    );
+            posix.AF.INET,
+            posix.SOCK.STREAM,
+
+            struct {
+                fn do(ctx: *u64, result: cassandra.Ring.SocketError!posix.socket_t) anyerror!void {
+                    log.info("(context: {}); socket created: {any}", .{ ctx.*, result });
+
+                    ctx.* += 1;
+                }
+            }.do,
+        );
+    }
+
+    log.info("submit and process", .{});
+    try ring.submitAndProcess();
+
+    log.info("draining", .{});
+    try ring.drain();
 }
