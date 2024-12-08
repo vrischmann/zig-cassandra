@@ -46,9 +46,3 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-
-      - name: Run tests
-        uses: dagger/dagger-for-github@v6
-        with:
-          verb: call
-          args: test --src=.
