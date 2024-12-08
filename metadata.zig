@@ -134,7 +134,7 @@ pub const RowsMetadata = struct {
         if (flags & FlagHasMorePages == FlagHasMorePages) {
             metadata.paging_state = try mr.readBytes(allocator);
         }
-        if (protocol_version.is(5)) {
+        if (protocol_version == .v5) {
             if (flags & FlagMetadataChanged == FlagMetadataChanged) {
                 metadata.new_metadata_id = try mr.readShortBytes(allocator);
             }
@@ -196,7 +196,7 @@ pub const PreparedMetadata = struct {
         const flags = try mr.readInt(u32);
         const columns_count = @as(usize, try mr.readInt(u32));
 
-        if (protocol_version.isAtLeast(4)) {
+        if (protocol_version.isAtLeast(.v4)) {
             const pk_count = @as(usize, try mr.readInt(u32));
 
             // Read the partition key indexes

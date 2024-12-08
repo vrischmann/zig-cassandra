@@ -22,11 +22,14 @@ pub fn build(b: *std.Build) !void {
     // Define options
 
     const with_cassandra = b.option(bool, "with_cassandra", "Run tests which need a Cassandra node running to work.") orelse false;
+    const enable_tracing = b.option(bool, "enable_tracing", "Enable tracing") orelse false;
+    const enable_logging = b.option(bool, "enable_logging", "Enable logging") orelse false;
 
     //
     // Create the public 'cassandra' module
     //
 
+    // TODO(vincent): is this still useful ?
     const module_options = b.addOptions();
 
     const module = b.addModule("cassandra", .{
@@ -58,10 +61,13 @@ pub fn build(b: *std.Build) !void {
     main_tests.linkLibrary(snappy);
 
     const main_tests_options = b.addOptions();
+    main_tests_options.addOption(bool, "enable_tracing", true);
+    main_tests_options.addOption(bool, "enable_logging", true);
+    main_tests_options.addOption(bool, "with_cassandra", with_cassandra);
+
     main_tests.root_module.addImport("build_options", main_tests_options.createModule());
     main_tests.root_module.addImport("lz4", lz4_mod);
     main_tests.root_module.addImport("snappy", snappy_mod);
-    main_tests_options.addOption(bool, "with_cassandra", with_cassandra);
 
     const run_main_tests = b.addRunArtifact(main_tests);
 
@@ -82,10 +88,15 @@ pub fn build(b: *std.Build) !void {
     example.linkLibC();
     example.linkLibrary(lz4);
     example.linkLibrary(snappy);
+
+    const example_options = b.addOptions();
+    example_options.addOption(bool, "enable_tracing", enable_tracing);
+    example_options.addOption(bool, "enable_logging", enable_logging);
+
     example.root_module.addImport("cassandra", module);
     example.root_module.addImport("lz4", lz4_mod);
     example.root_module.addImport("snappy", snappy_mod);
-    example.root_module.addImport("build_options", module_options.createModule());
+    example.root_module.addImport("build_options", example_options.createModule());
 
     const example_install_artifact = b.addInstallArtifact(example, .{});
     b.getInstallStep().dependOn(&example_install_artifact.step);

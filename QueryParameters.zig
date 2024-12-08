@@ -64,7 +64,7 @@ pub fn write(self: Self, protocol_version: ProtocolVersion, mw: *MessageWriter) 
     if (self.timestamp != null) {
         flags |= FlagWithDefaultTimestamp;
     }
-    if (protocol_version.is(5)) {
+    if (protocol_version.isAtLeast(.v5)) {
         if (self.keyspace != null) {
             flags |= FlagWithKeyspace;
         }
@@ -73,7 +73,7 @@ pub fn write(self: Self, protocol_version: ProtocolVersion, mw: *MessageWriter) 
         }
     }
 
-    if (protocol_version.is(5)) {
+    if (protocol_version.isAtLeast(.v5)) {
         _ = try mw.writeInt(u32, flags);
     } else {
         _ = try mw.writeInt(u8, @intCast(flags));
@@ -112,17 +112,14 @@ pub fn write(self: Self, protocol_version: ProtocolVersion, mw: *MessageWriter) 
         _ = try mw.writeInt(u64, ts);
     }
 
-    if (!protocol_version.is(5)) {
-        return;
-    }
-
-    // The following flags are only valid with protocol v5
-
-    if (self.keyspace) |ks| {
-        _ = try mw.writeString(ks);
-    }
-    if (self.now_in_seconds) |s| {
-        _ = try mw.writeInt(u32, s);
+    // The following flags are only valid since protocol v5
+    if (protocol_version.isAtLeast(.v5)) {
+        if (self.keyspace) |ks| {
+            _ = try mw.writeString(ks);
+        }
+        if (self.now_in_seconds) |s| {
+            _ = try mw.writeInt(u32, s);
+        }
     }
 }
 
@@ -145,7 +142,7 @@ pub fn read(allocator: mem.Allocator, protocol_version: ProtocolVersion, mr: *Me
 
     // The size of the flags bitmask depends on the protocol version.
     var flags: u32 = 0;
-    if (protocol_version.is(5)) {
+    if (protocol_version == .v5) {
         flags = try mr.readInt(u32);
     } else {
         flags = try mr.readInt(u8);
@@ -205,17 +202,14 @@ pub fn read(allocator: mem.Allocator, protocol_version: ProtocolVersion, mr: *Me
         params.timestamp = timestamp;
     }
 
-    if (!protocol_version.is(5)) {
-        return params;
-    }
-
-    // The following flags are only valid with protocol v5
-
-    if (flags & FlagWithKeyspace == FlagWithKeyspace) {
-        params.keyspace = try mr.readString(allocator);
-    }
-    if (flags & FlagWithNowInSeconds == FlagWithNowInSeconds) {
-        params.now_in_seconds = try mr.readInt(u32);
+    // The following flags are only valid since protocol v5
+    if (protocol_version.isAtLeast(.v5)) {
+        if (flags & FlagWithKeyspace == FlagWithKeyspace) {
+            params.keyspace = try mr.readString(allocator);
+        }
+        if (flags & FlagWithNowInSeconds == FlagWithNowInSeconds) {
+            params.now_in_seconds = try mr.readInt(u32);
+        }
     }
 
     return params;
