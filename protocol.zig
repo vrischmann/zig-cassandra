@@ -500,12 +500,10 @@ test "frame write: PREPARE message" {
         };
 
         var envelope_writer_buffer = std.ArrayList(u8).init(arena.allocator());
-        var envelope_writer = EnvelopeWriter(std.ArrayList(u8).Writer).init(envelope_writer_buffer.writer());
-
-        try envelope_writer.write(envelope);
+        const envelope_data = try writeEnvelope(envelope, &envelope_writer_buffer);
 
         // Write the frame to a buffer
-        const frame_payload = try envelope_writer_buffer.toOwnedSlice();
+        const frame_payload = envelope_data;
         const frame = try Frame.encode(arena.allocator(), frame_payload, true, .uncompressed);
 
         break :blk frame;
@@ -594,31 +592,23 @@ pub const Envelope = struct {
     }
 };
 
-pub fn EnvelopeWriter(comptime WriterType: type) type {
-    return struct {
-        const Self = @This();
+pub const WriteEnvelopeError = error{} || mem.Allocator.Error;
 
-        writer: WriterType,
+pub fn writeEnvelope(envelope: Envelope, out: *std.ArrayList(u8)) WriteEnvelopeError![]const u8 {
+    out.clearRetainingCapacity();
 
-        pub fn init(out: WriterType) Self {
-            return Self{
-                .writer = out,
-            };
-        }
+    var buf: [EnvelopeHeader.size]u8 = undefined;
 
-        pub fn write(self: *Self, envelope: Envelope) !void {
-            var buf: [EnvelopeHeader.size]u8 = undefined;
+    buf[0] = envelope.header.version.version;
+    buf[1] = envelope.header.flags;
+    mem.writeInt(i16, @ptrCast(buf[2..4]), envelope.header.stream, .big);
+    buf[4] = @intFromEnum(envelope.header.opcode);
+    mem.writeInt(u32, @ptrCast(buf[5..9]), envelope.header.body_len, .big);
 
-            buf[0] = envelope.header.version.version;
-            buf[1] = envelope.header.flags;
-            mem.writeInt(i16, @ptrCast(buf[2..4]), envelope.header.stream, .big);
-            buf[4] = @intFromEnum(envelope.header.opcode);
-            mem.writeInt(u32, @ptrCast(buf[5..9]), envelope.header.body_len, .big);
+    try out.appendSlice(&buf);
+    try out.appendSlice(envelope.body);
 
-            try self.writer.writeAll(&buf);
-            try self.writer.writeAll(envelope.body);
-        }
-    };
+    return out.items;
 }
 
 //
@@ -2360,8 +2350,8 @@ test "options message" {
 pub const StartupMessage = struct {
     const Self = @This();
 
-    cql_version: CQLVersion,
-    compression: ?CompressionAlgorithm,
+    cql_version: CQLVersion = .{ .major = 3, .minor = 0, .patch = 0 },
+    compression: ?CompressionAlgorithm = null,
 
     pub fn write(self: Self, mw: *MessageWriter) !void {
         var buf: [16]u8 = undefined;
@@ -3791,16 +3781,12 @@ fn expectSameEnvelope(comptime T: type, fr: T, header: EnvelopeHeader, exp: []co
         .body = mw.getWritten(),
     };
 
-    var buf2: [1024]u8 = undefined;
-    var fbs2 = io.fixedBufferStream(&buf2);
-    const writer = fbs2.writer();
-    var fw = EnvelopeWriter(@TypeOf(writer)).init(writer);
+    var buffer = std.ArrayList(u8).init(allocator);
+    const envelope_data = try writeEnvelope(envelope, &buffer);
 
-    try fw.write(envelope);
-
-    if (!std.mem.eql(u8, exp, fbs2.getWritten())) {
+    if (!std.mem.eql(u8, exp, envelope_data)) {
         testutils.printHRBytes("\n==> exp   : {s}\n", exp, .{});
-        testutils.printHRBytes("==> source: {s}\n", fbs2.getWritten(), .{});
+        testutils.printHRBytes("==> source: {s}\n", envelope_data, .{});
         std.debug.panic("envelopes are different\n", .{});
     }
 }

@@ -9,4 +9,5 @@ pub const Iterator = @import("iterator.zig").Iterator;
 test {
     _ = @import("protocol.zig");
     _ = @import("iterator.zig");
+    _ = @import("connection.zig");
 }
