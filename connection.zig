@@ -125,7 +125,7 @@ pub const Connection = struct {
     /// Additionally this method takes care of compression if enabled.
     ///
     /// This method is not thread safe.
-    pub fn appendMessage(self: *Self, scratch_allocator: mem.Allocator, message: Message, out: *std.ArrayList(u8)) !void {
+    pub fn writeMessage(self: *Self, scratch_allocator: mem.Allocator, message: Message, out: *std.ArrayList(u8)) !void {
         const MessageType = @TypeOf(message);
 
         //
@@ -209,41 +209,43 @@ pub const Connection = struct {
         try out.appendSlice(final_payload);
     }
 
-    pub fn decodeMessages(self: *Self, scratch_allocator: mem.Allocator, allocator: mem.Allocator, data: []const u8, out: *std.ArrayList(Message)) !void {
+    pub fn readMessages(self: *Self, scratch_allocator: mem.Allocator, allocator: mem.Allocator, data: []const u8, out: *std.ArrayList(Message)) !void {
         var data_fbs = std.io.fixedBufferStream(data);
 
-        if (self.framing.enabled) {
-            const result = try Frame.read(scratch_allocator, data_fbs.reader(), self.framing.format);
-            debug.assert(result.frame.is_self_contained);
-            debug.assert(result.frame.payload.len > 0);
+        while (true) {
+            if (self.framing.enabled) {
+                const result = try Frame.read(scratch_allocator, data_fbs.reader(), self.framing.format);
+                debug.assert(result.frame.is_self_contained);
+                debug.assert(result.frame.payload.len > 0);
 
-            var fbs = io.StreamSource{ .const_buffer = io.fixedBufferStream(result.frame.payload) };
-            const envelope = try Envelope.read(scratch_allocator, fbs.reader());
+                var fbs = io.StreamSource{ .const_buffer = io.fixedBufferStream(result.frame.payload) };
+                const envelope = try Envelope.read(scratch_allocator, fbs.reader());
 
-            const message = try self.decodeMessage(allocator, envelope);
+                const message = try self.decodeMessage(allocator, envelope);
 
-            try out.append(message);
-        } else {
-            var envelope = try Envelope.read(scratch_allocator, data_fbs.reader());
+                try out.append(message);
+            } else {
+                var envelope = try Envelope.read(scratch_allocator, data_fbs.reader());
 
-            if (envelope.header.flags & EnvelopeFlags.Compression == EnvelopeFlags.Compression) {
-                const compression = self.options.compression orelse return error.InvalidCompressedFrame;
+                if (envelope.header.flags & EnvelopeFlags.Compression == EnvelopeFlags.Compression) {
+                    const compression = self.options.compression orelse return error.InvalidCompressedFrame;
 
-                switch (compression) {
-                    .LZ4 => {
-                        const decompressed_data = try lz4.decompress(scratch_allocator, envelope.body, envelope.body.len * 3);
-                        envelope.body = decompressed_data;
-                    },
-                    .Snappy => {
-                        const decompressed_data = try snappy.decompress(scratch_allocator, envelope.body);
-                        envelope.body = decompressed_data;
-                    },
+                    switch (compression) {
+                        .LZ4 => {
+                            const decompressed_data = try lz4.decompress(scratch_allocator, envelope.body, envelope.body.len * 3);
+                            envelope.body = decompressed_data;
+                        },
+                        .Snappy => {
+                            const decompressed_data = try snappy.decompress(scratch_allocator, envelope.body);
+                            envelope.body = decompressed_data;
+                        },
+                    }
                 }
+
+                const message = try self.decodeMessage(allocator, envelope);
+
+                try out.append(message);
             }
-
-            const message = try self.decodeMessage(allocator, envelope);
-
-            try out.append(message);
         }
     }
 
@@ -269,46 +271,61 @@ pub const Connection = struct {
     }
 };
 
-test Connection {
-    var connection = Connection.init(.{});
+test "connection: v5" {
+    var connection = Connection.init(.{
+        .protocol_version = try ProtocolVersion.init(5),
+    });
 
-    // Sequence diagram to establish the connection:
-    //
-    // +---------+                 +---------+
-    // | Client  |                 | Server  |
-    // +---------+                 +---------+
-    //      |                           |
-    //      | OPTIONS                   |
-    //      |-------------------------->|
-    //      |                           |
-    //      |                 SUPPORTED |
-    //      |<--------------------------|
-    //      |                           |
-    //      | STARTUP                   |
-    //      |-------------------------->|
-    //      |                           |
-    //      |      (READY|AUTHENTICATE) |
-    //      |<--------------------------|
-    //      |                           |
-    //      | AUTH_RESPONSE             |
-    //      |-------------------------->|
-    //      |                           |
+    var arena = testutils.arenaAllocator();
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var write_buffer = std.ArrayList(u8).init(allocator);
+    var received_messages = std.ArrayList(Message).init(allocator);
 
     // Handshake
     {
-        var arena = testutils.arenaAllocator();
-        defer arena.deinit();
-        const allocator = arena.allocator();
 
-        var buffer = std.ArrayList(u8).init(allocator);
+        // Write OPTIONS
 
-        try connection.appendMessage(allocator, Message{ .options = {} }, &buffer);
+        try connection.writeMessage(allocator, Message{ .options = {} }, &write_buffer);
 
-        const data =
-            "\x84\x00\x00\x09\x06\x00\x00\x00\x60\x00\x03\x00\x11\x50\x52\x4f\x54\x4f\x43\x4f\x4c\x5f\x56\x45\x52\x53\x49\x4f\x4e\x53\x00\x03\x00\x04\x33\x2f\x76\x33\x00\x04\x34\x2f\x76\x34\x00\x09\x35\x2f\x76\x35\x2d\x62\x65\x74\x61\x00\x0b\x43\x4f\x4d\x50\x52\x45\x53\x53\x49\x4f\x4e\x00\x02\x00\x06\x73\x6e\x61\x70\x70\x79\x00\x03\x6c\x7a\x34\x00\x0b\x43\x51\x4c\x5f\x56\x45\x52\x53\x49\x4f\x4e\x00\x01\x00\x05\x33\x2e\x34\x2e\x34" ++
-            "\x84\x00\x00\x09\x06\x00\x00\x00\x60\x00\x03\x00\x11\x50\x52\x4f\x54\x4f\x43\x4f\x4c\x5f\x56\x45\x52\x53\x49\x4f\x4e\x53\x00\x03\x00\x04\x33\x2f\x76\x33\x00\x04\x34\x2f\x76\x34\x00\x09\x35\x2f\x76\x35\x2d\x62\x65\x74\x61\x00\x0b\x43\x4f\x4d\x50\x52\x45\x53\x53\x49\x4f\x4e\x00\x02\x00\x06\x73\x6e\x61\x70\x70\x79\x00\x03\x6c\x7a\x34\x00\x0b\x43\x51\x4c\x5f\x56\x45\x52\x53\x49\x4f\x4e\x00\x01\x00\x05\x33\x2e\x34\x2e\x34";
+        // Read SUPPORTED (2 messages here)
 
-        var received_messages = std.ArrayList(Message).init(allocator);
-        try connection.decodeMessages(allocator, allocator, data, &received_messages);
+        {
+            const data =
+                "\x84\x00\x00\x09\x06\x00\x00\x00\x60\x00\x03\x00\x11\x50\x52\x4f\x54\x4f\x43\x4f\x4c\x5f\x56\x45\x52\x53\x49\x4f\x4e\x53\x00\x03\x00\x04\x33\x2f\x76\x33\x00\x04\x34\x2f\x76\x34\x00\x09\x35\x2f\x76\x35\x2d\x62\x65\x74\x61\x00\x0b\x43\x4f\x4d\x50\x52\x45\x53\x53\x49\x4f\x4e\x00\x02\x00\x06\x73\x6e\x61\x70\x70\x79\x00\x03\x6c\x7a\x34\x00\x0b\x43\x51\x4c\x5f\x56\x45\x52\x53\x49\x4f\x4e\x00\x01\x00\x05\x33\x2e\x34\x2e\x34" ++
+                "\x84\x00\x00\x09\x06\x00\x00\x00\x60\x00\x03\x00\x11\x50\x52\x4f\x54\x4f\x43\x4f\x4c\x5f\x56\x45\x52\x53\x49\x4f\x4e\x53\x00\x03\x00\x04\x33\x2f\x76\x33\x00\x04\x34\x2f\x76\x34\x00\x09\x35\x2f\x76\x35\x2d\x62\x65\x74\x61\x00\x0b\x43\x4f\x4d\x50\x52\x45\x53\x53\x49\x4f\x4e\x00\x02\x00\x06\x73\x6e\x61\x70\x70\x79\x00\x03\x6c\x7a\x34\x00\x0b\x43\x51\x4c\x5f\x56\x45\x52\x53\x49\x4f\x4e\x00\x01\x00\x05\x33\x2e\x34\x2e\x34";
+
+            connection.readMessages(allocator, allocator, data, &received_messages) catch |err| switch (err) {
+                error.UnexpectedEOF => {},
+                else => return err,
+            };
+            try testing.expectEqual(2, received_messages.items.len);
+        }
+
+        // Write STARTUP
+
+        try connection.writeMessage(allocator, Message{ .startup = .{} }, &write_buffer);
+
+        // Read READY
+
+        {
+            const data = "\x84\x00\x00\x02\x02\x00\x00\x00\x00";
+
+            received_messages.clearRetainingCapacity();
+            connection.readMessages(allocator, allocator, data, &received_messages) catch |err| switch (err) {
+                error.UnexpectedEOF => {},
+                else => return err,
+            };
+            try testing.expectEqual(1, received_messages.items.len);
+        }
+
+        // Switch to framing
+        if (connection.options.protocol_version.isAtLeast(5)) {
+            connection.framing.enabled = true;
+        }
     }
+
+    // Query
 }

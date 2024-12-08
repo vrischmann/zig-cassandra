@@ -89,7 +89,9 @@ pub const Frame = struct {
         return buf;
     }
 
-    fn readPayloadAndTrailer(reader: anytype, allocator: mem.Allocator, payload_length: usize) !PayloadAndTrailer {
+    const ReadPayloadAndTrailerError = error{UnexpectedEOF} || mem.Allocator.Error;
+
+    fn readPayloadAndTrailer(reader: anytype, allocator: mem.Allocator, payload_length: usize) ReadPayloadAndTrailerError!PayloadAndTrailer {
         const size = payload_length + trailer_size;
 
         const res = try allocator.alloc(u8, size);
