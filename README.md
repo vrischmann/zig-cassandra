@@ -1,27 +1,6 @@
-# Cassandra client in Zig
+# zig-cql
 
-This was the start of a CQL client for Zig that is now unmaintained.
-
-It hasn't been updated for years and won't compile with any recent Zig release.
-
-# Available features
-
-* Executing a single query without preparation
-* Preparing a query and executing it later, with type-checked arguments.
-* Comprehensive errors and diagnostics in case of failure.
-
-TODO
-====
-
-* Use proper error sets for stuff
-* Cleanup code that won't be used, some frames are never written by a client for example.
-* Add an abstraction for a Stream
-* Handle named values in a statement
-* Batching
-* Cluster client / client pool capable of maintaining a connection to each node in the cluster + autodiscovery with events
-* Implement token-aware routing
-* Need to add custom types for thins we can't infer with Zig's meta programming (things like Counter, Time, Timestamp, Timeuuid).
-* Expose as a C library ?
+This is a CQL (the native protocol used by Cassandra) implementation in Zig.
 
 # License
 
