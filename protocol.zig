@@ -9,7 +9,6 @@ const assert = std.debug.assert;
 
 const lz4 = @import("lz4");
 
-const casstest = @import("casstest.zig");
 const event = @import("event.zig");
 const metadata = @import("metadata.zig");
 const testutils = @import("testutils.zig");
