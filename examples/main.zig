@@ -328,7 +328,7 @@ fn findArg(comptime T: type, args: []const []const u8, key: []const u8, default:
     return default;
 }
 
-pub const std_options = .{
+pub const std_options: std.Options = .{
     .log_level = .debug,
     .log_scope_levels = &[_]std.log.ScopeLevel{
         .{ .scope = .connection, .level = .err },
