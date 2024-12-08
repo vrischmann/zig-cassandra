@@ -389,8 +389,7 @@ pub const Iterator = struct {
                             },
                         };
 
-                        var mr: MessageReader = undefined;
-                        mr.reset(column_data);
+                        var mr = MessageReader.init(column_data);
                         const n = try mr.readInt(u32);
 
                         slice = try allocator.alloc(ChildType, @as(usize, n));

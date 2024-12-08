@@ -210,7 +210,7 @@ pub const Connection = struct {
     }
 
     pub fn decodeMessages(self: *Self, scratch_allocator: mem.Allocator, allocator: mem.Allocator, data: []const u8, out: *std.ArrayList(Message)) !void {
-        const data_fbs = std.io.fixedBufferStream(data);
+        var data_fbs = std.io.fixedBufferStream(data);
 
         if (self.framing.enabled) {
             const result = try Frame.read(scratch_allocator, data_fbs.reader(), self.framing.format);
@@ -224,7 +224,7 @@ pub const Connection = struct {
 
             try out.append(message);
         } else {
-            var envelope = try Envelope.read(scratch_allocator, self.buffered_reader.reader());
+            var envelope = try Envelope.read(scratch_allocator, data_fbs.reader());
 
             if (envelope.header.flags & EnvelopeFlags.Compression == EnvelopeFlags.Compression) {
                 const compression = self.options.compression orelse return error.InvalidCompressedFrame;
@@ -248,20 +248,20 @@ pub const Connection = struct {
     }
 
     fn decodeMessage(self: *Self, allocator: mem.Allocator, envelope: Envelope) !Message {
-        self.message_reader.reset(envelope.body);
+        var mr = MessageReader.init(envelope.body);
 
         const message = switch (envelope.header.opcode) {
-            .@"error" => Message{ .@"error" = try ErrorMessage.read(allocator, &self.message_reader) },
-            .startup => Message{ .startup = try StartupMessage.read(allocator, &self.message_reader) },
+            .@"error" => Message{ .@"error" = try ErrorMessage.read(allocator, &mr) },
+            .startup => Message{ .startup = try StartupMessage.read(allocator, &mr) },
             .ready => Message{ .ready = ReadyMessage{} },
             .options => Message{ .options = {} },
-            .supported => Message{ .supported = try SupportedMessage.read(allocator, &self.message_reader) },
-            .result => Message{ .result = try ResultMessage.read(allocator, self.options.protocol_version, &self.message_reader) },
+            .supported => Message{ .supported = try SupportedMessage.read(allocator, &mr) },
+            .result => Message{ .result = try ResultMessage.read(allocator, self.options.protocol_version, &mr) },
             .register => Message{ .register = {} },
-            .event => Message{ .event = try EventMessage.read(allocator, &self.message_reader) },
-            .authenticate => Message{ .authenticate = try AuthenticateMessage.read(allocator, &self.message_reader) },
-            .auth_challenge => Message{ .auth_challenge = try AuthChallengeMessage.read(allocator, &self.message_reader) },
-            .auth_success => Message{ .auth_success = try AuthSuccessMessage.read(allocator, &self.message_reader) },
+            .event => Message{ .event = try EventMessage.read(allocator, &mr) },
+            .authenticate => Message{ .authenticate = try AuthenticateMessage.read(allocator, &mr) },
+            .auth_challenge => Message{ .auth_challenge = try AuthChallengeMessage.read(allocator, &mr) },
+            .auth_success => Message{ .auth_success = try AuthSuccessMessage.read(allocator, &mr) },
             else => std.debug.panic("invalid read message {}\n", .{envelope.header.opcode}),
         };
 
@@ -272,6 +272,28 @@ pub const Connection = struct {
 test Connection {
     var connection = Connection.init(.{});
 
+    // Sequence diagram to establish the connection:
+    //
+    // +---------+                 +---------+
+    // | Client  |                 | Server  |
+    // +---------+                 +---------+
+    //      |                           |
+    //      | OPTIONS                   |
+    //      |-------------------------->|
+    //      |                           |
+    //      |                 SUPPORTED |
+    //      |<--------------------------|
+    //      |                           |
+    //      | STARTUP                   |
+    //      |-------------------------->|
+    //      |                           |
+    //      |      (READY|AUTHENTICATE) |
+    //      |<--------------------------|
+    //      |                           |
+    //      | AUTH_RESPONSE             |
+    //      |-------------------------->|
+    //      |                           |
+
     // Handshake
     {
         var arena = testutils.arenaAllocator();
@@ -280,6 +302,13 @@ test Connection {
 
         var buffer = std.ArrayList(u8).init(allocator);
 
-        try connection.appendMessage(allocator, Message{ .startup = .{} }, &buffer);
+        try connection.appendMessage(allocator, Message{ .options = {} }, &buffer);
+
+        const data =
+            "\x84\x00\x00\x09\x06\x00\x00\x00\x60\x00\x03\x00\x11\x50\x52\x4f\x54\x4f\x43\x4f\x4c\x5f\x56\x45\x52\x53\x49\x4f\x4e\x53\x00\x03\x00\x04\x33\x2f\x76\x33\x00\x04\x34\x2f\x76\x34\x00\x09\x35\x2f\x76\x35\x2d\x62\x65\x74\x61\x00\x0b\x43\x4f\x4d\x50\x52\x45\x53\x53\x49\x4f\x4e\x00\x02\x00\x06\x73\x6e\x61\x70\x70\x79\x00\x03\x6c\x7a\x34\x00\x0b\x43\x51\x4c\x5f\x56\x45\x52\x53\x49\x4f\x4e\x00\x01\x00\x05\x33\x2e\x34\x2e\x34" ++
+            "\x84\x00\x00\x09\x06\x00\x00\x00\x60\x00\x03\x00\x11\x50\x52\x4f\x54\x4f\x43\x4f\x4c\x5f\x56\x45\x52\x53\x49\x4f\x4e\x53\x00\x03\x00\x04\x33\x2f\x76\x33\x00\x04\x34\x2f\x76\x34\x00\x09\x35\x2f\x76\x35\x2d\x62\x65\x74\x61\x00\x0b\x43\x4f\x4d\x50\x52\x45\x53\x53\x49\x4f\x4e\x00\x02\x00\x06\x73\x6e\x61\x70\x70\x79\x00\x03\x6c\x7a\x34\x00\x0b\x43\x51\x4c\x5f\x56\x45\x52\x53\x49\x4f\x4e\x00\x01\x00\x05\x33\x2e\x34\x2e\x34";
+
+        var received_messages = std.ArrayList(Message).init(allocator);
+        try connection.decodeMessages(allocator, allocator, data, &received_messages);
     }
 }

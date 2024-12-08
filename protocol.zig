@@ -304,8 +304,7 @@ test "frame reader: QUERY message" {
         const envelope = try testReadEnvelope(arena.allocator(), frame.payload);
         try checkEnvelopeHeader(5, Opcode.query, frame.payload.len, envelope.header);
 
-        var mr: MessageReader = undefined;
-        mr.reset(envelope.body);
+        var mr = MessageReader.init(envelope.body);
 
         const query_message = try QueryMessage.read(
             arena.allocator(),
@@ -351,8 +350,7 @@ test "frame reader: QUERY message incomplete" {
     const envelope = try testReadEnvelope(arena.allocator(), frame.payload);
     try checkEnvelopeHeader(5, Opcode.query, frame.payload.len, envelope.header);
 
-    var mr: MessageReader = undefined;
-    mr.reset(envelope.body);
+    var mr = MessageReader.init(envelope.body);
 
     const query_message = try QueryMessage.read(
         arena.allocator(),
@@ -368,8 +366,6 @@ test "frame reader: QUERY message incomplete" {
 test "frame reader: RESULT message" {
     var arena = testutils.arenaAllocator();
     defer arena.deinit();
-
-    var mr: MessageReader = undefined;
 
     // The rows in the result message have the following columns.
     // The order is important !
@@ -411,7 +407,8 @@ test "frame reader: RESULT message" {
         const envelope = try testReadEnvelope(arena.allocator(), frame.payload);
         try checkEnvelopeHeader(5, Opcode.result, frame.payload.len, envelope.header);
 
-        mr.reset(envelope.body);
+        var mr = MessageReader.init(envelope.body);
+
         const result_message = try ResultMessage.read(
             arena.allocator(),
             envelope.header.version,
@@ -451,7 +448,8 @@ test "frame reader: RESULT message" {
         const envelope = try testReadEnvelope(arena.allocator(), frame.payload);
         try checkEnvelopeHeader(5, Opcode.result, frame.payload.len, envelope.header);
 
-        mr.reset(envelope.body);
+        var mr = MessageReader.init(envelope.body);
+
         const result_message = try ResultMessage.read(
             arena.allocator(),
             envelope.header.version,
@@ -517,8 +515,7 @@ test "frame write: PREPARE message" {
         const envelope = try testReadEnvelope(arena.allocator(), result.frame.payload);
         try checkEnvelopeHeader(5, Opcode.prepare, result.frame.payload.len, envelope.header);
 
-        var mr: MessageReader = undefined;
-        mr.reset(envelope.body);
+        var mr = MessageReader.init(envelope.body);
 
         const prepare_message = try PrepareMessage.read(
             arena.allocator(),
@@ -1191,21 +1188,21 @@ pub const MessageReader = struct {
     const Self = @This();
 
     buffer: io.FixedBufferStream([]const u8),
-    reader: io.FixedBufferStream([]const u8).Reader,
 
-    pub fn reset(self: *Self, buf: []const u8) void {
-        self.buffer = io.fixedBufferStream(buf);
-        self.reader = self.buffer.reader();
+    pub fn init(buffer: []const u8) MessageReader {
+        return MessageReader{
+            .buffer = io.fixedBufferStream(buffer),
+        };
     }
 
     /// Read either a short, a int or a long from the buffer.
     pub fn readInt(self: *Self, comptime T: type) !T {
-        return self.reader.readInt(T, .big);
+        return self.buffer.reader().readInt(T, .big);
     }
 
     /// Read a single byte from the buffer.
     pub fn readByte(self: *Self) !u8 {
-        return self.reader.readByte();
+        return self.buffer.reader().readByte();
     }
 
     /// Read a length-prefixed byte slice from the stream. The length is 2 bytes.
@@ -1232,7 +1229,7 @@ pub const MessageReader = struct {
 
         const buf = try allocator.alloc(u8, @as(usize, @intCast(len)));
 
-        const n_read = try self.reader.readAll(buf);
+        const n_read = try self.buffer.reader().readAll(buf);
         if (n_read != len) {
             return error.UnexpectedEOF;
         }
@@ -1263,7 +1260,7 @@ pub const MessageReader = struct {
     /// Read a UUID from the stream.
     pub fn readUUID(self: *Self) ![16]u8 {
         var buf: [16]u8 = undefined;
-        _ = try self.reader.readAll(&buf);
+        _ = try self.buffer.reader().readAll(&buf);
         return buf;
     }
 
@@ -1290,7 +1287,7 @@ pub const MessageReader = struct {
 
         if (len >= 0) {
             const result = try allocator.alloc(u8, @intCast(len));
-            _ = try self.reader.readAll(result);
+            _ = try self.buffer.reader().readAll(result);
 
             return Value{ .Set = result };
         } else if (len == -1) {
@@ -1316,7 +1313,7 @@ pub const MessageReader = struct {
         var res: IntType = 0;
 
         while (true) {
-            const b = try self.reader.readByte();
+            const b = try self.buffer.reader().readByte();
             const tmp = @as(IntType, @intCast(b)) & ~@as(IntType, 0x80);
 
             // TODO(vincent): runtime check if the number will actually fit in the type T ?
@@ -1369,7 +1366,7 @@ pub const MessageReader = struct {
         return switch (n) {
             4 => {
                 var buf: [4]u8 = undefined;
-                _ = try self.reader.readAll(&buf);
+                _ = try self.buffer.reader().readAll(&buf);
 
                 const port = if (with_port) try self.readInt(i32) else 0;
 
@@ -1377,7 +1374,7 @@ pub const MessageReader = struct {
             },
             16 => {
                 var buf: [16]u8 = undefined;
-                _ = try self.reader.readAll(&buf);
+                _ = try self.buffer.reader().readAll(&buf);
 
                 const port = if (with_port) try self.readInt(i32) else 0;
 
@@ -1426,17 +1423,16 @@ pub const MessageReader = struct {
 };
 
 test "message reader: read int" {
-    var mr: MessageReader = undefined;
-    mr.reset("\x00\x20\x11\x00");
+    var mr = MessageReader.init("\x00\x20\x11\x00");
     try testing.expectEqual(@as(i32, 2101504), try mr.readInt(i32));
 
-    mr.reset("\x00\x00\x40\x00\x00\x20\x11\x00");
+    mr = MessageReader.init("\x00\x00\x40\x00\x00\x20\x11\x00");
     try testing.expectEqual(@as(i64, 70368746279168), try mr.readInt(i64));
 
-    mr.reset("\x11\x00");
+    mr = MessageReader.init("\x11\x00");
     try testing.expectEqual(@as(u16, 4352), try mr.readInt(u16));
 
-    mr.reset("\xff");
+    mr = MessageReader.init("\xff");
     try testing.expectEqual(@as(u8, 0xFF), try mr.readByte());
 }
 
@@ -1444,38 +1440,37 @@ test "message reader: read strings and bytes" {
     var arena = testutils.arenaAllocator();
     defer arena.deinit();
 
-    var mr: MessageReader = undefined;
     {
         // short string
-        mr.reset("\x00\x06foobar");
+        var mr = MessageReader.init("\x00\x06foobar");
         try testing.expectEqualStrings("foobar", try mr.readString(arena.allocator()));
 
         // long string
-        mr.reset("\x00\x00\x00\x06foobar");
+        mr = MessageReader.init("\x00\x00\x00\x06foobar");
         try testing.expectEqualStrings("foobar", try mr.readLongString(arena.allocator()));
     }
 
     {
         // int32 + bytes
-        mr.reset("\x00\x00\x00\x0A123456789A");
+        var mr = MessageReader.init("\x00\x00\x00\x0A123456789A");
         try testing.expectEqualStrings("123456789A", (try mr.readBytes(arena.allocator())).?);
 
-        mr.reset("\x00\x00\x00\x00");
+        mr = MessageReader.init("\x00\x00\x00\x00");
         try testing.expectEqualStrings("", (try mr.readBytes(arena.allocator())).?);
 
-        mr.reset("\xff\xff\xff\xff");
+        mr = MessageReader.init("\xff\xff\xff\xff");
         try testing.expect((try mr.readBytes(arena.allocator())) == null);
     }
 
     {
         // int16 + bytes
-        mr.reset("\x00\x0A123456789A");
+        var mr = MessageReader.init("\x00\x0A123456789A");
         try testing.expectEqualStrings("123456789A", (try mr.readShortBytes(arena.allocator())).?);
 
-        mr.reset("\x00\x00");
+        mr = MessageReader.init("\x00\x00");
         try testing.expectEqualStrings("", (try mr.readShortBytes(arena.allocator())).?);
 
-        mr.reset("\xff\xff");
+        mr = MessageReader.init("\xff\xff");
         try testing.expect((try mr.readShortBytes(arena.allocator())) == null);
     }
 }
@@ -1487,8 +1482,7 @@ test "message reader: read uuid" {
     var uuid: [16]u8 = undefined;
     try std.posix.getrandom(&uuid);
 
-    var mr: MessageReader = undefined;
-    mr.reset(&uuid);
+    var mr = MessageReader.init(&uuid);
 
     try testing.expectEqualSlices(u8, &uuid, &(try mr.readUUID()));
 }
@@ -1497,8 +1491,7 @@ test "message reader: read string list" {
     var arena = testutils.arenaAllocator();
     defer arena.deinit();
 
-    var mr: MessageReader = undefined;
-    mr.reset("\x00\x02\x00\x03foo\x00\x03bar");
+    var mr = MessageReader.init("\x00\x02\x00\x03foo\x00\x03bar");
 
     const result = try mr.readStringList(arena.allocator());
     try testing.expectEqual(@as(usize, 2), result.len);
@@ -1515,8 +1508,7 @@ test "message reader: read value" {
     defer arena.deinit();
 
     // Normal value
-    var mr: MessageReader = undefined;
-    mr.reset("\x00\x00\x00\x02\x61\x62");
+    var mr = MessageReader.init("\x00\x00\x00\x02\x61\x62");
 
     const value = try mr.readValue(arena.allocator());
     try testing.expect(value == .Set);
@@ -1524,13 +1516,13 @@ test "message reader: read value" {
 
     // Null value
 
-    mr.reset("\xff\xff\xff\xff");
+    mr = MessageReader.init("\xff\xff\xff\xff");
     const value2 = try mr.readValue(arena.allocator());
     try testing.expect(value2 == .Null);
 
     // "Not set" value
 
-    mr.reset("\xff\xff\xff\xfe");
+    mr = MessageReader.init("\xff\xff\xff\xfe");
     const value3 = try mr.readValue(arena.allocator());
     try testing.expect(value3 == .NotSet);
 }
@@ -1544,8 +1536,7 @@ test "read unsigned vint" {
     try mw.writeUnsignedVint(@as(u32, 140022));
     try mw.writeUnsignedVint(@as(u16, 24450));
 
-    var mr: MessageReader = undefined;
-    mr.reset(mw.getWritten());
+    var mr = MessageReader.init(mw.getWritten());
 
     const n1 = try mr.readUnsignedVint(u64);
     try testing.expect(n1 == @as(u64, 282240));
@@ -1565,8 +1556,7 @@ test "read vint" {
     try mw.writeVint(@as(i32, -38000));
     try mw.writeVint(@as(i32, 80000000));
 
-    var mr: MessageReader = undefined;
-    mr.reset(mw.getWritten());
+    var mr = MessageReader.init(mw.getWritten());
 
     const n1 = try mr.readVint(i64);
     try testing.expect(n1 == @as(i64, 282240));
@@ -1582,10 +1572,8 @@ test "message reader: read inet and inetaddr" {
     var arena = testutils.arenaAllocator();
     defer arena.deinit();
 
-    var mr: MessageReader = undefined;
-
     // IPv4
-    mr.reset("\x04\x12\x34\x56\x78\x00\x00\x00\x22");
+    var mr = MessageReader.init("\x04\x12\x34\x56\x78\x00\x00\x00\x22");
 
     var result = try mr.readInet();
     try testing.expectEqual(@as(u16, std.posix.AF.INET), result.any.family);
@@ -1593,7 +1581,7 @@ test "message reader: read inet and inetaddr" {
     try testing.expectEqual(@as(u16, 34), result.getPort());
 
     // IPv6
-    mr.reset("\x10\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\x00\x00\x00\x22");
+    mr = MessageReader.init("\x10\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\x00\x00\x00\x22");
 
     result = try mr.readInet();
     try testing.expectEqual(@as(u16, std.posix.AF.INET6), result.any.family);
@@ -1601,7 +1589,7 @@ test "message reader: read inet and inetaddr" {
     try testing.expectEqual(@as(u16, 34), result.getPort());
 
     // IPv4 without port
-    mr.reset("\x04\x12\x34\x56\x78");
+    mr = MessageReader.init("\x04\x12\x34\x56\x78");
 
     result = try mr.readInetaddr();
     try testing.expectEqual(@as(u16, std.posix.AF.INET), result.any.family);
@@ -1609,7 +1597,7 @@ test "message reader: read inet and inetaddr" {
     try testing.expectEqual(@as(u16, 0), result.getPort());
 
     // IPv6 without port
-    mr.reset("\x10\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff");
+    mr = MessageReader.init("\x10\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff");
 
     result = try mr.readInetaddr();
     try testing.expectEqual(@as(u16, std.posix.AF.INET6), result.any.family);
@@ -1641,8 +1629,7 @@ test "message reader: read consistency" {
     };
 
     for (testCases) |tc| {
-        var mr: MessageReader = undefined;
-        mr.reset(tc.b);
+        var mr = MessageReader.init(tc.b);
 
         const result = try mr.readConsistency();
         try testing.expectEqual(tc.exp, result);
@@ -1655,8 +1642,7 @@ test "message reader: read stringmap" {
 
     // 2 elements string map
 
-    var mr: MessageReader = undefined;
-    mr.reset("\x00\x02\x00\x03foo\x00\x03baz\x00\x03bar\x00\x03baz");
+    var mr = MessageReader.init("\x00\x02\x00\x03foo\x00\x03baz\x00\x03bar\x00\x03baz");
 
     var result = try mr.readStringMap(arena.allocator());
     try testing.expectEqual(@as(usize, 2), result.count());
@@ -1674,8 +1660,7 @@ test "message reader: read string multimap" {
 
     // 1 key, 2 values multimap
 
-    var mr: MessageReader = undefined;
-    mr.reset("\x00\x01\x00\x03foo\x00\x02\x00\x03bar\x00\x03baz");
+    var mr = MessageReader.init("\x00\x01\x00\x03foo\x00\x02\x00\x03bar\x00\x03baz");
 
     var result = try mr.readStringMultimap(arena.allocator());
     try testing.expectEqual(@as(usize, 1), result.count());
@@ -2284,8 +2269,7 @@ test "error message: invalid query, no keyspace specified" {
 
     try checkEnvelopeHeader(4, Opcode.@"error", data.len, envelope.header);
 
-    var mr: MessageReader = undefined;
-    mr.reset(envelope.body);
+    var mr = MessageReader.init(envelope.body);
     const message = try ErrorMessage.read(arena.allocator(), &mr);
 
     try testing.expectEqual(ErrorCode.InvalidQuery, message.error_code);
@@ -2301,8 +2285,7 @@ test "error message: already exists" {
 
     try checkEnvelopeHeader(4, Opcode.@"error", data.len, envelope.header);
 
-    var mr: MessageReader = undefined;
-    mr.reset(envelope.body);
+    var mr = MessageReader.init(envelope.body);
     const message = try ErrorMessage.read(arena.allocator(), &mr);
 
     try testing.expectEqual(ErrorCode.AlreadyExists, message.error_code);
@@ -2321,8 +2304,7 @@ test "error message: syntax error" {
 
     try checkEnvelopeHeader(4, Opcode.@"error", data.len, envelope.header);
 
-    var mr: MessageReader = undefined;
-    mr.reset(envelope.body);
+    var mr = MessageReader.init(envelope.body);
     const message = try ErrorMessage.read(arena.allocator(), &mr);
 
     try testing.expectEqual(ErrorCode.SyntaxError, message.error_code);
@@ -2420,8 +2402,7 @@ test "startup message" {
 
     try checkEnvelopeHeader(4, Opcode.startup, exp.len, envelope.header);
 
-    var mr: MessageReader = undefined;
-    mr.reset(envelope.body);
+    var mr = MessageReader.init(envelope.body);
     const message = try StartupMessage.read(arena.allocator(), &mr);
 
     try testing.expectEqual(CQLVersion{ .major = 3, .minor = 0, .patch = 0 }, message.cql_version);
@@ -2480,8 +2461,7 @@ test "execute message" {
 
     try checkEnvelopeHeader(4, Opcode.execute, exp.len, envelope.header);
 
-    var mr: MessageReader = undefined;
-    mr.reset(envelope.body);
+    var mr = MessageReader.init(envelope.body);
     const message = try ExecuteMessage.read(arena.allocator(), envelope.header.version, &mr);
 
     const exp_query_id = "\x97\x97\x95\x6d\xfe\xb2\x4c\x99\x86\x8e\xd3\x84\xff\x6f\xd9\x4c";
@@ -2571,8 +2551,7 @@ test "authenticate message" {
 
     try checkEnvelopeHeader(4, Opcode.authenticate, exp.len, envelope.header);
 
-    var mr: MessageReader = undefined;
-    mr.reset(envelope.body);
+    var mr = MessageReader.init(envelope.body);
     const message = try AuthenticateMessage.read(arena.allocator(), &mr);
 
     try testing.expectEqualStrings("org.apache.cassandra.auth.PasswordAuthenticator", message.authenticator);
@@ -2593,8 +2572,7 @@ test "auth response message" {
 
     try checkEnvelopeHeader(4, Opcode.auth_response, exp.len, envelope.header);
 
-    var mr: MessageReader = undefined;
-    mr.reset(envelope.body);
+    var mr = MessageReader.init(envelope.body);
     const message = try AuthResponseMessage.read(arena.allocator(), &mr);
 
     const exp_token = "\x00cassandra\x00cassandra";
@@ -2616,8 +2594,7 @@ test "auth success message" {
 
     try checkEnvelopeHeader(4, Opcode.auth_success, exp.len, envelope.header);
 
-    var mr: MessageReader = undefined;
-    mr.reset(envelope.body);
+    var mr = MessageReader.init(envelope.body);
     const message = try AuthSuccessMessage.read(arena.allocator(), &mr);
 
     try testing.expect(message.token == null);
@@ -2831,8 +2808,7 @@ test "batch message: query type string" {
 
     try checkEnvelopeHeader(4, Opcode.batch, exp.len, envelope.header);
 
-    var mr: MessageReader = undefined;
-    mr.reset(envelope.body);
+    var mr = MessageReader.init(envelope.body);
     const message = try BatchMessage.read(arena.allocator(), envelope.header.version, &mr);
 
     try testing.expectEqual(BatchType.Logged, message.batch_type);
@@ -2868,8 +2844,7 @@ test "batch message: query type prepared" {
 
     try checkEnvelopeHeader(4, Opcode.batch, exp.len, envelope.header);
 
-    var mr: MessageReader = undefined;
-    mr.reset(envelope.body);
+    var mr = MessageReader.init(envelope.body);
     const message = try BatchMessage.read(arena.allocator(), envelope.header.version, &mr);
 
     try testing.expectEqual(BatchType.Logged, message.batch_type);
@@ -2968,12 +2943,11 @@ test "event message: topology change" {
     // read
 
     const exp = "\x84\x00\xff\xff\x0c\x00\x00\x00\x24\x00\x0f\x54\x4f\x50\x4f\x4c\x4f\x47\x59\x5f\x43\x48\x41\x4e\x47\x45\x00\x08\x4e\x45\x57\x5f\x4e\x4f\x44\x45\x04\x7f\x00\x00\x04\x00\x00\x23\x52";
-    const envlope = try testReadEnvelope(arena.allocator(), exp);
+    const envelope = try testReadEnvelope(arena.allocator(), exp);
 
-    try checkEnvelopeHeader(4, Opcode.event, exp.len, envlope.header);
+    try checkEnvelopeHeader(4, Opcode.event, exp.len, envelope.header);
 
-    var mr: MessageReader = undefined;
-    mr.reset(envlope.body);
+    var mr = MessageReader.init(envelope.body);
     const message = try EventMessage.read(arena.allocator(), &mr);
 
     try testing.expect(message.event == .TOPOLOGY_CHANGE);
@@ -2994,8 +2968,7 @@ test "event message: status change" {
 
     try checkEnvelopeHeader(4, Opcode.event, data.len, envelope.header);
 
-    var mr: MessageReader = undefined;
-    mr.reset(envelope.body);
+    var mr = MessageReader.init(envelope.body);
     const message = try EventMessage.read(arena.allocator(), &mr);
 
     try testing.expect(message.event == .STATUS_CHANGE);
@@ -3016,8 +2989,7 @@ test "event message: schema change/keyspace" {
 
     try checkEnvelopeHeader(4, Opcode.event, data.len, envelope.header);
 
-    var mr: MessageReader = undefined;
-    mr.reset(envelope.body);
+    var mr = MessageReader.init(envelope.body);
     const message = try EventMessage.read(arena.allocator(), &mr);
 
     try testing.expect(message.event == .SCHEMA_CHANGE);
@@ -3041,8 +3013,7 @@ test "event message: schema change/table" {
 
     try checkEnvelopeHeader(4, Opcode.event, data.len, envelope.header);
 
-    var mr: MessageReader = undefined;
-    mr.reset(envelope.body);
+    var mr = MessageReader.init(envelope.body);
     const message = try EventMessage.read(arena.allocator(), &mr);
 
     try testing.expect(message.event == .SCHEMA_CHANGE);
@@ -3066,8 +3037,7 @@ test "event message: schema change/function" {
 
     try checkEnvelopeHeader(4, Opcode.event, data.len, envelope.header);
 
-    var mr: MessageReader = undefined;
-    mr.reset(envelope.body);
+    var mr = MessageReader.init(envelope.body);
     const message = try EventMessage.read(arena.allocator(), &mr);
 
     try testing.expect(message.event == .SCHEMA_CHANGE);
@@ -3141,8 +3111,7 @@ test "prepare message" {
 
     try checkEnvelopeHeader(4, Opcode.prepare, exp.len, envelope.header);
 
-    var mr: MessageReader = undefined;
-    mr.reset(envelope.body);
+    var mr = MessageReader.init(envelope.body);
     const message = try PrepareMessage.read(arena.allocator(), envelope.header.version, &mr);
 
     try testing.expectEqualStrings("SELECT age, name from foobar.user where id = ?", message.query);
@@ -3186,8 +3155,7 @@ test "query message: no values, no paging state" {
 
     try checkEnvelopeHeader(4, Opcode.query, exp.len, envelope.header);
 
-    var mr: MessageReader = undefined;
-    mr.reset(envelope.body);
+    var mr = MessageReader.init(envelope.body);
     const message = try QueryMessage.read(arena.allocator(), envelope.header.version, &mr);
 
     try testing.expectEqualStrings("SELECT * FROM foobar.user ;", message.query);
@@ -3248,8 +3216,7 @@ test "register message" {
 
     try checkEnvelopeHeader(4, Opcode.register, exp.len, envelope.header);
 
-    var mr: MessageReader = undefined;
-    mr.reset(envelope.body);
+    var mr = MessageReader.init(envelope.body);
     const message = try RegisterMessage.read(arena.allocator(), &mr);
 
     try testing.expectEqual(@as(usize, 3), message.event_types.len);
@@ -3401,8 +3368,7 @@ test "result message: void" {
 
     try checkEnvelopeHeader(4, Opcode.result, data.len, envelope.header);
 
-    var mr: MessageReader = undefined;
-    mr.reset(envelope.body);
+    var mr = MessageReader.init(envelope.body);
     const message = try ResultMessage.read(arena.allocator(), envelope.header.version, &mr);
 
     try testing.expect(message.result == .Void);
@@ -3417,8 +3383,7 @@ test "result message: rows" {
 
     try checkEnvelopeHeader(4, Opcode.result, data.len, envelope.header);
 
-    var mr: MessageReader = undefined;
-    mr.reset(envelope.body);
+    var mr = MessageReader.init(envelope.body);
     const message = try ResultMessage.read(arena.allocator(), envelope.header.version, &mr);
 
     try testing.expect(message.result == .Rows);
@@ -3472,8 +3437,7 @@ test "result message: rows, don't skip metadata" {
 
     try checkEnvelopeHeader(4, Opcode.result, data.len, envelope.header);
 
-    var mr: MessageReader = undefined;
-    mr.reset(envelope.body);
+    var mr = MessageReader.init(envelope.body);
     const message = try ResultMessage.read(arena.allocator(), envelope.header.version, &mr);
 
     try testing.expect(message.result == .Rows);
@@ -3517,8 +3481,7 @@ test "result message: rows, list of uuid" {
 
     try checkEnvelopeHeader(4, Opcode.result, data.len, envelope.header);
 
-    var mr: MessageReader = undefined;
-    mr.reset(envelope.body);
+    var mr = MessageReader.init(envelope.body);
     const message = try ResultMessage.read(arena.allocator(), envelope.header.version, &mr);
 
     try testing.expect(message.result == .Rows);
@@ -3558,8 +3521,7 @@ test "result message: set keyspace" {
 
     try checkEnvelopeHeader(4, Opcode.result, data.len, envelope.header);
 
-    var mr: MessageReader = undefined;
-    mr.reset(envelope.body);
+    var mr = MessageReader.init(envelope.body);
     const message = try ResultMessage.read(arena.allocator(), envelope.header.version, &mr);
 
     try testing.expect(message.result == .SetKeyspace);
@@ -3575,8 +3537,7 @@ test "result message: prepared insert" {
 
     try checkEnvelopeHeader(4, Opcode.result, data.len, envelope.header);
 
-    var mr: MessageReader = undefined;
-    mr.reset(envelope.body);
+    var mr = MessageReader.init(envelope.body);
     const message = try ResultMessage.read(arena.allocator(), envelope.header.version, &mr);
 
     try testing.expect(message.result == .Prepared);
@@ -3620,8 +3581,7 @@ test "result message: prepared select" {
 
     try checkEnvelopeHeader(4, Opcode.result, data.len, envelope.header);
 
-    var mr: MessageReader = undefined;
-    mr.reset(envelope.body);
+    var mr = MessageReader.init(envelope.body);
     const message = try ResultMessage.read(arena.allocator(), envelope.header.version, &mr);
 
     try testing.expect(message.result == .Prepared);
@@ -3730,8 +3690,7 @@ test "supported message" {
 
     try checkEnvelopeHeader(4, Opcode.supported, exp.len, envelope.header);
 
-    var mr: MessageReader = undefined;
-    mr.reset(envelope.body);
+    var mr = MessageReader.init(envelope.body);
     const message = try SupportedMessage.read(arena.allocator(), &mr);
 
     try testing.expectEqual(@as(usize, 1), message.cql_versions.len);
