@@ -41,6 +41,8 @@ const SupportedMessage = protocol.SupportedMessage;
 const lz4 = @import("lz4");
 const snappy = @import("snappy");
 
+const log = std.log.scoped(.connection);
+
 pub const Message = union(Opcode) {
     @"error": ErrorMessage,
     startup: StartupMessage,
@@ -59,8 +61,6 @@ pub const Message = union(Opcode) {
     auth_response: AuthResponseMessage,
     auth_success: AuthSuccessMessage,
 };
-
-const log = std.log.scoped(.connection);
 
 pub const Connection = struct {
     const Self = @This();
@@ -87,9 +87,6 @@ pub const Connection = struct {
         };
     };
 
-    const BufferedReaderType = io.BufferedReader(4096, std.net.Stream.Reader);
-    const BufferedWriterType = io.BufferedWriter(4096, std.net.Stream.Writer);
-
     // TODO(vincent): we probably don't need the reader and writer abstractions here.
     const EnvelopeWriterType = EnvelopeWriter(std.ArrayList(u8).Writer);
 
@@ -100,11 +97,6 @@ pub const Connection = struct {
 
     allocator: mem.Allocator,
     options: InitOptions,
-
-    socket: std.net.Stream,
-
-    buffered_reader: BufferedReaderType,
-    buffered_writer: BufferedWriterType,
 
     /// Helpers types needed to encode and decode the CQL protocol.
     envelope_writer_buffer: std.ArrayList(u8),
@@ -119,162 +111,28 @@ pub const Connection = struct {
         format: Frame.Format = undefined,
     } = .{},
 
-    pub fn initIp4(self: *Self, allocator: mem.Allocator, seed_address: net.Address, options: InitOptions) !void {
+    pub fn init(allocator: mem.Allocator, options: InitOptions) Connection {
+        var self = Connection{};
+
         self.allocator = allocator;
         self.options = options;
-
-        self.socket = try net.tcpConnectToAddress(seed_address);
-        errdefer self.socket.close();
-
-        {
-            const nonblock = 1;
-            const sock_flags = posix.SOCK.STREAM | nonblock | posix.SOCK.CLOEXEC;
-            const sockfd = try posix.socket(seed_address.any.family, sock_flags, posix.IPPROTO.TCP);
-            errdefer net.Stream.close(.{ .handle = sockfd });
-
-            try posix.connect(sockfd, &seed_address.any, seed_address.getOsSockLen());
-
-            self.socket = net.Stream{ .handle = sockfd };
-        }
-
-        self.buffered_reader = BufferedReaderType{ .unbuffered_reader = self.socket.reader() };
-        self.buffered_writer = BufferedWriterType{ .unbuffered_writer = self.socket.writer() };
 
         self.envelope_writer_buffer = std.ArrayList(u8).init(allocator);
         self.envelope_writer = EnvelopeWriterType.init(self.envelope_writer_buffer.writer());
 
-        MessageReader.reset(&self.message_reader, "");
+        self.message_reader.reset("");
         // TODO(vincent): don't use the root allocator here, limit how much memory we can use
         self.message_writer = try MessageWriter.init(allocator);
 
-        var dummy_diags = InitOptions.Diagnostics{};
-        const diags = options.diags orelse &dummy_diags;
-
-        try self.handshake(diags);
+        return self;
     }
 
     pub fn deinit(self: *Self) void {
-        self.socket.close();
         self.envelope_writer_buffer.deinit();
         self.message_writer.deinit();
     }
 
-    fn handshake(self: *Self, diags: *InitOptions.Diagnostics) !void {
-        // Sequence diagram to establish the connection:
-        //
-        // +---------+                 +---------+
-        // | Client  |                 | Server  |
-        // +---------+                 +---------+
-        //      |                           |
-        //      | OPTIONS                   |
-        //      |-------------------------->|
-        //      |                           |
-        //      |                 SUPPORTED |
-        //      |<--------------------------|
-        //      |                           |
-        //      | STARTUP                   |
-        //      |-------------------------->|
-        //      |                           |
-        //      |      (READY|AUTHENTICATE) |
-        //      |<--------------------------|
-        //      |                           |
-        //      | AUTH_RESPONSE             |
-        //      |-------------------------->|
-        //      |                           |
-        var buffer: [4096]u8 = undefined;
-        var fba = heap.FixedBufferAllocator.init(&buffer);
-
-        // Write OPTIONS, expect SUPPORTED
-
-        try self.writeMessage(
-            fba.allocator(),
-            .options,
-            protocol.OptionsMessage{},
-            .{},
-        );
-
-        fba.reset();
-        switch (try self.nextMessage(fba.allocator(), .{})) {
-            .supported => |fr| self.negotiated_state.cql_version = fr.cql_versions[0],
-            .@"error" => |err| {
-                diags.message = err.message;
-                return error.HandshakeFailed;
-            },
-            else => return error.InvalidServerResponse,
-        }
-
-        // Write STARTUP, expect either READY or AUTHENTICATE
-
-        fba.reset();
-        try self.writeMessage(
-            fba.allocator(),
-            .startup,
-            protocol.StartupMessage{
-                .cql_version = self.negotiated_state.cql_version,
-                .compression = self.options.compression,
-            },
-            .{},
-        );
-
-        switch (try self.nextMessage(fba.allocator(), .{})) {
-            .ready => {
-                // At this point the server expects framing if we're using the v5 protocol
-                if (self.options.protocol_version.isAtLeast(5)) {
-                    self.framing.enabled = true;
-                    self.framing.format = .uncompressed; // TODO(vincent): use compression
-                }
-            },
-            .authenticate => |fr| {
-                try self.authenticate(fba.allocator(), diags, fr.authenticator);
-            },
-            .@"error" => |err| {
-                diags.message = err.message;
-                return error.HandshakeFailed;
-            },
-            else => return error.InvalidServerResponse,
-        }
-    }
-
-    fn authenticate(self: *Self, allocator: mem.Allocator, diags: *InitOptions.Diagnostics, _: []const u8) !void {
-        // TODO(vincent): handle authenticator classes
-        // TODO(vincent): handle auth challenges
-        if (self.options.username == null) {
-            return error.NoUsername;
-        }
-        if (self.options.password == null) {
-            return error.NoPassword;
-        }
-
-        // Write AUTH_RESPONSE
-        {
-            var buf: [512]u8 = undefined;
-            const token = try std.fmt.bufPrint(&buf, "\x00{s}\x00{s}", .{ self.options.username.?, self.options.password.? });
-
-            try self.writeMessage(
-                allocator,
-                .auth_response,
-                protocol.AuthResponseMessage{
-                    .token = token,
-                },
-                .{},
-            );
-        }
-
-        // Read either AUTH_CHALLENGE, AUTH_SUCCESS or ERROR
-        switch (try self.nextMessage(allocator, .{})) {
-            .auth_challenge => unreachable,
-            .auth_success => return,
-            .@"error" => |err| {
-                diags.message = err.message;
-                return error.AuthenticationFailed;
-            },
-            else => return error.InvalidServerResponse,
-        }
-    }
-
-    const WriteMessageOptions = struct {};
-
-    /// writeMessage writes a single message to the TCP connection.
+    /// appendMessage writes a single message to the output
     ///
     /// A message can be
     ///
@@ -288,7 +146,7 @@ pub const Connection = struct {
     /// Additionally this method takes care of compression if enabled.
     ///
     /// This method is not thread safe.
-    pub fn writeMessage(self: *Self, allocator: mem.Allocator, opcode: Opcode, message: anytype, _: WriteMessageOptions) !void {
+    pub fn appendMessage(self: *Self, allocator: mem.Allocator, opcode: Opcode, message: anytype, out: *std.ArrayList(u8)) !void {
         const MessageType = @TypeOf(message);
 
         self.message_writer.reset();
@@ -370,82 +228,45 @@ pub const Connection = struct {
         else
             envelope_data;
 
-        _ = try self.buffered_writer.write(final_payload);
-        try self.buffered_writer.flush();
+        try out.append(final_payload);
     }
 
-    pub const ReadMessageOptions = struct {
-        /// If set the message will be allocated using this allocator instead of the allocator
-        /// passed in `nextMessage`.
-        ///
-        /// This is useful if you want the message to have a different lifecycle, for example
-        /// if you need to store the message in a list or a map.
-        message_allocator: ?mem.Allocator = null,
-    };
-
-    pub fn nextMessage(self: *Self, allocator: mem.Allocator, options: ReadMessageOptions) !Message {
-        var messages = try self.readMessages(allocator, options);
-        defer messages.deinit();
-
-        debug.assert(messages.items.len == 1);
-
-        return messages.pop();
-    }
-
-    fn readMessages(self: *Self, allocator: mem.Allocator, options: ReadMessageOptions) !std.ArrayList(Message) {
-        var result = std.ArrayList(Message).init(allocator);
+    pub fn decodeMessages(self: *Self, allocator: mem.Allocator, data: []const u8, out: *std.ArrayList(Message)) !void {
+        const data_fbs = std.io.fixedBufferStream(data);
 
         if (self.framing.enabled) {
-            try self.readMessagesV5(allocator, options, &result);
+            const result = try Frame.read(allocator, data_fbs.reader(), self.framing.format);
+            debug.assert(result.frame.is_self_contained);
+            debug.assert(result.frame.payload.len > 0);
+
+            var fbs = io.StreamSource{ .const_buffer = io.fixedBufferStream(result.frame.payload) };
+            const envelope = try Envelope.read(allocator, fbs.reader());
+
+            const message = try self.decodeMessage(allocator, envelope);
+
+            try out.append(message);
         } else {
-            try self.readMessageV4(allocator, options, &result);
-        }
+            var envelope = try Envelope.read(allocator, self.buffered_reader.reader());
 
-        return result;
-    }
+            if (envelope.header.flags & EnvelopeFlags.Compression == EnvelopeFlags.Compression) {
+                const compression = self.options.compression orelse return error.InvalidCompressedFrame;
 
-    fn readMessagesV5(self: *Self, allocator: mem.Allocator, options: ReadMessageOptions, messages: *std.ArrayList(Message)) !void {
-        const result = try Frame.read(allocator, self.buffered_reader.reader(), self.framing.format);
-        debug.assert(result.frame.is_self_contained);
-        debug.assert(result.frame.payload.len > 0);
-
-        var fbs = io.StreamSource{ .const_buffer = io.fixedBufferStream(result.frame.payload) };
-        const envelope = try Envelope.read(allocator, fbs.reader());
-
-        const message = try self.decodeMessage(options.message_allocator orelse allocator, envelope);
-
-        try messages.append(message);
-    }
-
-    fn readMessageV4(self: *Self, allocator: mem.Allocator, options: ReadMessageOptions, messages: *std.ArrayList(Message)) !void {
-        const envelope = try self.readEnvelope(allocator);
-        defer envelope.deinit(allocator);
-
-        const message = try self.decodeMessage(options.message_allocator orelse allocator, envelope);
-
-        try messages.append(message);
-    }
-
-    fn readEnvelope(self: *Self, allocator: mem.Allocator) !Envelope {
-        var envelope = try Envelope.read(allocator, self.buffered_reader.reader());
-
-        if (envelope.header.flags & EnvelopeFlags.Compression == EnvelopeFlags.Compression) {
-            const compression = self.options.compression orelse return error.InvalidCompressedFrame;
-
-            switch (compression) {
-                .LZ4 => {
-                    // TODO(vincent): this is ugly
-                    const decompressed_data = try lz4.decompress(allocator, envelope.body, envelope.body.len * 3);
-                    envelope.body = decompressed_data;
-                },
-                .Snappy => {
-                    const decompressed_data = try snappy.decompress(allocator, envelope.body);
-                    envelope.body = decompressed_data;
-                },
+                switch (compression) {
+                    .LZ4 => {
+                        const decompressed_data = try lz4.decompress(allocator, envelope.body, envelope.body.len * 3);
+                        envelope.body = decompressed_data;
+                    },
+                    .Snappy => {
+                        const decompressed_data = try snappy.decompress(allocator, envelope.body);
+                        envelope.body = decompressed_data;
+                    },
+                }
             }
-        }
 
-        return envelope;
+            const message = try self.decodeMessage(allocator, envelope);
+
+            try out.append(message);
+        }
     }
 
     fn decodeMessage(self: *Self, message_allocator: mem.Allocator, envelope: Envelope) !Message {
