@@ -25,6 +25,4 @@ TODO
 
 # License
 
-The files `src/lz4.c` and `src/lz4.h` are from [github.com/lz4/lz4](https://github.com/lz4/lz4/tree/dev) and use the license in `LICENSE.lz4`.
-
-All other files use the license in `LICENSE`.
+See the `LICENSE` file.
