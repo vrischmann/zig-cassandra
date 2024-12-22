@@ -152,14 +152,37 @@ pub const Message = union(Opcode) {
     auth_success: AuthSuccessMessage,
 };
 
+fn messageFormatter(message: Message) fmt.Formatter(formatMessage) {
+    return .{ .data = message };
+}
+
+fn formatMessage(message: Message, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
+    switch (message) {
+        .@"error" => |msg| {
+            try writer.print("error_code={s} message={s}", .{
+                @tagName(msg.error_code),
+                msg.message,
+            });
+        },
+        else => try writer.print("{any}", .{message}),
+    }
+}
+
 gpa: mem.Allocator,
 arena: heap.ArenaAllocator,
 
 /// Use this arena for temporary allocations that don't outlive a function call.
 scratch_arena: heap.ArenaAllocator,
 
+/// This buffer contains the data to be written out to the Cassandra node.
+/// TODO(vincent): does this need to be dynamic ?
+write_buffer: fifo(u8, .Dynamic) = undefined,
+/// This buffer contains the data that was read from the Cassandra node that still needs to be parsed.
+/// TODO(vincent): does this need to be dynamic ?
+read_buffer: fifo(u8, .Dynamic) = undefined,
 /// The queue of messages that were read and correctly parsed.
-queue: fifo(Message, .Dynamic),
+/// TODO(vincent): does this need to be dynamic ?
+queue: fifo(Message, .Dynamic) = undefined,
 
 /// The state the connection is in.
 ///
@@ -241,10 +264,10 @@ pub fn init(allocator: mem.Allocator) !*Self {
         .gpa = allocator,
         .arena = heap.ArenaAllocator.init(allocator),
         .scratch_arena = heap.ArenaAllocator.init(allocator),
-        .queue = undefined,
+        .write_buffer = fifo(u8, .Dynamic).init(allocator),
+        .read_buffer = fifo(u8, .Dynamic).init(allocator),
+        .queue = fifo(Message, .Dynamic).init(allocator),
     };
-
-    res.queue = fifo(Message, .Dynamic).init(res.arena.allocator());
 
     if (comptime build_options.enable_tracing) {
         res.tracer = try Tracer.init(allocator);
@@ -263,6 +286,14 @@ pub fn deinit(conn: *Self) void {
     conn.gpa.destroy(conn);
 }
 
+pub fn feedReadable(conn: *Self, data: []const u8) !void {
+    try conn.read_buffer.write(data);
+}
+
+pub fn moveWritable(conn: *Self) ![]const u8 {
+    return try conn.write_buffer.toOwnedSlice();
+}
+
 /// Tick drives the connection state machines.
 ///
 /// Depending on the current state it can:
@@ -273,12 +304,12 @@ pub fn deinit(conn: *Self) void {
 /// There is no expectation that any message can be read from `reader`,
 /// if there's nothing to read or the message is incomplete then the state
 /// will simply not change and the next call to `tick` will try to make more progress.
-pub fn tick(conn: *Self, writer: anytype, reader: anytype) !void {
+pub fn tick(conn: *Self) !void {
     // TODO(vincent): diags
 
     switch (conn.state) {
         .handshake => {
-            try conn.tickInHandshake(writer, reader);
+            try conn.tickInHandshake();
         },
         .nominal => unreachable,
         .shutdown => unreachable,
@@ -335,18 +366,18 @@ pub fn tick(conn: *Self, writer: anytype, reader: anytype) !void {
 ///   |                                        |
 ///
 ///
-fn tickInHandshake(conn: *Self, writer: anytype, reader: anytype) !void {
+fn tickInHandshake(conn: *Self) !void {
     debug.assert(conn.state == .handshake);
 
     switch (conn.handshake_state) {
         .options => {
-            try conn.appendMessage(writer, OptionsMessage{});
+            try conn.appendMessage(OptionsMessage{});
 
             conn.handshake_state = .supported;
         },
         .supported => {
             // TODO(vincent): correct allocator ?
-            try conn.readMessagesNoEof(conn.arena.allocator(), reader);
+            try conn.readMessagesNoEof(conn.arena.allocator());
 
             if (conn.queue.readItem()) |message| {
                 const supported_message = switch (message) {
@@ -374,7 +405,7 @@ fn tickInHandshake(conn: *Self, writer: anytype, reader: anytype) !void {
             }
         },
         .startup => {
-            try conn.appendMessage(writer, StartupMessage{
+            try conn.appendMessage(StartupMessage{
                 .compression = conn.compression,
                 .cql_version = conn.cql_version,
             });
@@ -383,7 +414,7 @@ fn tickInHandshake(conn: *Self, writer: anytype, reader: anytype) !void {
         },
         .authenticate_or_ready => {
             // TODO(vincent): correct allocator ?
-            try conn.readMessagesNoEof(conn.arena.allocator(), reader);
+            try conn.readMessagesNoEof(conn.arena.allocator());
         },
         .auth_response => unreachable,
         .ready => unreachable,
@@ -404,7 +435,7 @@ fn tickInHandshake(conn: *Self, writer: anytype, reader: anytype) !void {
 /// Additionally this method takes care of compression if enabled.
 ///
 /// This method is not thread safe.
-fn appendMessage(conn: *Self, writer: anytype, message: anytype) !void {
+fn appendMessage(conn: *Self, message: anytype) !void {
     const scratch_allocator = conn.scratch_arena.allocator();
     defer _ = conn.scratch_arena.reset(.{ .retain_with_limit = preferred_scratch_size });
 
@@ -501,14 +532,15 @@ fn appendMessage(conn: *Self, writer: anytype, message: anytype) !void {
     else
         envelope_data;
 
-    try writer.writeAll(final_payload);
+    try conn.write_buffer.write(final_payload);
 
     //
     // Debugging/Observability
     //
 
     if (comptime build_options.enable_logging) {
-        log.info("[appendMessage] msg={any} data={s}", .{
+        // TODO(vincent): custom formatting
+        log.info("[appendMessage] msg={s} data={s}", .{
             message,
             fmt.fmtSliceHexLower(final_payload),
         });
@@ -525,9 +557,11 @@ fn appendMessage(conn: *Self, writer: anytype, message: anytype) !void {
     }
 }
 
-fn readMessagesNoEof(conn: *Self, message_allocator: mem.Allocator, rd: anytype) !void {
+fn readMessagesNoEof(conn: *Self, message_allocator: mem.Allocator) !void {
     const scratch_allocator = conn.scratch_arena.allocator();
     defer _ = conn.scratch_arena.reset(.{ .retain_with_limit = preferred_scratch_size });
+
+    const rd = conn.read_buffer.reader();
 
     while (true) {
         var reader: TracingReader(@TypeOf(rd)) = undefined;
@@ -593,6 +627,7 @@ fn readMessagesNoEof(conn: *Self, message_allocator: mem.Allocator, rd: anytype)
             const payload = reader.buffer.readableSlice(0);
 
             log.info("[readMessagesNoEof] msg={any} data={s}", .{
+                // messageFormatter(message),
                 message,
                 fmt.fmtSliceHexLower(payload),
             });
@@ -612,12 +647,13 @@ fn readMessagesNoEof(conn: *Self, message_allocator: mem.Allocator, rd: anytype)
 /// TeeReader creates a reader type that wraps a reader and writes the data read to a writer.
 fn TeeReader(comptime ReaderType: type, comptime WriterType: type) type {
     return struct {
-        pub const Reader = std.io.Reader(*@This(), error{OutOfMemory}, readFn);
+        const Error = error{OutOfMemory} || std.posix.ReadError;
+        pub const Reader = std.io.Reader(*@This(), Error, readFn);
 
         child_reader: ReaderType,
         writer: WriterType,
 
-        fn readFn(self: *@This(), dest: []u8) error{OutOfMemory}!usize {
+        fn readFn(self: *@This(), dest: []u8) Error!usize {
             const n = try self.child_reader.read(dest);
             if (n == 0) return 0;
 
