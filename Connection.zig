@@ -417,7 +417,6 @@ fn tickInHandshake(conn: *Self) !void {
                     },
                 };
 
-                conn.compression = supported_message.compression_algorithms[0];
                 conn.cql_version = supported_message.cql_versions[0];
 
                 // TODO(vincent): is this always sorted ?
@@ -432,6 +431,18 @@ fn tickInHandshake(conn: *Self) !void {
                     } else return error.NoSupportedProtocolVersion;
                 };
                 conn.protocol_version = usable_protocol_version;
+
+                if (conn.protocol_version.isAtLeast(.v5)) {
+                    // Enable framing
+                    conn.framing.enabled = true;
+                    conn.framing.format = .uncompressed;
+
+                    conn.compression = .LZ4;
+                } else {
+                    conn.compression = supported_message.compression_algorithms[0];
+                }
+
+                log.debug("chosen protocol version: {s}", .{conn.protocol_version});
 
                 conn.handshake_state = .startup;
             }
@@ -589,9 +600,10 @@ fn appendMessage(conn: *Self, message: anytype) !void {
         const tmp = @unionInit(Message, @tagName(opcode), message);
 
         // TODO(vincent): custom formatting
-        log.info("[appendMessage] msg={any} data={s}", .{
+        log.info("[appendMessage] msg={any} data={s} framing={}", .{
             messageFormatter(tmp),
             fmt.fmtSliceHexLower(final_payload),
+            conn.framing.enabled,
         });
     }
 

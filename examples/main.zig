@@ -48,6 +48,8 @@ pub fn main() anyerror!void {
     var conn = try Connection.init(gpa.allocator());
     defer conn.deinit();
 
+    conn.protocol_version = .v4;
+
     // try backend.drive(conn);
 
     var poll_fds: [4]posix.pollfd = undefined;
@@ -77,6 +79,7 @@ pub fn main() anyerror!void {
 
                     const writable = conn.getWritable();
                     try socket.writeAll(writable);
+                    conn.write_buffer.discard(writable.len);
                     log.info("written {d} bytes", .{writable.len});
                 }
             }
@@ -84,33 +87,4 @@ pub fn main() anyerror!void {
 
         std.time.sleep(std.time.ns_per_ms * 100);
     }
-
-    // try conn.tick(writer, reader);
-    // while (conn.tracer.events.readItem()) |event| {
-    //     log.info("event: {any}", .{event});
-    // }
-    // try conn.tick(writer, reader);
-    // while (conn.tracer.events.readItem()) |event| {
-    //     log.info("event: {any}", .{event});
-    // }
-
-    // try client.appendMessage(cassandra.Connection.Message{ .options = {} });
-    //
-    // const written = try client.connection.write.buffer.toOwnedSlice();
-    //
-    // log.err("written: {s}", .{fmt.fmtSliceHexLower(written)});
-    //
-    // try socket.writeAll(written);
-    //
-    // try client.connection.read.buffer.ensureUnusedCapacity(1 * 1024 * 1024);
-    // const read = try socket.read(client.connection.read.buffer.writableSlice(0));
-    // debug.assert(read > 0);
-    // client.connection.read.buffer.update(read);
-    //
-    // log.err("read: {d} bytes => {d} {s}", .{ read, client.connection.read.buffer.readableLength(), fmt.fmtSliceHexLower(client.connection.read.buffer.readableSlice(0)) });
-    //
-    //     const supported_message = client.connection.read.queue.readItem().?.supported;
-    //     try client.connection.updateWithSupported(supported_message.compression_algorithms, supported_message.cql_versions, supported_message.protocol_versions);
-    //
-    // try client.appendMessage(cassandra.Connection.Message{.startup = cassandra.Connection.})
 }
