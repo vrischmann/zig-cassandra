@@ -1,21 +1,23 @@
 const std = @import("std");
 const debug = std.debug;
 const heap = std.heap;
+const fmt = std.fmt;
 const io = std.io;
 const mem = std.mem;
 const net = std.net;
 const os = std.os;
 const testing = std.testing;
-
 const assert = std.debug.assert;
 
-const lz4 = @import("lz4.zig");
+const snappy = @import("snappy");
 
 const event = @import("event.zig");
+const lz4 = @import("lz4.zig");
 const metadata = @import("metadata.zig");
+const QueryParameters = @import("QueryParameters.zig");
 const testutils = @import("testutils.zig");
 
-const QueryParameters = @import("QueryParameters.zig");
+const log = std.log.scoped(.protocol);
 
 // Framing format
 //
@@ -91,7 +93,9 @@ pub const Frame = struct {
         return buf;
     }
 
-    const ReadPayloadAndTrailerError = error{UnexpectedEOF} || mem.Allocator.Error;
+    const ReadPayloadAndTrailerError = error{
+        UnexpectedEOF,
+    } || mem.Allocator.Error || std.posix.ReadError;
 
     fn readPayloadAndTrailer(reader: anytype, allocator: mem.Allocator, payload_length: usize) ReadPayloadAndTrailerError!PayloadAndTrailer {
         const size = payload_length + trailer_size;
@@ -305,7 +309,7 @@ test "frame reader: QUERY message" {
         try testing.expect(frame.is_self_contained);
         try testing.expectEqual(@as(usize, 66), frame.payload.len);
 
-        const envelope = try testReadEnvelope(arena.allocator(), frame.payload);
+        const envelope = try testReadEnvelope(arena.allocator(), frame.payload, .none);
         try checkEnvelopeHeader(.v5, Opcode.query, frame.payload.len, envelope.header);
 
         var mr = MessageReader.init(envelope.body);
@@ -351,7 +355,7 @@ test "frame reader: QUERY message incomplete" {
     try testing.expect(frame.is_self_contained);
     try testing.expectEqual(@as(usize, 66), frame.payload.len);
 
-    const envelope = try testReadEnvelope(arena.allocator(), frame.payload);
+    const envelope = try testReadEnvelope(arena.allocator(), frame.payload, .none);
     try checkEnvelopeHeader(.v5, Opcode.query, frame.payload.len, envelope.header);
 
     var mr = MessageReader.init(envelope.body);
@@ -408,7 +412,7 @@ test "frame reader: RESULT message" {
         try testing.expect(frame.is_self_contained);
         try testing.expectEqual(@as(usize, 605), frame.payload.len);
 
-        const envelope = try testReadEnvelope(arena.allocator(), frame.payload);
+        const envelope = try testReadEnvelope(arena.allocator(), frame.payload, .none);
         try checkEnvelopeHeader(.v5, Opcode.result, frame.payload.len, envelope.header);
 
         var mr = MessageReader.init(envelope.body);
@@ -449,7 +453,7 @@ test "frame reader: RESULT message" {
         try testing.expect(frame.is_self_contained);
         try testing.expectEqual(@as(usize, 5532), frame.payload.len);
 
-        const envelope = try testReadEnvelope(arena.allocator(), frame.payload);
+        const envelope = try testReadEnvelope(arena.allocator(), frame.payload, .none);
         try checkEnvelopeHeader(.v5, Opcode.result, frame.payload.len, envelope.header);
 
         var mr = MessageReader.init(envelope.body);
@@ -516,7 +520,7 @@ test "frame write: PREPARE message" {
     {
         const result = try Frame.decode(arena.allocator(), frame, .uncompressed);
 
-        const envelope = try testReadEnvelope(arena.allocator(), result.frame.payload);
+        const envelope = try testReadEnvelope(arena.allocator(), result.frame.payload, .none);
         try checkEnvelopeHeader(.v5, Opcode.prepare, result.frame.payload.len, envelope.header);
 
         var mr = MessageReader.init(envelope.body);
@@ -537,11 +541,11 @@ test "frame write: PREPARE message" {
 //
 
 pub const EnvelopeFlags = struct {
-    pub const Compression: u8 = 0x01;
-    pub const Tracing: u8 = 0x02;
-    pub const CustomPayload: u8 = 0x04;
-    pub const Warning: u8 = 0x08;
-    pub const UseBeta: u8 = 0x10;
+    pub const compression: u8 = 0x01;
+    pub const tracing: u8 = 0x02;
+    pub const custom_payload: u8 = 0x04;
+    pub const warning: u8 = 0x08;
+    pub const use_beta: u8 = 0x10;
 };
 
 pub const EnvelopeHeader = packed struct {
@@ -555,41 +559,81 @@ pub const EnvelopeHeader = packed struct {
 };
 
 pub const Envelope = struct {
+    const TracingID = [16]u8;
+
     header: EnvelopeHeader,
+    tracing_id: ?TracingID = null,
+    warnings: ?[]const []const u8 = null,
+    custom_payload: ?BytesMap = null,
     body: []const u8,
 
     pub fn deinit(self: @This(), allocator: mem.Allocator) void {
         allocator.free(self.body);
     }
 
-    pub fn read(allocator: mem.Allocator, reader: anytype) !Envelope {
-        var buf: [EnvelopeHeader.size]u8 = undefined;
+    pub fn read(allocator: mem.Allocator, reader: anytype, compression_algorithm: CompressionAlgorithm) !Envelope {
+        var res: Envelope = undefined;
 
-        const n_header_read = try reader.readAll(&buf);
-        if (n_header_read != EnvelopeHeader.size) {
-            return error.UnexpectedEOF;
-        }
+        res.header = hdr: {
+            var buf: [EnvelopeHeader.size]u8 = undefined;
 
-        const header = EnvelopeHeader{
-            .version = try ProtocolVersion.init(buf[0]),
-            .flags = buf[1],
-            .stream = mem.readInt(i16, @ptrCast(buf[2..4]), .big),
-            .opcode = @enumFromInt(buf[4]),
-            .body_len = mem.readInt(u32, @ptrCast(buf[5..9]), .big),
+            const n = try reader.readAll(&buf);
+            if (n != EnvelopeHeader.size) return error.UnexpectedEOF;
+
+            break :hdr EnvelopeHeader{
+                .version = try ProtocolVersion.init(buf[0]),
+                .flags = buf[1],
+                .stream = mem.readInt(i16, @ptrCast(buf[2..4]), .big),
+                .opcode = @enumFromInt(buf[4]),
+                .body_len = mem.readInt(u32, @ptrCast(buf[5..9]), .big),
+            };
         };
 
-        const len = @as(usize, header.body_len);
+        res.body = body: {
+            const len = @as(usize, res.header.body_len);
 
-        const body = try allocator.alloc(u8, len);
-        const n_read = try reader.readAll(body);
-        if (n_read != len) {
-            return error.UnexpectedEOF;
+            const tmp = try allocator.alloc(u8, len);
+            const n = try reader.readAll(tmp);
+            if (n != len) return error.UnexpectedEOF;
+
+            break :body tmp[0..n];
+        };
+
+        if (res.header.flags != 0) {
+            if (compression_algorithm != .none and (res.header.flags & EnvelopeFlags.compression == EnvelopeFlags.compression)) {
+                switch (compression_algorithm) {
+                    .lz4 => {
+                        const decompressed_data = try lz4.decompress(allocator, res.body, res.body.len * 3);
+                        res.body = decompressed_data;
+                    },
+                    .snappy => {
+                        const decompressed_data = try snappy.decompress(allocator, res.body);
+                        res.body = decompressed_data;
+                    },
+                    .none => unreachable, // We can't come in this branch if compression_algorithm is none
+                }
+            }
+
+            var mr = MessageReader.init(res.body);
+
+            if (res.header.flags & EnvelopeFlags.tracing == EnvelopeFlags.tracing) {
+                var tmp: TracingID = undefined;
+                try mr.readUUIDInto(&tmp);
+                res.tracing_id = tmp;
+            }
+
+            if (res.header.flags & EnvelopeFlags.warning == EnvelopeFlags.warning) {
+                res.warnings = try mr.readStringList(allocator);
+            }
+
+            if (res.header.flags & EnvelopeFlags.custom_payload == EnvelopeFlags.custom_payload) {
+                res.custom_payload = try mr.readBytesMap(allocator);
+            }
+
+            res.body = res.body[mr.bytes_read..];
         }
 
-        return Envelope{
-            .header = header,
-            .body = body,
-        };
+        return res;
     }
 };
 
@@ -792,6 +836,13 @@ pub const CQLVersion = struct {
         return version;
     }
 
+    pub fn format(value: @This(), comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
+        var buf: [16]u8 = undefined;
+        const res = try value.print(&buf);
+
+        try writer.print("{s}", .{res});
+    }
+
     pub fn print(self: @This(), buf: []u8) ![]u8 {
         return std.fmt.bufPrint(buf, "{d}.{d}.{d}", .{
             self.major,
@@ -876,6 +927,10 @@ pub const ProtocolVersion = enum(u8) {
             return error.InvalidProtocolVersion;
         }
     }
+
+    pub fn format(value: ProtocolVersion, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
+        try writer.print("{s}", .{@tagName(value)});
+    }
 };
 
 pub const Opcode = enum(u8) {
@@ -898,24 +953,22 @@ pub const Opcode = enum(u8) {
 };
 
 pub const CompressionAlgorithm = enum {
-    LZ4,
-    Snappy,
+    lz4,
+    snappy,
+    none,
 
     pub fn fromString(s: []const u8) !CompressionAlgorithm {
         if (mem.eql(u8, "lz4", s)) {
-            return CompressionAlgorithm.LZ4;
+            return .lz4;
         } else if (mem.eql(u8, "snappy", s)) {
-            return CompressionAlgorithm.Snappy;
+            return .snappy;
         } else {
             return error.InvalidCompressionAlgorithm;
         }
     }
 
-    pub fn toString(self: @This()) []const u8 {
-        return switch (self) {
-            .LZ4 => "lz4",
-            .Snappy => "snappy",
-        };
+    pub fn format(value: CompressionAlgorithm, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
+        try writer.print("{s}", .{@tagName(value)});
     }
 };
 
@@ -985,56 +1038,89 @@ test "protocol version: fromString" {
 }
 
 test "compression algorith: fromString" {
-    try testing.expectEqual(CompressionAlgorithm.LZ4, try CompressionAlgorithm.fromString("lz4"));
-    try testing.expectEqual(CompressionAlgorithm.Snappy, try CompressionAlgorithm.fromString("snappy"));
+    try testing.expectEqual(CompressionAlgorithm.lz4, try CompressionAlgorithm.fromString("lz4"));
+    try testing.expectEqual(CompressionAlgorithm.snappy, try CompressionAlgorithm.fromString("snappy"));
     try testing.expectError(error.InvalidCompressionAlgorithm, CompressionAlgorithm.fromString("foobar"));
 }
 
-pub const Map = struct {
-    const Self = @This();
-
-    const MapType = std.StringHashMap([]const u8);
-    const MapEntry = MapType.Entry;
-    const Iterator = MapType.Iterator;
-
-    allocator: mem.Allocator,
-    map: MapType,
-
-    pub fn init(allocator: mem.Allocator) Self {
-        return Self{
-            .allocator = allocator,
-            .map = MapType.init(allocator),
-        };
+/// Represents the [string map] or [bytes map] types of the CQL protocol.
+fn GenericMap(comptime ValueType: type) type {
+    if (ValueType != []const u8 and ValueType != ?[]const u8) {
+        @compileError(std.fmt.comptimePrint("value type {s} is invalid in a CQL map", .{
+            @typeName(ValueType),
+        }));
     }
 
-    pub fn put(self: *Self, key: []const u8, value: []const u8) !void {
-        const result = try self.map.getOrPut(key);
-        if (result.found_existing) {
-            self.allocator.free(result.value_ptr.*);
+    return struct {
+        const Self = @This();
+
+        const MapType = std.StringHashMap(ValueType);
+        const MapEntry = MapType.Entry;
+        const Iterator = MapType.Iterator;
+
+        allocator: mem.Allocator,
+        map: MapType,
+
+        pub fn init(allocator: mem.Allocator) Self {
+            return Self{
+                .allocator = allocator,
+                .map = MapType.init(allocator),
+            };
         }
-        result.value_ptr.* = value;
-    }
 
-    pub fn count(self: *const Self) usize {
-        return self.map.count();
-    }
+        pub fn put(self: *Self, key: []const u8, value: ValueType) !void {
+            const result = try self.map.getOrPut(key);
 
-    pub fn iterator(self: *const Self) Iterator {
-        return self.map.iterator();
-    }
+            switch (ValueType) {
+                []const u8 => {
+                    if (result.found_existing) {
+                        self.allocator.free(result.value_ptr.*);
+                    }
+                    result.value_ptr.* = value;
+                },
+                ?[]const u8 => {
+                    if (result.found_existing) {
+                        if (result.value_ptr.*) |v| {
+                            self.allocator.free(v);
+                        }
+                    }
+                    if (value) |v| {
+                        result.value_ptr.* = v;
+                    }
+                },
+                else => @compileError("should not happen"),
+            }
+        }
 
-    pub fn getEntry(self: *const Self, key: []const u8) ?MapEntry {
-        return self.map.getEntry(key);
-    }
-};
+        pub fn count(self: *const Self) usize {
+            return self.map.count();
+        }
+
+        pub fn iterator(self: *const Self) Iterator {
+            return self.map.iterator();
+        }
+
+        pub fn getEntry(self: *const Self, key: []const u8) ?MapEntry {
+            return self.map.getEntry(key);
+        }
+    };
+}
+
+/// Represents the [string map] type of the CQL protocol.
+pub const Map = GenericMap([]const u8);
+/// Represents the [bytes map] type of the CQL protocol.
+/// It's almost identical to Map except the value can be null.
+pub const BytesMap = GenericMap(?[]const u8);
 
 pub const Entry = struct {
     key: []const u8,
     value: []const u8,
 };
 
+/// Represents the [string list] type of the CQL protocol.
 const EntryList = []const []const u8;
 
+/// Represents the [string multimap] types of the CQL protocol.
 pub const Multimap = struct {
     const Self = @This();
 
@@ -1162,40 +1248,67 @@ test "multimap" {
 }
 
 pub const MessageReader = struct {
-    const Self = @This();
-
-    buffer: io.FixedBufferStream([]const u8),
+    buffer: []const u8,
+    bytes_read: usize,
 
     pub fn init(buffer: []const u8) MessageReader {
         return MessageReader{
-            .buffer = io.fixedBufferStream(buffer),
+            .buffer = buffer,
+            .bytes_read = 0,
         };
     }
 
+    const Error = error{
+        UnexpectedEOF,
+    };
+
+    const Reader = io.Reader(*MessageReader, Error, read);
+
+    fn read(self: *MessageReader, buf: []u8) Error!usize {
+        if (self.bytes_read >= self.buffer.len) {
+            return error.UnexpectedEOF;
+        }
+
+        const remaining = self.buffer[self.bytes_read..];
+
+        const to_read = @min(remaining.len, buf.len);
+        const data = remaining[0..to_read];
+
+        @memcpy(buf, data);
+
+        self.bytes_read += data.len;
+
+        return data.len;
+    }
+
+    fn reader(self: *MessageReader) Reader {
+        return .{ .context = self };
+    }
+
     /// Read either a short, a int or a long from the buffer.
-    pub fn readInt(self: *Self, comptime T: type) !T {
-        return self.buffer.reader().readInt(T, .big);
+    pub fn readInt(self: *MessageReader, comptime T: type) !T {
+        return self.reader().readInt(T, .big);
     }
 
     /// Read a single byte from the buffer.
-    pub fn readByte(self: *Self) !u8 {
-        return self.buffer.reader().readByte();
+    pub fn readByte(self: *MessageReader) !u8 {
+        return self.reader().readByte();
     }
 
     /// Read a length-prefixed byte slice from the stream. The length is 2 bytes.
     /// The slice can be null.
-    pub fn readShortBytes(self: *Self, allocator: mem.Allocator) !?[]const u8 {
+    pub fn readShortBytes(self: *MessageReader, allocator: mem.Allocator) !?[]const u8 {
         return self.readBytesGeneric(allocator, i16);
     }
 
     /// Read a length-prefixed byte slice from the stream. The length is 4 bytes.
     /// The slice can be null.
-    pub fn readBytes(self: *Self, allocator: mem.Allocator) !?[]const u8 {
+    pub fn readBytes(self: *MessageReader, allocator: mem.Allocator) !?[]const u8 {
         return self.readBytesGeneric(allocator, i32);
     }
 
     /// Read bytes from the stream in a generic way.
-    fn readBytesGeneric(self: *Self, allocator: mem.Allocator, comptime LenType: type) !?[]const u8 {
+    fn readBytesGeneric(self: *MessageReader, allocator: mem.Allocator, comptime LenType: type) !?[]const u8 {
         const len = try self.readInt(LenType);
         if (len < 0) {
             return null;
@@ -1206,7 +1319,7 @@ pub const MessageReader = struct {
 
         const buf = try allocator.alloc(u8, @as(usize, @intCast(len)));
 
-        const n_read = try self.buffer.reader().readAll(buf);
+        const n_read = try self.reader().readAll(buf);
         if (n_read != len) {
             return error.UnexpectedEOF;
         }
@@ -1216,7 +1329,7 @@ pub const MessageReader = struct {
 
     /// Read a length-prefixed string from the stream. The length is 2 bytes.
     /// The string can't be null.
-    pub fn readString(self: *Self, allocator: mem.Allocator) ![]const u8 {
+    pub fn readString(self: *MessageReader, allocator: mem.Allocator) ![]const u8 {
         if (try self.readBytesGeneric(allocator, i16)) |v| {
             return v;
         } else {
@@ -1226,7 +1339,7 @@ pub const MessageReader = struct {
 
     /// Read a length-prefixed string from the stream. The length is 4 bytes.
     /// The string can't be null.
-    pub fn readLongString(self: *Self, allocator: mem.Allocator) ![]const u8 {
+    pub fn readLongString(self: *MessageReader, allocator: mem.Allocator) ![]const u8 {
         if (try self.readBytesGeneric(allocator, i32)) |v| {
             return v;
         } else {
@@ -1235,14 +1348,18 @@ pub const MessageReader = struct {
     }
 
     /// Read a UUID from the stream.
-    pub fn readUUID(self: *Self) ![16]u8 {
+    pub fn readUUID(self: *MessageReader) ![16]u8 {
         var buf: [16]u8 = undefined;
-        _ = try self.buffer.reader().readAll(&buf);
+        _ = try self.reader().readAll(&buf);
         return buf;
     }
 
+    pub fn readUUIDInto(self: *MessageReader, buf: *[16]u8) !void {
+        _ = try self.reader().readAll(buf);
+    }
+
     /// Read a list of string from the stream.
-    pub fn readStringList(self: *Self, allocator: mem.Allocator) ![]const []const u8 {
+    pub fn readStringList(self: *MessageReader, allocator: mem.Allocator) ![]const []const u8 {
         const len = @as(usize, try self.readInt(u16));
 
         var list = try std.ArrayList([]const u8).initCapacity(allocator, len);
@@ -1259,12 +1376,12 @@ pub const MessageReader = struct {
     }
 
     /// Read a value from the stream.
-    pub fn readValue(self: *Self, allocator: mem.Allocator) !Value {
+    pub fn readValue(self: *MessageReader, allocator: mem.Allocator) !Value {
         const len = try self.readInt(i32);
 
         if (len >= 0) {
             const result = try allocator.alloc(u8, @intCast(len));
-            _ = try self.buffer.reader().readAll(result);
+            _ = try self.reader().readAll(result);
 
             return Value{ .Set = result };
         } else if (len == -1) {
@@ -1276,7 +1393,7 @@ pub const MessageReader = struct {
         }
     }
 
-    pub fn readUnsignedVint(self: *Self, comptime IntType: type) !IntType {
+    pub fn readUnsignedVint(self: *MessageReader, comptime IntType: type) !IntType {
         const bits = switch (@typeInfo(IntType)) {
             .int => |info| blk: {
                 comptime assert(info.bits >= 16);
@@ -1290,7 +1407,7 @@ pub const MessageReader = struct {
         var res: IntType = 0;
 
         while (true) {
-            const b = try self.buffer.reader().readByte();
+            const b = try self.reader().readByte();
             const tmp = @as(IntType, @intCast(b)) & ~@as(IntType, 0x80);
 
             // TODO(vincent): runtime check if the number will actually fit in the type T ?
@@ -1307,7 +1424,7 @@ pub const MessageReader = struct {
         return res;
     }
 
-    pub fn readVint(self: *Self, comptime IntType: type) !IntType {
+    pub fn readVint(self: *MessageReader, comptime IntType: type) !IntType {
         const bits = switch (@typeInfo(IntType)) {
             .int => |info| blk: {
                 comptime assert(info.signedness == .signed);
@@ -1330,20 +1447,20 @@ pub const MessageReader = struct {
         return n;
     }
 
-    pub inline fn readInetaddr(self: *Self) !net.Address {
+    pub inline fn readInetaddr(self: *MessageReader) !net.Address {
         return self.readInetGeneric(false);
     }
-    pub inline fn readInet(self: *Self) !net.Address {
+    pub inline fn readInet(self: *MessageReader) !net.Address {
         return self.readInetGeneric(true);
     }
 
-    fn readInetGeneric(self: *Self, comptime with_port: bool) !net.Address {
+    fn readInetGeneric(self: *MessageReader, comptime with_port: bool) !net.Address {
         const n = try self.readByte();
 
         return switch (n) {
             4 => {
                 var buf: [4]u8 = undefined;
-                _ = try self.buffer.reader().readAll(&buf);
+                _ = try self.reader().readAll(&buf);
 
                 const port = if (with_port) try self.readInt(i32) else 0;
 
@@ -1351,7 +1468,7 @@ pub const MessageReader = struct {
             },
             16 => {
                 var buf: [16]u8 = undefined;
-                _ = try self.buffer.reader().readAll(&buf);
+                _ = try self.reader().readAll(&buf);
 
                 const port = if (with_port) try self.readInt(i32) else 0;
 
@@ -1361,12 +1478,12 @@ pub const MessageReader = struct {
         };
     }
 
-    pub fn readConsistency(self: *Self) !Consistency {
+    pub fn readConsistency(self: *MessageReader) !Consistency {
         const n = try self.readInt(u16);
         return @enumFromInt(n);
     }
 
-    pub fn readStringMap(self: *Self, allocator: mem.Allocator) !Map {
+    pub fn readStringMap(self: *MessageReader, allocator: mem.Allocator) !Map {
         const n = try self.readInt(u16);
 
         var map = Map.init(allocator);
@@ -1382,7 +1499,7 @@ pub const MessageReader = struct {
         return map;
     }
 
-    pub fn readStringMultimap(self: *Self, allocator: mem.Allocator) !Multimap {
+    pub fn readStringMultimap(self: *MessageReader, allocator: mem.Allocator) !Multimap {
         const n = try self.readInt(u16);
 
         var map = Multimap.init(allocator);
@@ -1393,6 +1510,22 @@ pub const MessageReader = struct {
             const list = try self.readStringList(allocator);
 
             _ = try map.put(k, list);
+        }
+
+        return map;
+    }
+
+    pub fn readBytesMap(self: *MessageReader, allocator: mem.Allocator) !BytesMap {
+        const n = try self.readInt(u16);
+
+        var map = BytesMap.init(allocator);
+
+        var i: usize = 0;
+        while (i < n) : (i += 1) {
+            const k = try self.readString(allocator);
+            const v = try self.readBytes(allocator);
+
+            _ = try map.put(k, v);
         }
 
         return map;
@@ -2043,7 +2176,7 @@ test "envelope header: read and write" {
 
     // deserialize the header
 
-    const envelope = try Envelope.read(testing.allocator, fbs.reader());
+    const envelope = try Envelope.read(testing.allocator, fbs.reader(), .none);
     const header = envelope.header;
 
     try testing.expect(header.version == .v4);
@@ -2241,7 +2374,7 @@ test "error message: invalid query, no keyspace specified" {
     defer arena.deinit();
 
     const data = "\x84\x00\x00\x02\x00\x00\x00\x00\x5e\x00\x00\x22\x00\x00\x58\x4e\x6f\x20\x6b\x65\x79\x73\x70\x61\x63\x65\x20\x68\x61\x73\x20\x62\x65\x65\x6e\x20\x73\x70\x65\x63\x69\x66\x69\x65\x64\x2e\x20\x55\x53\x45\x20\x61\x20\x6b\x65\x79\x73\x70\x61\x63\x65\x2c\x20\x6f\x72\x20\x65\x78\x70\x6c\x69\x63\x69\x74\x6c\x79\x20\x73\x70\x65\x63\x69\x66\x79\x20\x6b\x65\x79\x73\x70\x61\x63\x65\x2e\x74\x61\x62\x6c\x65\x6e\x61\x6d\x65";
-    const envelope = try testReadEnvelope(arena.allocator(), data);
+    const envelope = try testReadEnvelope(arena.allocator(), data, .none);
 
     try checkEnvelopeHeader(.v4, Opcode.@"error", data.len, envelope.header);
 
@@ -2257,7 +2390,7 @@ test "error message: already exists" {
     defer arena.deinit();
 
     const data = "\x84\x00\x00\x23\x00\x00\x00\x00\x53\x00\x00\x24\x00\x00\x3e\x43\x61\x6e\x6e\x6f\x74\x20\x61\x64\x64\x20\x61\x6c\x72\x65\x61\x64\x79\x20\x65\x78\x69\x73\x74\x69\x6e\x67\x20\x74\x61\x62\x6c\x65\x20\x22\x68\x65\x6c\x6c\x6f\x22\x20\x74\x6f\x20\x6b\x65\x79\x73\x70\x61\x63\x65\x20\x22\x66\x6f\x6f\x62\x61\x72\x22\x00\x06\x66\x6f\x6f\x62\x61\x72\x00\x05\x68\x65\x6c\x6c\x6f";
-    const envelope = try testReadEnvelope(arena.allocator(), data);
+    const envelope = try testReadEnvelope(arena.allocator(), data, .none);
 
     try checkEnvelopeHeader(.v4, Opcode.@"error", data.len, envelope.header);
 
@@ -2276,7 +2409,7 @@ test "error message: syntax error" {
     defer arena.deinit();
 
     const data = "\x84\x00\x00\x2f\x00\x00\x00\x00\x41\x00\x00\x20\x00\x00\x3b\x6c\x69\x6e\x65\x20\x32\x3a\x30\x20\x6d\x69\x73\x6d\x61\x74\x63\x68\x65\x64\x20\x69\x6e\x70\x75\x74\x20\x27\x3b\x27\x20\x65\x78\x70\x65\x63\x74\x69\x6e\x67\x20\x4b\x5f\x46\x52\x4f\x4d\x20\x28\x73\x65\x6c\x65\x63\x74\x2a\x5b\x3b\x5d\x29";
-    const envelope = try testReadEnvelope(arena.allocator(), data);
+    const envelope = try testReadEnvelope(arena.allocator(), data, .none);
 
     try checkEnvelopeHeader(.v4, Opcode.@"error", data.len, envelope.header);
 
@@ -2297,7 +2430,7 @@ test "options message" {
     defer arena.deinit();
 
     const data = "\x04\x00\x00\x05\x05\x00\x00\x00\x00";
-    const envelope = try testReadEnvelope(arena.allocator(), data);
+    const envelope = try testReadEnvelope(arena.allocator(), data, .none);
 
     try checkEnvelopeHeader(.v4, Opcode.options, data.len, envelope.header);
 }
@@ -2309,36 +2442,40 @@ pub const StartupMessage = struct {
     const Self = @This();
 
     cql_version: CQLVersion = .{ .major = 3, .minor = 0, .patch = 0 },
-    compression: ?CompressionAlgorithm = null,
+    compression: CompressionAlgorithm = .none,
 
     pub fn write(self: Self, mw: *MessageWriter) !void {
         var buf: [16]u8 = undefined;
         const cql_version = try self.cql_version.print(&buf);
 
-        if (self.compression) |c| {
-            // Always 2 keys
-            _ = try mw.startStringMap(2);
-
-            _ = try mw.writeString("CQL_VERSION");
-            _ = try mw.writeString(cql_version);
-
-            _ = try mw.writeString("COMPRESSION");
-            switch (c) {
-                .LZ4 => _ = try mw.writeString("lz4"),
-                .Snappy => _ = try mw.writeString("snappy"),
-            }
-        } else {
-            // Always 1 key
-            _ = try mw.startStringMap(1);
-            _ = try mw.writeString("CQL_VERSION");
-            _ = try mw.writeString(cql_version);
+        switch (self.compression) {
+            .lz4 => {
+                _ = try mw.startStringMap(2);
+                _ = try mw.writeString("CQL_VERSION");
+                _ = try mw.writeString(cql_version);
+                _ = try mw.writeString("COMPRESSION");
+                _ = try mw.writeString("lz4");
+            },
+            .snappy => {
+                _ = try mw.startStringMap(2);
+                _ = try mw.writeString("CQL_VERSION");
+                _ = try mw.writeString(cql_version);
+                _ = try mw.writeString("COMPRESSION");
+                _ = try mw.writeString("snappy");
+            },
+            .none => {
+                // Always 1 key
+                _ = try mw.startStringMap(1);
+                _ = try mw.writeString("CQL_VERSION");
+                _ = try mw.writeString(cql_version);
+            },
         }
     }
 
     pub fn read(allocator: mem.Allocator, br: *MessageReader) !Self {
         var message = Self{
             .cql_version = undefined,
-            .compression = null,
+            .compression = .none,
         };
 
         const map = try br.readStringMap(allocator);
@@ -2355,9 +2492,9 @@ pub const StartupMessage = struct {
 
         if (map.getEntry("COMPRESSION")) |entry| {
             if (mem.eql(u8, entry.value_ptr.*, "lz4")) {
-                message.compression = CompressionAlgorithm.LZ4;
+                message.compression = .lz4;
             } else if (mem.eql(u8, entry.value_ptr.*, "snappy")) {
-                message.compression = CompressionAlgorithm.Snappy;
+                message.compression = .snappy;
             } else {
                 return error.InvalidCompression;
             }
@@ -2374,7 +2511,7 @@ test "startup message" {
     // read
 
     const exp = "\x04\x00\x00\x00\x01\x00\x00\x00\x16\x00\x01\x00\x0b\x43\x51\x4c\x5f\x56\x45\x52\x53\x49\x4f\x4e\x00\x05\x33\x2e\x30\x2e\x30";
-    const envelope = try testReadEnvelope(arena.allocator(), exp);
+    const envelope = try testReadEnvelope(arena.allocator(), exp, .none);
 
     try checkEnvelopeHeader(.v4, Opcode.startup, exp.len, envelope.header);
 
@@ -2382,7 +2519,7 @@ test "startup message" {
     const message = try StartupMessage.read(arena.allocator(), &mr);
 
     try testing.expectEqual(CQLVersion{ .major = 3, .minor = 0, .patch = 0 }, message.cql_version);
-    try testing.expect(message.compression == null);
+    try testing.expect(message.compression == .none);
 
     // write
 
@@ -2433,7 +2570,7 @@ test "execute message" {
     // read
 
     const exp = "\x04\x00\x01\x00\x0a\x00\x00\x00\x37\x00\x10\x97\x97\x95\x6d\xfe\xb2\x4c\x99\x86\x8e\xd3\x84\xff\x6f\xd9\x4c\x00\x04\x27\x00\x01\x00\x00\x00\x10\xeb\x11\xc9\x1e\xd8\xcc\x48\x4d\xaf\x55\xe9\x9f\x5c\xd9\xec\x4a\x00\x00\x13\x88\x00\x05\xa2\x41\x4c\x1b\x06\x4c";
-    const envelope = try testReadEnvelope(arena.allocator(), exp);
+    const envelope = try testReadEnvelope(arena.allocator(), exp, .none);
 
     try checkEnvelopeHeader(.v4, Opcode.execute, exp.len, envelope.header);
 
@@ -2523,7 +2660,7 @@ test "authenticate message" {
     // read
 
     const exp = "\x84\x00\x00\x00\x03\x00\x00\x00\x31\x00\x2f\x6f\x72\x67\x2e\x61\x70\x61\x63\x68\x65\x2e\x63\x61\x73\x73\x61\x6e\x64\x72\x61\x2e\x61\x75\x74\x68\x2e\x50\x61\x73\x73\x77\x6f\x72\x64\x41\x75\x74\x68\x65\x6e\x74\x69\x63\x61\x74\x6f\x72";
-    const envelope = try testReadEnvelope(arena.allocator(), exp);
+    const envelope = try testReadEnvelope(arena.allocator(), exp, .none);
 
     try checkEnvelopeHeader(.v4, Opcode.authenticate, exp.len, envelope.header);
 
@@ -2544,7 +2681,7 @@ test "auth response message" {
     // read
 
     const exp = "\x04\x00\x00\x02\x0f\x00\x00\x00\x18\x00\x00\x00\x14\x00\x63\x61\x73\x73\x61\x6e\x64\x72\x61\x00\x63\x61\x73\x73\x61\x6e\x64\x72\x61";
-    const envelope = try testReadEnvelope(arena.allocator(), exp);
+    const envelope = try testReadEnvelope(arena.allocator(), exp, .none);
 
     try checkEnvelopeHeader(.v4, Opcode.auth_response, exp.len, envelope.header);
 
@@ -2566,7 +2703,7 @@ test "auth success message" {
     // read
 
     const exp = "\x84\x00\x00\x02\x10\x00\x00\x00\x04\xff\xff\xff\xff";
-    const envelope = try testReadEnvelope(arena.allocator(), exp);
+    const envelope = try testReadEnvelope(arena.allocator(), exp, .none);
 
     try checkEnvelopeHeader(.v4, Opcode.auth_success, exp.len, envelope.header);
 
@@ -2778,7 +2915,7 @@ test "batch message: query type string" {
     // read
 
     const exp = "\x04\x00\x00\xc0\x0d\x00\x00\x00\xcc\x00\x00\x03\x00\x00\x00\x00\x3b\x49\x4e\x53\x45\x52\x54\x20\x49\x4e\x54\x4f\x20\x66\x6f\x6f\x62\x61\x72\x2e\x75\x73\x65\x72\x28\x69\x64\x2c\x20\x6e\x61\x6d\x65\x29\x20\x76\x61\x6c\x75\x65\x73\x28\x75\x75\x69\x64\x28\x29\x2c\x20\x27\x76\x69\x6e\x63\x65\x6e\x74\x27\x29\x00\x00\x00\x00\x00\x00\x3b\x49\x4e\x53\x45\x52\x54\x20\x49\x4e\x54\x4f\x20\x66\x6f\x6f\x62\x61\x72\x2e\x75\x73\x65\x72\x28\x69\x64\x2c\x20\x6e\x61\x6d\x65\x29\x20\x76\x61\x6c\x75\x65\x73\x28\x75\x75\x69\x64\x28\x29\x2c\x20\x27\x76\x69\x6e\x63\x65\x6e\x74\x27\x29\x00\x00\x00\x00\x00\x00\x3b\x49\x4e\x53\x45\x52\x54\x20\x49\x4e\x54\x4f\x20\x66\x6f\x6f\x62\x61\x72\x2e\x75\x73\x65\x72\x28\x69\x64\x2c\x20\x6e\x61\x6d\x65\x29\x20\x76\x61\x6c\x75\x65\x73\x28\x75\x75\x69\x64\x28\x29\x2c\x20\x27\x76\x69\x6e\x63\x65\x6e\x74\x27\x29\x00\x00\x00\x00\x00";
-    const envelope = try testReadEnvelope(arena.allocator(), exp);
+    const envelope = try testReadEnvelope(arena.allocator(), exp, .none);
 
     try checkEnvelopeHeader(.v4, Opcode.batch, exp.len, envelope.header);
 
@@ -2814,7 +2951,7 @@ test "batch message: query type prepared" {
     // read
 
     const exp = "\x04\x00\x01\x00\x0d\x00\x00\x00\xa2\x00\x00\x03\x01\x00\x10\x88\xb7\xd6\x81\x8b\x2d\x8d\x97\xfc\x41\xc1\x34\x7b\x27\xde\x65\x00\x02\x00\x00\x00\x10\x3a\x9a\xab\x41\x68\x24\x4a\xef\x9d\xf5\x72\xc7\x84\xab\xa2\x57\x00\x00\x00\x07\x56\x69\x6e\x63\x65\x6e\x74\x01\x00\x10\x88\xb7\xd6\x81\x8b\x2d\x8d\x97\xfc\x41\xc1\x34\x7b\x27\xde\x65\x00\x02\x00\x00\x00\x10\xed\x54\xb0\x6d\xcc\xb2\x43\x51\x96\x51\x74\x5e\xee\xae\xd2\xfe\x00\x00\x00\x07\x56\x69\x6e\x63\x65\x6e\x74\x01\x00\x10\x88\xb7\xd6\x81\x8b\x2d\x8d\x97\xfc\x41\xc1\x34\x7b\x27\xde\x65\x00\x02\x00\x00\x00\x10\x79\xdf\x8a\x28\x5a\x60\x47\x19\x9b\x42\x84\xea\x69\x10\x1a\xe6\x00\x00\x00\x07\x56\x69\x6e\x63\x65\x6e\x74\x00\x00\x00";
-    const envelope = try testReadEnvelope(arena.allocator(), exp);
+    const envelope = try testReadEnvelope(arena.allocator(), exp, .none);
 
     try checkEnvelopeHeader(.v4, Opcode.batch, exp.len, envelope.header);
 
@@ -2917,7 +3054,7 @@ test "event message: topology change" {
     // read
 
     const exp = "\x84\x00\xff\xff\x0c\x00\x00\x00\x24\x00\x0f\x54\x4f\x50\x4f\x4c\x4f\x47\x59\x5f\x43\x48\x41\x4e\x47\x45\x00\x08\x4e\x45\x57\x5f\x4e\x4f\x44\x45\x04\x7f\x00\x00\x04\x00\x00\x23\x52";
-    const envelope = try testReadEnvelope(arena.allocator(), exp);
+    const envelope = try testReadEnvelope(arena.allocator(), exp, .none);
 
     try checkEnvelopeHeader(.v4, Opcode.event, exp.len, envelope.header);
 
@@ -2938,7 +3075,7 @@ test "event message: status change" {
     defer arena.deinit();
 
     const data = "\x84\x00\xff\xff\x0c\x00\x00\x00\x1e\x00\x0d\x53\x54\x41\x54\x55\x53\x5f\x43\x48\x41\x4e\x47\x45\x00\x04\x44\x4f\x57\x4e\x04\x7f\x00\x00\x01\x00\x00\x23\x52";
-    const envelope = try testReadEnvelope(arena.allocator(), data);
+    const envelope = try testReadEnvelope(arena.allocator(), data, .none);
 
     try checkEnvelopeHeader(.v4, Opcode.event, data.len, envelope.header);
 
@@ -2959,7 +3096,7 @@ test "event message: schema change/keyspace" {
     defer arena.deinit();
 
     const data = "\x84\x00\xff\xff\x0c\x00\x00\x00\x2a\x00\x0d\x53\x43\x48\x45\x4d\x41\x5f\x43\x48\x41\x4e\x47\x45\x00\x07\x43\x52\x45\x41\x54\x45\x44\x00\x08\x4b\x45\x59\x53\x50\x41\x43\x45\x00\x06\x62\x61\x72\x62\x61\x7a";
-    const envelope = try testReadEnvelope(arena.allocator(), data);
+    const envelope = try testReadEnvelope(arena.allocator(), data, .none);
 
     try checkEnvelopeHeader(.v4, Opcode.event, data.len, envelope.header);
 
@@ -2983,7 +3120,7 @@ test "event message: schema change/table" {
     defer arena.deinit();
 
     const data = "\x84\x00\xff\xff\x0c\x00\x00\x00\x2e\x00\x0d\x53\x43\x48\x45\x4d\x41\x5f\x43\x48\x41\x4e\x47\x45\x00\x07\x43\x52\x45\x41\x54\x45\x44\x00\x05\x54\x41\x42\x4c\x45\x00\x06\x66\x6f\x6f\x62\x61\x72\x00\x05\x73\x61\x6c\x75\x74";
-    const envelope = try testReadEnvelope(arena.allocator(), data);
+    const envelope = try testReadEnvelope(arena.allocator(), data, .none);
 
     try checkEnvelopeHeader(.v4, Opcode.event, data.len, envelope.header);
 
@@ -3007,7 +3144,7 @@ test "event message: schema change/function" {
     defer arena.deinit();
 
     const data = "\x84\x00\xff\xff\x0c\x00\x00\x00\x40\x00\x0d\x53\x43\x48\x45\x4d\x41\x5f\x43\x48\x41\x4e\x47\x45\x00\x07\x43\x52\x45\x41\x54\x45\x44\x00\x08\x46\x55\x4e\x43\x54\x49\x4f\x4e\x00\x06\x66\x6f\x6f\x62\x61\x72\x00\x0d\x73\x6f\x6d\x65\x5f\x66\x75\x6e\x63\x74\x69\x6f\x6e\x00\x01\x00\x03\x69\x6e\x74";
-    const envelope = try testReadEnvelope(arena.allocator(), data);
+    const envelope = try testReadEnvelope(arena.allocator(), data, .none);
 
     try checkEnvelopeHeader(.v4, Opcode.event, data.len, envelope.header);
 
@@ -3081,7 +3218,7 @@ test "prepare message" {
     // read
 
     const exp = "\x04\x00\x00\xc0\x09\x00\x00\x00\x32\x00\x00\x00\x2e\x53\x45\x4c\x45\x43\x54\x20\x61\x67\x65\x2c\x20\x6e\x61\x6d\x65\x20\x66\x72\x6f\x6d\x20\x66\x6f\x6f\x62\x61\x72\x2e\x75\x73\x65\x72\x20\x77\x68\x65\x72\x65\x20\x69\x64\x20\x3d\x20\x3f";
-    const envelope = try testReadEnvelope(arena.allocator(), exp);
+    const envelope = try testReadEnvelope(arena.allocator(), exp, .none);
 
     try checkEnvelopeHeader(.v4, Opcode.prepare, exp.len, envelope.header);
 
@@ -3125,7 +3262,7 @@ test "query message: no values, no paging state" {
     // read
 
     const exp = "\x04\x00\x00\x08\x07\x00\x00\x00\x30\x00\x00\x00\x1b\x53\x45\x4c\x45\x43\x54\x20\x2a\x20\x46\x52\x4f\x4d\x20\x66\x6f\x6f\x62\x61\x72\x2e\x75\x73\x65\x72\x20\x3b\x00\x01\x34\x00\x00\x00\x64\x00\x08\x00\x05\xa2\x2c\xf0\x57\x3e\x3f";
-    const envelope = try testReadEnvelope(arena.allocator(), exp);
+    const envelope = try testReadEnvelope(arena.allocator(), exp, .none);
 
     try checkEnvelopeHeader(.v4, Opcode.query, exp.len, envelope.header);
 
@@ -3157,7 +3294,7 @@ test "ready message" {
     defer arena.deinit();
 
     const data = "\x84\x00\x00\x02\x02\x00\x00\x00\x00";
-    const envelope = try testReadEnvelope(arena.allocator(), data);
+    const envelope = try testReadEnvelope(arena.allocator(), data, .none);
 
     try checkEnvelopeHeader(.v4, Opcode.ready, data.len, envelope.header);
 }
@@ -3186,7 +3323,7 @@ test "register message" {
     // read
 
     const exp = "\x04\x00\x00\xc0\x0b\x00\x00\x00\x31\x00\x03\x00\x0f\x54\x4f\x50\x4f\x4c\x4f\x47\x59\x5f\x43\x48\x41\x4e\x47\x45\x00\x0d\x53\x54\x41\x54\x55\x53\x5f\x43\x48\x41\x4e\x47\x45\x00\x0d\x53\x43\x48\x45\x4d\x41\x5f\x43\x48\x41\x4e\x47\x45";
-    const envelope = try testReadEnvelope(arena.allocator(), exp);
+    const envelope = try testReadEnvelope(arena.allocator(), exp, .none);
 
     try checkEnvelopeHeader(.v4, Opcode.register, exp.len, envelope.header);
 
@@ -3307,7 +3444,8 @@ pub const ResultMessage = struct {
             .result = undefined,
         };
 
-        const kind: ResultKind = @enumFromInt(try br.readInt(u32));
+        const n = try br.readInt(u32);
+        const kind: ResultKind = @enumFromInt(n);
 
         switch (kind) {
             .Void => message.result = Result{ .Void = {} },
@@ -3338,7 +3476,7 @@ test "result message: void" {
     defer arena.deinit();
 
     const data = "\x84\x00\x00\x9d\x08\x00\x00\x00\x04\x00\x00\x00\x01";
-    const envelope = try testReadEnvelope(arena.allocator(), data);
+    const envelope = try testReadEnvelope(arena.allocator(), data, .none);
 
     try checkEnvelopeHeader(.v4, Opcode.result, data.len, envelope.header);
 
@@ -3353,7 +3491,7 @@ test "result message: rows" {
     defer arena.deinit();
 
     const data = "\x84\x00\x00\x20\x08\x00\x00\x00\xa2\x00\x00\x00\x02\x00\x00\x00\x01\x00\x00\x00\x03\x00\x06\x66\x6f\x6f\x62\x61\x72\x00\x04\x75\x73\x65\x72\x00\x02\x69\x64\x00\x0c\x00\x03\x61\x67\x65\x00\x14\x00\x04\x6e\x61\x6d\x65\x00\x0d\x00\x00\x00\x03\x00\x00\x00\x10\x35\x94\x43\xf3\xb7\xc4\x47\xb2\x8a\xb4\xe2\x42\x39\x79\x36\xf8\x00\x00\x00\x01\x00\x00\x00\x00\x08\x56\x69\x6e\x63\x65\x6e\x74\x30\x00\x00\x00\x10\xd7\x77\xd5\xd7\x58\xc0\x4d\x2b\x8c\xf9\xa3\x53\xfa\x8e\x6c\x96\x00\x00\x00\x01\x01\x00\x00\x00\x08\x56\x69\x6e\x63\x65\x6e\x74\x31\x00\x00\x00\x10\x94\xa4\x7b\xb2\x8c\xf7\x43\x3d\x97\x6e\x72\x74\xb3\xfd\xd3\x31\x00\x00\x00\x01\x02\x00\x00\x00\x08\x56\x69\x6e\x63\x65\x6e\x74\x32";
-    const envelope = try testReadEnvelope(arena.allocator(), data);
+    const envelope = try testReadEnvelope(arena.allocator(), data, .none);
 
     try checkEnvelopeHeader(.v4, Opcode.result, data.len, envelope.header);
 
@@ -3407,7 +3545,7 @@ test "result message: rows, don't skip metadata" {
     defer arena.deinit();
 
     const data = "\x84\x00\x00\x00\x08\x00\x00\x02\x3a\x00\x00\x00\x02\x00\x00\x00\x01\x00\x00\x00\x03\x00\x06\x66\x6f\x6f\x62\x61\x72\x00\x04\x75\x73\x65\x72\x00\x02\x69\x64\x00\x0c\x00\x03\x61\x67\x65\x00\x00\x00\x28\x6f\x72\x67\x2e\x61\x70\x61\x63\x68\x65\x2e\x63\x61\x73\x73\x61\x6e\x64\x72\x61\x2e\x64\x62\x2e\x6d\x61\x72\x73\x68\x61\x6c\x2e\x42\x79\x74\x65\x54\x79\x70\x65\x00\x04\x6e\x61\x6d\x65\x00\x0d\x00\x00\x00\x0d\x00\x00\x00\x10\x35\x94\x43\xf3\xb7\xc4\x47\xb2\x8a\xb4\xe2\x42\x39\x79\x36\xf8\x00\x00\x00\x01\x00\x00\x00\x00\x08\x56\x69\x6e\x63\x65\x6e\x74\x30\x00\x00\x00\x10\x87\x0e\x45\x7f\x56\x4a\x4f\xd5\xb5\xd6\x4a\x48\x4b\xe0\x67\x67\x00\x00\x00\x01\x01\x00\x00\x00\x08\x56\x69\x6e\x63\x65\x6e\x74\x31\x00\x00\x00\x10\xc5\xb1\x12\xf4\x0d\xea\x4d\x22\x83\x5b\xe0\x25\xef\x69\x0c\xe1\x00\x00\x00\x01\x01\x00\x00\x00\x08\x56\x69\x6e\x63\x65\x6e\x74\x31\x00\x00\x00\x10\xd7\x77\xd5\xd7\x58\xc0\x4d\x2b\x8c\xf9\xa3\x53\xfa\x8e\x6c\x96\x00\x00\x00\x01\x01\x00\x00\x00\x08\x56\x69\x6e\x63\x65\x6e\x74\x31\x00\x00\x00\x10\x65\x54\x02\x89\x33\xe1\x42\x73\x82\xcc\x1c\xdb\x3d\x24\x5e\x40\x00\x00\x00\x01\x00\x00\x00\x00\x08\x56\x69\x6e\x63\x65\x6e\x74\x30\x00\x00\x00\x10\x6a\xd1\x07\x9d\x27\x23\x47\x76\x8b\x7f\x39\x4d\xe3\xb8\x97\xc5\x00\x00\x00\x01\x02\x00\x00\x00\x08\x56\x69\x6e\x63\x65\x6e\x74\x32\x00\x00\x00\x10\xe9\xef\xfe\xa6\xeb\xc5\x4d\xb9\xaf\xc7\xd7\xc0\x28\x43\x27\x40\x00\x00\x00\x01\x00\x00\x00\x00\x08\x56\x69\x6e\x63\x65\x6e\x74\x30\x00\x00\x00\x10\x96\xe6\xdd\x62\x14\xc9\x4e\x7c\xa1\x2f\x98\x5e\xe9\xe0\x91\x0d\x00\x00\x00\x01\x02\x00\x00\x00\x08\x56\x69\x6e\x63\x65\x6e\x74\x32\x00\x00\x00\x10\xef\xd5\x5a\x9b\xec\x7f\x4c\x5c\x89\xc3\x8c\xfa\x28\xf9\x6d\xfe\x00\x00\x00\x01\x00\x00\x00\x00\x08\x56\x69\x6e\x63\x65\x6e\x74\x30\x00\x00\x00\x10\x94\xa4\x7b\xb2\x8c\xf7\x43\x3d\x97\x6e\x72\x74\xb3\xfd\xd3\x31\x00\x00\x00\x01\x02\x00\x00\x00\x08\x56\x69\x6e\x63\x65\x6e\x74\x32\x00\x00\x00\x10\xe6\x02\xc7\x47\xbf\xca\x44\xbc\x9d\xc6\x6b\x04\x0f\xb7\x15\xed\x00\x00\x00\x01\x78\x00\x00\x00\x04\x48\x61\x68\x61\x00\x00\x00\x10\xac\x5e\xcc\xa8\x8e\xa1\x42\x2f\x86\xe6\xa0\x93\xbe\xd2\x73\x22\x00\x00\x00\x01\x02\x00\x00\x00\x08\x56\x69\x6e\x63\x65\x6e\x74\x32\x00\x00\x00\x10\xbe\x90\x37\x66\x31\xe5\x43\x93\xbc\x99\x43\xd3\x69\xf8\xe6\xba\x00\x00\x00\x01\x01\x00\x00\x00\x08\x56\x69\x6e\x63\x65\x6e\x74\x31";
-    const envelope = try testReadEnvelope(arena.allocator(), data);
+    const envelope = try testReadEnvelope(arena.allocator(), data, .none);
 
     try checkEnvelopeHeader(.v4, Opcode.result, data.len, envelope.header);
 
@@ -3451,7 +3589,7 @@ test "result message: rows, list of uuid" {
     defer arena.deinit();
 
     const data = "\x84\x00\x00\x00\x08\x00\x00\x00\x58\x00\x00\x00\x02\x00\x00\x00\x01\x00\x00\x00\x02\x00\x06\x66\x6f\x6f\x62\x61\x72\x00\x0a\x61\x67\x65\x5f\x74\x6f\x5f\x69\x64\x73\x00\x03\x61\x67\x65\x00\x09\x00\x03\x69\x64\x73\x00\x20\x00\x0c\x00\x00\x00\x01\x00\x00\x00\x04\x00\x00\x00\x78\x00\x00\x00\x18\x00\x00\x00\x01\x00\x00\x00\x10\xe6\x02\xc7\x47\xbf\xca\x44\xbc\x9d\xc6\x6b\x04\x0f\xb7\x15\xed";
-    const envelope = try testReadEnvelope(arena.allocator(), data);
+    const envelope = try testReadEnvelope(arena.allocator(), data, .none);
 
     try checkEnvelopeHeader(.v4, Opcode.result, data.len, envelope.header);
 
@@ -3491,7 +3629,7 @@ test "result message: set keyspace" {
     defer arena.deinit();
 
     const data = "\x84\x00\x00\x77\x08\x00\x00\x00\x0c\x00\x00\x00\x03\x00\x06\x66\x6f\x6f\x62\x61\x72";
-    const envelope = try testReadEnvelope(arena.allocator(), data);
+    const envelope = try testReadEnvelope(arena.allocator(), data, .none);
 
     try checkEnvelopeHeader(.v4, Opcode.result, data.len, envelope.header);
 
@@ -3507,7 +3645,7 @@ test "result message: prepared insert" {
     defer arena.deinit();
 
     const data = "\x84\x00\x00\x80\x08\x00\x00\x00\x4f\x00\x00\x00\x04\x00\x10\x63\x7c\x1c\x1f\xd0\x13\x4a\xb8\xfc\x94\xca\x67\xf2\x88\xb2\xa3\x00\x00\x00\x01\x00\x00\x00\x03\x00\x00\x00\x01\x00\x00\x00\x06\x66\x6f\x6f\x62\x61\x72\x00\x04\x75\x73\x65\x72\x00\x02\x69\x64\x00\x0c\x00\x03\x61\x67\x65\x00\x14\x00\x04\x6e\x61\x6d\x65\x00\x0d\x00\x00\x00\x04\x00\x00\x00\x00";
-    const envelope = try testReadEnvelope(arena.allocator(), data);
+    const envelope = try testReadEnvelope(arena.allocator(), data, .none);
 
     try checkEnvelopeHeader(.v4, Opcode.result, data.len, envelope.header);
 
@@ -3551,7 +3689,7 @@ test "result message: prepared select" {
     defer arena.deinit();
 
     const data = "\x84\x00\x00\xc0\x08\x00\x00\x00\x63\x00\x00\x00\x04\x00\x10\x3b\x2e\x8d\x03\x43\xf4\x3b\xfc\xad\xa1\x78\x9c\x27\x0e\xcf\xee\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x06\x66\x6f\x6f\x62\x61\x72\x00\x04\x75\x73\x65\x72\x00\x02\x69\x64\x00\x0c\x00\x00\x00\x01\x00\x00\x00\x03\x00\x06\x66\x6f\x6f\x62\x61\x72\x00\x04\x75\x73\x65\x72\x00\x02\x69\x64\x00\x0c\x00\x03\x61\x67\x65\x00\x14\x00\x04\x6e\x61\x6d\x65\x00\x0d";
-    const envelope = try testReadEnvelope(arena.allocator(), data);
+    const envelope = try testReadEnvelope(arena.allocator(), data, .none);
 
     try checkEnvelopeHeader(.v4, Opcode.result, data.len, envelope.header);
 
@@ -3593,6 +3731,24 @@ test "result message: prepared select" {
         try testing.expectEqualStrings("name", col3.name);
         try testing.expectEqual(OptionID.Varchar, col3.option);
     }
+}
+
+test "result message: rows with warning" {
+    var arena = testutils.arenaAllocator();
+    defer arena.deinit();
+
+    const data = "\x84\x09\x00\x00\x08\x00\x00\x00\x62\x69\xa0\x00\x01\x00\x2c\x41\x67\x67\x72\x65\x67\x61\x74\x69\x6f\x6e\x20\x71\x75\x65\x72\x79\x20\x75\x73\x65\x64\x20\x77\x69\x74\x68\x6f\x75\x74\x20\x70\x61\x72\x74\x69\x74\x01\x1d\x28\x6b\x65\x79\x00\x00\x00\x02\x00\x00\x00\x01\x05\x04\x64\x06\x66\x6f\x6f\x62\x61\x72\x00\x0a\x61\x67\x65\x5f\x74\x6f\x5f\x69\x64\x73\x00\x05\x63\x6f\x75\x6e\x74\x15\x25\x20\x08\x00\x00\x00\x00\x00\x00\x9c\x40";
+    const envelope = try testReadEnvelope(arena.allocator(), data, .snappy);
+    try testing.expect(envelope.warnings != null);
+    try testing.expectEqual(1, envelope.warnings.?.len);
+    try testing.expectEqualStrings(envelope.warnings.?[0], "Aggregation query used without partition key");
+
+    try checkEnvelopeHeader(.v4, Opcode.result, data.len, envelope.header);
+
+    var mr = MessageReader.init(envelope.body);
+    const message = try ResultMessage.read(arena.allocator(), envelope.header.version, &mr);
+
+    try testing.expect(message.result == .Rows);
 }
 
 /// SUPPORTED is sent by a node in response to a OPTIONS message.
@@ -3660,7 +3816,7 @@ test "supported message" {
     // read
 
     const exp = "\x84\x00\x00\x09\x06\x00\x00\x00\x60\x00\x03\x00\x11\x50\x52\x4f\x54\x4f\x43\x4f\x4c\x5f\x56\x45\x52\x53\x49\x4f\x4e\x53\x00\x03\x00\x04\x33\x2f\x76\x33\x00\x04\x34\x2f\x76\x34\x00\x09\x35\x2f\x76\x35\x2d\x62\x65\x74\x61\x00\x0b\x43\x4f\x4d\x50\x52\x45\x53\x53\x49\x4f\x4e\x00\x02\x00\x06\x73\x6e\x61\x70\x70\x79\x00\x03\x6c\x7a\x34\x00\x0b\x43\x51\x4c\x5f\x56\x45\x52\x53\x49\x4f\x4e\x00\x01\x00\x05\x33\x2e\x34\x2e\x34";
-    const envelope = try testReadEnvelope(arena.allocator(), exp);
+    const envelope = try testReadEnvelope(arena.allocator(), exp, .none);
 
     try checkEnvelopeHeader(.v4, Opcode.supported, exp.len, envelope.header);
 
@@ -3676,16 +3832,16 @@ test "supported message" {
     try testing.expect(message.protocol_versions[2] == .v5);
 
     try testing.expectEqual(@as(usize, 2), message.compression_algorithms.len);
-    try testing.expectEqual(CompressionAlgorithm.Snappy, message.compression_algorithms[0]);
-    try testing.expectEqual(CompressionAlgorithm.LZ4, message.compression_algorithms[1]);
+    try testing.expectEqual(CompressionAlgorithm.snappy, message.compression_algorithms[0]);
+    try testing.expectEqual(CompressionAlgorithm.lz4, message.compression_algorithms[1]);
 }
 
 /// Reads an enevelope from the provided buffer.
 /// Only intended to be used for tests.
-fn testReadEnvelope(allocator: mem.Allocator, data: []const u8) !Envelope {
+fn testReadEnvelope(allocator: mem.Allocator, data: []const u8, compression_algorithm: CompressionAlgorithm) !Envelope {
     var fbs = io.fixedBufferStream(data);
 
-    return Envelope.read(allocator, fbs.reader());
+    return Envelope.read(allocator, fbs.reader(), compression_algorithm);
 }
 
 fn expectSameEnvelope(comptime T: type, fr: T, header: EnvelopeHeader, exp: []const u8) !void {
