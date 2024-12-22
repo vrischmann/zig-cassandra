@@ -75,7 +75,7 @@ pub fn main() anyerror!void {
                 if (conn.write_buffer.readableLength() > 0) {
                     log.info("writing {d} bytes", .{conn.write_buffer.readableLength()});
 
-                    const writable = try conn.moveWritable();
+                    const writable = conn.getWritable();
                     try socket.writeAll(writable);
                     log.info("written {d} bytes", .{writable.len});
                 }

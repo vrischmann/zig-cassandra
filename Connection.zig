@@ -280,6 +280,7 @@ pub fn init(allocator: mem.Allocator) !*Self {
         .gpa = allocator,
         .arena = heap.ArenaAllocator.init(allocator),
         .scratch_arena = heap.ArenaAllocator.init(allocator),
+        // TODO(vincent): which allocator to use ?
         .write_buffer = fifo(u8, .Dynamic).init(allocator),
         .read_buffer = fifo(u8, .Dynamic).init(allocator),
         .queue = fifo(Message, .Dynamic).init(allocator),
@@ -293,6 +294,10 @@ pub fn init(allocator: mem.Allocator) !*Self {
 }
 
 pub fn deinit(conn: *Self) void {
+    conn.write_buffer.deinit();
+    conn.read_buffer.deinit();
+    conn.queue.deinit();
+
     conn.arena.deinit();
     conn.scratch_arena.deinit();
     if (comptime build_options.enable_tracing) {
@@ -306,8 +311,8 @@ pub fn feedReadable(conn: *Self, data: []const u8) !void {
     try conn.read_buffer.write(data);
 }
 
-pub fn moveWritable(conn: *Self) ![]const u8 {
-    return try conn.write_buffer.toOwnedSlice();
+pub fn getWritable(conn: *Self) []const u8 {
+    return conn.write_buffer.readableSlice(0);
 }
 
 /// Tick drives the connection state machines.
@@ -385,6 +390,14 @@ pub fn tick(conn: *Self) !void {
 fn tickInHandshake(conn: *Self) !void {
     debug.assert(conn.state == .handshake);
 
+    const previous_handshake_state = conn.handshake_state;
+    defer {
+        log.debug("transitioning handshake from {s} to {s}", .{
+            @tagName(previous_handshake_state),
+            @tagName(conn.handshake_state),
+        });
+    }
+
     switch (conn.handshake_state) {
         .options => {
             try conn.appendMessage(OptionsMessage{});
@@ -398,7 +411,10 @@ fn tickInHandshake(conn: *Self) !void {
             if (conn.queue.readItem()) |message| {
                 const supported_message = switch (message) {
                     .supported => |tmp| tmp,
-                    else => return error.UnexpectedMessageType,
+                    else => {
+                        // TODO(vincent): diags
+                        return error.UnexpectedMessageType;
+                    },
                 };
 
                 conn.compression = supported_message.compression_algorithms[0];
@@ -431,6 +447,21 @@ fn tickInHandshake(conn: *Self) !void {
         .authenticate_or_ready => {
             // TODO(vincent): correct allocator ?
             try conn.readMessagesNoEof(conn.arena.allocator());
+
+            if (conn.queue.readItem()) |message| {
+                switch (message) {
+                    .ready => |_| {},
+                    .authenticate => |_| {},
+                    .@"error" => |_| {
+                        // TODO(vincent): diags
+                        return error.UnexpectedMessageType;
+                    },
+                    else => {
+                        // TODO(vincent): diags
+                        return error.UnexpectedMessageType;
+                    },
+                }
+            }
         },
         .auth_response => unreachable,
         .ready => unreachable,
