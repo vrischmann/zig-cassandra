@@ -159,10 +159,26 @@ fn messageFormatter(message: Message) fmt.Formatter(formatMessage) {
 fn formatMessage(message: Message, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
     switch (message) {
         .@"error" => |msg| {
-            try writer.print("error_code={s} message={s}", .{
+            try writer.print("ERROR::[error_code={s} message={s}]", .{
                 @tagName(msg.error_code),
                 msg.message,
             });
+        },
+        .startup => |msg| {
+            try writer.print("STARTUP::[cql_version={?} compression={?}]", .{
+                msg.cql_version,
+                msg.compression,
+            });
+        },
+        .supported => |msg| {
+            try writer.print("SUPPORTED::[protocol_versions={s} cql_versions={s} compression_algorithms={s}]", .{
+                msg.protocol_versions,
+                msg.cql_versions,
+                msg.compression_algorithms,
+            });
+        },
+        .options => |_| {
+            try writer.print("OPTIONS::[]", .{});
         },
         else => try writer.print("{any}", .{message}),
     }
@@ -539,9 +555,11 @@ fn appendMessage(conn: *Self, message: anytype) !void {
     //
 
     if (comptime build_options.enable_logging) {
+        const tmp = @unionInit(Message, @tagName(opcode), message);
+
         // TODO(vincent): custom formatting
-        log.info("[appendMessage] msg={s} data={s}", .{
-            message,
+        log.info("[appendMessage] msg={any} data={s}", .{
+            messageFormatter(tmp),
             fmt.fmtSliceHexLower(final_payload),
         });
     }
@@ -627,8 +645,7 @@ fn readMessagesNoEof(conn: *Self, message_allocator: mem.Allocator) !void {
             const payload = reader.buffer.readableSlice(0);
 
             log.info("[readMessagesNoEof] msg={any} data={s}", .{
-                // messageFormatter(message),
-                message,
+                messageFormatter(message),
                 fmt.fmtSliceHexLower(payload),
             });
         }

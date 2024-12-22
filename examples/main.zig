@@ -68,16 +68,16 @@ pub fn main() anyerror!void {
                 const n = try socket.read(&buf);
 
                 if (n > 0) {
-                    log.info("read !", .{});
-
+                    log.info("read {d} bytes!", .{n});
                     try conn.feedReadable(buf[0..n]);
                 }
             } else if (poll_fd.revents & posix.POLL.OUT == posix.POLL.OUT) {
                 if (conn.write_buffer.readableLength() > 0) {
-                    log.info("write !", .{});
+                    log.info("writing {d} bytes", .{conn.write_buffer.readableLength()});
 
                     const writable = try conn.moveWritable();
                     try socket.writeAll(writable);
+                    log.info("written {d} bytes", .{writable.len});
                 }
             }
         }

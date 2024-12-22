@@ -794,6 +794,13 @@ pub const CQLVersion = struct {
         return version;
     }
 
+    pub fn format(value: @This(), comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
+        var buf: [16]u8 = undefined;
+        const res = try value.print(&buf);
+
+        try writer.print("{s}", .{res});
+    }
+
     pub fn print(self: @This(), buf: []u8) ![]u8 {
         return std.fmt.bufPrint(buf, "{d}.{d}.{d}", .{
             self.major,
@@ -878,6 +885,10 @@ pub const ProtocolVersion = enum(u8) {
             return error.InvalidProtocolVersion;
         }
     }
+
+    pub fn format(value: ProtocolVersion, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
+        try writer.print("{s}", .{@tagName(value)});
+    }
 };
 
 pub const Opcode = enum(u8) {
@@ -913,11 +924,8 @@ pub const CompressionAlgorithm = enum {
         }
     }
 
-    pub fn toString(self: @This()) []const u8 {
-        return switch (self) {
-            .LZ4 => "lz4",
-            .Snappy => "snappy",
-        };
+    pub fn format(value: CompressionAlgorithm, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
+        try writer.print("{s}", .{@tagName(value)});
     }
 };
 
