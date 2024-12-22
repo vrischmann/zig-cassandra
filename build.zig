@@ -12,12 +12,11 @@ pub fn build(b: *std.Build) !void {
     const snappy = snappy_dep.artifact("snappy");
     const snappy_mod = snappy_dep.module("snappy");
 
-    const lz4_dep = b.dependency("liblz4", .{
+    const lz4_dep = b.dependency("lz4", .{
         .target = target,
         .optimize = optimize,
     });
     const lz4 = lz4_dep.artifact("lz4");
-    const lz4_mod = lz4_dep.module("lz4");
 
     // Define options
 
@@ -36,41 +35,44 @@ pub fn build(b: *std.Build) !void {
         .optimize = optimize,
     });
 
+    // module.addIncludePath(lz4_dep.path("lz4"));
+    module.linkLibrary(lz4);
+    module.linkLibrary(snappy);
+
     const module_options = b.addOptions();
     module_options.addOption(bool, "enable_tracing", enable_tracing);
     module_options.addOption(bool, "enable_logging", enable_logging);
     module_options.addOption(bool, "with_cassandra", with_cassandra);
 
-    module.addIncludePath(b.path("."));
-    module.linkLibrary(lz4);
-    module.linkLibrary(snappy);
     module.addImport("build_options", module_options.createModule());
-    module.addImport("lz4", lz4_mod);
     module.addImport("snappy", snappy_mod);
 
     //
     // Add the main tests for the library.
     //
 
-    var main_tests = b.addTest(.{
-        .name = "main",
+    var main_tests_mod = b.createModule(.{
+        .root_source_file = b.path("lib.zig"),
         .target = target,
         .optimize = optimize,
-        .root_source_file = b.path("lib.zig"),
     });
-    main_tests.addIncludePath(b.path("."));
-    main_tests.linkLibC();
-    main_tests.linkLibrary(lz4);
-    main_tests.linkLibrary(snappy);
+    // main_tests_mod.addIncludePath(lz4_dep.path("lz4"));
+    main_tests_mod.linkLibrary(lz4);
+    main_tests_mod.linkLibrary(snappy);
 
     const main_tests_options = b.addOptions();
     main_tests_options.addOption(bool, "enable_tracing", true);
     main_tests_options.addOption(bool, "enable_logging", true);
     main_tests_options.addOption(bool, "with_cassandra", with_cassandra);
 
-    main_tests.root_module.addImport("build_options", main_tests_options.createModule());
-    main_tests.root_module.addImport("lz4", lz4_mod);
-    main_tests.root_module.addImport("snappy", snappy_mod);
+    main_tests_mod.addImport("build_options", main_tests_options.createModule());
+    main_tests_mod.addImport("snappy", snappy_mod);
+
+    const main_tests = b.addTest(.{
+        .name = "main",
+        .root_module = main_tests_mod,
+    });
+    main_tests.linkLibC();
 
     const run_main_tests = b.addRunArtifact(main_tests);
 
@@ -81,25 +83,27 @@ pub fn build(b: *std.Build) !void {
     // Add the example
     //
 
-    const example = b.addExecutable(.{
-        .name = "example",
+    const example_mod = b.createModule(.{
         .root_source_file = b.path("examples/main.zig"),
         .target = target,
         .optimize = optimize,
     });
-    example.addIncludePath(b.path("."));
-    example.linkLibC();
-    example.linkLibrary(lz4);
-    example.linkLibrary(snappy);
+    example_mod.linkLibrary(lz4);
+    example_mod.linkLibrary(snappy);
 
     const example_options = b.addOptions();
     example_options.addOption(bool, "enable_tracing", enable_tracing);
     example_options.addOption(bool, "enable_logging", enable_logging);
 
-    example.root_module.addImport("cassandra", module);
-    example.root_module.addImport("lz4", lz4_mod);
-    example.root_module.addImport("snappy", snappy_mod);
-    example.root_module.addImport("build_options", example_options.createModule());
+    example_mod.addImport("cassandra", module);
+    example_mod.addImport("snappy", snappy_mod);
+    example_mod.addImport("build_options", example_options.createModule());
+
+    const example = b.addExecutable(.{
+        .name = "example",
+        .root_module = example_mod,
+    });
+    example.linkLibC();
 
     const example_install_artifact = b.addInstallArtifact(example, .{});
     b.getInstallStep().dependOn(&example_install_artifact.step);

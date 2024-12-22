@@ -43,7 +43,7 @@ pub fn main() anyerror!void {
 
     //
 
-    const backend = Backend{};
+    var backend = Backend{};
 
     var conn = try Connection.init(gpa.allocator());
     defer conn.deinit();

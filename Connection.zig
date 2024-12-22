@@ -8,7 +8,7 @@ const testing = std.testing;
 const fifo = std.fifo.LinearFifo;
 const build_options = @import("build_options");
 
-const lz4 = @import("lz4");
+const lz4 = @import("lz4.zig");
 const snappy = @import("snappy");
 
 const protocol = @import("protocol.zig");

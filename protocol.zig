@@ -9,7 +9,7 @@ const testing = std.testing;
 
 const assert = std.debug.assert;
 
-const lz4 = @import("lz4");
+const lz4 = @import("lz4.zig");
 
 const event = @import("event.zig");
 const metadata = @import("metadata.zig");
