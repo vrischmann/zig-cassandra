@@ -29,15 +29,18 @@ pub fn build(b: *std.Build) !void {
     // Create the public 'cassandra' module
     //
 
-    // TODO(vincent): is this still useful ?
-    const module_options = b.addOptions();
-
     const module = b.addModule("cassandra", .{
         .root_source_file = b.path("lib.zig"),
         .link_libc = true,
         .target = target,
         .optimize = optimize,
     });
+
+    const module_options = b.addOptions();
+    module_options.addOption(bool, "enable_tracing", enable_tracing);
+    module_options.addOption(bool, "enable_logging", enable_logging);
+    module_options.addOption(bool, "with_cassandra", with_cassandra);
+
     module.addIncludePath(b.path("."));
     module.linkLibrary(lz4);
     module.linkLibrary(snappy);
