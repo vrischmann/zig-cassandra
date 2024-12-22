@@ -24,7 +24,7 @@ fn fromRawBytes(allocator: mem.Allocator, data: []const u8) !big.int.Managed {
     var k: usize = 0;
     while (i >= limb_bytes) : (k += 1) {
         const bytes = data[i - limb_bytes .. i];
-        const limb = mem.readInt(big.Limb, bytes[0..8], .big);
+        const limb = mem.readInt(big.Limb, bytes[0..limb_bytes], .big);
         limbs[k] = limb;
 
         i -= limb_bytes;
@@ -35,8 +35,8 @@ fn fromRawBytes(allocator: mem.Allocator, data: []const u8) !big.int.Managed {
     if (i > 0) {
         var limb: big.Limb = 0;
 
-        var s: u6 = 0;
-        while (i > 0) : (s += 8) {
+        var s: if (limb_bits == 32) u5 else u6 = 0;
+        while (i > 0) : (s += limb_bytes) {
             const n: usize = @intCast(data[i - 1]);
             limb |= n << s;
             i -= 1;
