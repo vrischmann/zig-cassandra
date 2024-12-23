@@ -1,21 +1,21 @@
 const std = @import("std");
 const debug = std.debug;
 const heap = std.heap;
+const fmt = std.fmt;
 const io = std.io;
 const mem = std.mem;
 const net = std.net;
 const os = std.os;
 const testing = std.testing;
-
 const assert = std.debug.assert;
 
-const lz4 = @import("lz4.zig");
-
 const event = @import("event.zig");
+const lz4 = @import("lz4.zig");
 const metadata = @import("metadata.zig");
+const QueryParameters = @import("QueryParameters.zig");
 const testutils = @import("testutils.zig");
 
-const QueryParameters = @import("QueryParameters.zig");
+const log = std.log.scoped(.protocol);
 
 // Framing format
 //
@@ -608,6 +608,11 @@ pub fn writeEnvelope(envelope: Envelope, out: *std.ArrayList(u8)) WriteEnvelopeE
     buf[4] = @intFromEnum(envelope.header.opcode);
     mem.writeInt(u32, @ptrCast(buf[5..9]), envelope.header.body_len, .big);
 
+    log.debug("envelope header: {s}, body: {s}", .{
+        fmt.fmtSliceHexLower(&buf),
+        fmt.fmtSliceHexLower(envelope.body),
+    });
+
     try out.appendSlice(&buf);
     try out.appendSlice(envelope.body);
 
@@ -908,6 +913,13 @@ pub const Opcode = enum(u8) {
     auth_challenge = 0x0e,
     auth_response = 0x0f,
     auth_success = 0x10,
+
+    pub fn isCompressionAllowed(opcode: Opcode) bool {
+        switch (opcode) {
+            .options, .startup => false,
+            else => true,
+        }
+    }
 };
 
 pub const CompressionAlgorithm = enum {
@@ -2343,6 +2355,10 @@ pub const StartupMessage = struct {
             _ = try mw.writeString("CQL_VERSION");
             _ = try mw.writeString(cql_version);
         }
+
+        log.debug("startup message data: {s}", .{
+            fmt.fmtSliceHexLower(mw.getWritten()),
+        });
     }
 
     pub fn read(allocator: mem.Allocator, br: *MessageReader) !Self {

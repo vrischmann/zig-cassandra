@@ -417,7 +417,7 @@ fn tickInHandshake(conn: *Self) !void {
                     },
                 };
 
-                conn.cql_version = supported_message.cql_versions[0];
+                // conn.cql_version = supported_message.cql_versions[0];
 
                 // TODO(vincent): is this always sorted ?
                 const usable_protocol_version = blk: {
@@ -530,10 +530,13 @@ fn appendMessage(conn: *Self, message: anytype) !void {
         envelope.header.flags |= EnvelopeFlags.UseBeta;
     }
 
+    //
+    // Encode body
+    //
+
     var mw = try MessageWriter.init(scratch_allocator);
     defer mw.deinit();
 
-    // Encode body
     if (std.meta.hasMethod(MessageType, "write")) {
         switch (@typeInfo(@TypeOf(MessageType.write))) {
             .@"fn" => |info| {
@@ -550,13 +553,20 @@ fn appendMessage(conn: *Self, message: anytype) !void {
     // This is the actual bytes of the encoded body.
     const written = mw.getWritten();
 
-    // Default to using the uncompressed body.
     envelope.header.body_len = @intCast(written.len);
     envelope.body = written;
 
-    // Compress the body if we can use it.
-    // Only relevant for Protocol <= v4, Protocol v5 doest compression using the framing format.
-    if (conn.protocol_version.lessThan(.v5)) {
+    //
+    // Compress the envelope body if protocol <= v4
+    // Protocol v5 does compression using the framing format.
+    //
+
+    // Compression is not allowed on OPTIONS and STARTUP message because the client and server have not yet negotiated the compression algorithm.
+    if (conn.protocol_version.lessThan(.v5) and opcode != .options and opcode != .startup) {
+        log.debug("envelope body before compression: {s}", .{
+            fmt.fmtSliceHexLower(envelope.body),
+        });
+
         if (conn.compression) |compression| {
             switch (compression) {
                 .LZ4 => {
@@ -575,6 +585,10 @@ fn appendMessage(conn: *Self, message: anytype) !void {
                 },
             }
         }
+
+        log.debug("envelope body after compression: {s}", .{
+            fmt.fmtSliceHexLower(envelope.body),
+        });
     }
 
     //
@@ -586,7 +600,8 @@ fn appendMessage(conn: *Self, message: anytype) !void {
     const envelope_data = try protocol.writeEnvelope(envelope, &envelope_buffer);
 
     const final_payload = if (conn.framing.enabled)
-        try Frame.encode(scratch_allocator, envelope_data, true, .uncompressed)
+        // TODO(vincent): handle self contained
+        try Frame.encode(scratch_allocator, envelope_data, true, conn.framing.format)
     else
         envelope_data;
 
@@ -600,8 +615,9 @@ fn appendMessage(conn: *Self, message: anytype) !void {
         const tmp = @unionInit(Message, @tagName(opcode), message);
 
         // TODO(vincent): custom formatting
-        log.info("[appendMessage] msg={any} data={s} framing={}", .{
+        log.info("[appendMessage] msg={any} envelope_data={s} data={s} framing={}", .{
             messageFormatter(tmp),
+            fmt.fmtSliceHexLower(envelope_data),
             fmt.fmtSliceHexLower(final_payload),
             conn.framing.enabled,
         });
