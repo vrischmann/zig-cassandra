@@ -56,6 +56,7 @@ pub fn main() anyerror!void {
     poll_fds[0].fd = socket.handle;
     poll_fds[0].events = posix.POLL.IN | posix.POLL.OUT;
 
+    var count: usize = 0;
     while (true) {
         try conn.tick();
 
@@ -86,5 +87,20 @@ pub fn main() anyerror!void {
         }
 
         std.time.sleep(std.time.ns_per_ms * 100);
+
+        if (conn.state == .nominal and count == 0) {
+            try conn.doQuery("select count(1) from foobar.age_to_ids ;", .{
+                .consistency_level = .One,
+                .values = null,
+                .skip_metadata = false,
+                .page_size = null,
+                .paging_state = null,
+                .serial_consistency_level = null,
+                .timestamp = null,
+                .keyspace = null,
+                .now_in_seconds = null,
+            });
+            count = 1;
+        }
     }
 }

@@ -2348,10 +2348,6 @@ pub const StartupMessage = struct {
             _ = try mw.writeString("CQL_VERSION");
             _ = try mw.writeString(cql_version);
         }
-
-        log.debug("startup message data: {s}", .{
-            fmt.fmtSliceHexLower(mw.getWritten()),
-        });
     }
 
     pub fn read(allocator: mem.Allocator, br: *MessageReader) !Self {
@@ -3326,7 +3322,13 @@ pub const ResultMessage = struct {
             .result = undefined,
         };
 
-        const kind: ResultKind = @enumFromInt(try br.readInt(u32));
+        log.debug("body: {s}", .{
+            fmt.fmtSliceHexLower(br.buffer.buffer[br.buffer.pos..]),
+        });
+
+        const n = try br.readInt(u32);
+        log.info("n: {x}", .{n});
+        const kind: ResultKind = @enumFromInt(n);
 
         switch (kind) {
             .Void => message.result = Result{ .Void = {} },

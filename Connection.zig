@@ -178,6 +178,9 @@ fn formatMessage(message: Message, comptime _: []const u8, _: std.fmt.FormatOpti
                 msg.authenticator,
             });
         },
+        .options => |_| {
+            try writer.print("OPTIONS::[]", .{});
+        },
         .supported => |msg| {
             try writer.print("SUPPORTED::[protocol_versions={s} cql_versions={s} compression_algorithms={s}]", .{
                 msg.protocol_versions,
@@ -185,8 +188,11 @@ fn formatMessage(message: Message, comptime _: []const u8, _: std.fmt.FormatOpti
                 msg.compression_algorithms,
             });
         },
-        .options => |_| {
-            try writer.print("OPTIONS::[]", .{});
+        .query => |msg| {
+            try writer.print("QUERY::[query={s} query_parameters={any}]", .{
+                msg.query,
+                msg.query_parameters,
+            });
         },
         else => try writer.print("{any}", .{message}),
     }
@@ -313,6 +319,13 @@ pub fn deinit(conn: *Self) void {
     }
 
     conn.gpa.destroy(conn);
+}
+
+pub fn doQuery(conn: *Self, query: []const u8, query_parameters: QueryParameters) !void {
+    try conn.appendMessage(QueryMessage{
+        .query = query,
+        .query_parameters = query_parameters,
+    });
 }
 
 pub fn feedReadable(conn: *Self, data: []const u8) !void {
@@ -492,7 +505,13 @@ fn tickInHandshake(conn: *Self) !void {
 }
 
 fn tickNominal(conn: *Self) !void {
-    _ = conn;
+    try conn.readMessagesNoEof(conn.arena.allocator());
+
+    while (conn.queue.readItem()) |message| {
+        log.debug("message: {s}", .{
+            messageFormatter(message),
+        });
+    }
 }
 
 /// appendMessage writes a single message to the output
@@ -680,14 +699,30 @@ fn readMessagesNoEof(conn: *Self, message_allocator: mem.Allocator) !void {
                         envelope.body = decompressed_data;
                     },
                     .Snappy => {
+                        log.debug("compressed body: {s}", .{
+                            fmt.fmtSliceHexLower(envelope.body),
+                        });
+
                         const decompressed_data = try snappy.decompress(scratch_allocator, envelope.body);
                         envelope.body = decompressed_data;
+
+                        log.debug("decompressed body: {s}", .{
+                            fmt.fmtSliceHexLower(envelope.body),
+                        });
                     },
                 }
             }
 
             break :blk envelope;
         };
+
+        {
+            const payload = reader.buffer.readableSlice(0);
+            log.debug("payload: {s}, body: {s}", .{
+                fmt.fmtSliceHexLower(payload),
+                fmt.fmtSliceHexLower(envelope.body),
+            });
+        }
 
         const message = blk: {
             var mr = MessageReader.init(envelope.body);
@@ -708,6 +743,10 @@ fn readMessagesNoEof(conn: *Self, message_allocator: mem.Allocator) !void {
             };
         };
         try conn.queue.writeItem(message);
+
+        //
+        // Observability / debugging
+        //
 
         if (comptime build_options.enable_logging) {
             const payload = reader.buffer.readableSlice(0);
