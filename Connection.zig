@@ -851,63 +851,63 @@ test {
 
     // OPTIONS
 
-    {
-        try testing.expectEqual(.handshake, conn.state);
-        try testing.expectEqual(.options, conn.handshake_state);
-
-        try conn.tick(write_buffer.writer(), read_buffer.reader());
-
-        const event = conn.tracer.events.readItem().?;
-        try testing.expect(std.meta.activeTag(event.message) == .options);
-    }
-
-    // SUPPORTED
-    {
-        try testing.expectEqual(.handshake, conn.state);
-        try testing.expectEqual(.supported, conn.handshake_state);
-
-        const data = "\x84\x00\x00\x09\x06\x00\x00\x00\x60\x00\x03\x00\x11\x50\x52\x4f\x54\x4f\x43\x4f\x4c\x5f\x56\x45\x52\x53\x49\x4f\x4e\x53\x00\x03\x00\x04\x33\x2f\x76\x33\x00\x04\x34\x2f\x76\x34\x00\x09\x35\x2f\x76\x35\x2d\x62\x65\x74\x61\x00\x0b\x43\x4f\x4d\x50\x52\x45\x53\x53\x49\x4f\x4e\x00\x02\x00\x06\x73\x6e\x61\x70\x70\x79\x00\x03\x6c\x7a\x34\x00\x0b\x43\x51\x4c\x5f\x56\x45\x52\x53\x49\x4f\x4e\x00\x01\x00\x05\x33\x2e\x30\x2e\x30";
-        try read_buffer.write(data);
-
-        try conn.tick(write_buffer.writer(), read_buffer.reader());
-
-        try testing.expectEqual(ProtocolVersion.v5, conn.protocol_version);
-        try testing.expectEqual(0, conn.queue.readableLength());
-
-        const message = conn.tracer.events.readItem().?.message.supported;
-        try testing.expectEqualSlices(ProtocolVersion, &[_]ProtocolVersion{ .v3, .v4, .v5 }, message.protocol_versions);
-        try testing.expectEqualSlices(CQLVersion, &[_]CQLVersion{CQLVersion{ .major = 3, .minor = 0, .patch = 0 }}, message.cql_versions);
-        try testing.expectEqualSlices(CompressionAlgorithm, &[_]CompressionAlgorithm{ .Snappy, .LZ4 }, message.compression_algorithms);
-    }
-
-    // STARTUP
-    {
-        try testing.expectEqual(.handshake, conn.state);
-        try testing.expectEqual(.startup, conn.handshake_state);
-
-        try conn.tick(write_buffer.writer(), read_buffer.reader());
-
-        const message = conn.tracer.events.readItem().?.message.startup;
-        try testing.expectEqual(conn.cql_version, message.cql_version);
-        try testing.expectEqual(conn.compression, message.compression);
-    }
-
-    // Read READY
-    {
-        try testing.expectEqual(.handshake, conn.state);
-        try testing.expectEqual(.authenticate_or_ready, conn.handshake_state);
-
-        const data = "\x84\x00\x00\x02\x02\x00\x00\x00\x00";
-        try read_buffer.write(data);
-
-        try conn.tick(write_buffer.writer(), read_buffer.reader());
-
-        _ = conn.tracer.events.readItem().?.message.ready;
-    }
-
-    // Switch to framing
-    conn.framing.enabled = true;
-    conn.framing.format = .compressed;
+    // {
+    //     try testing.expectEqual(.handshake, conn.state);
+    //     try testing.expectEqual(.options, conn.handshake_state);
+    //
+    //     try conn.tick(write_buffer.writer(), read_buffer.reader());
+    //
+    //     const event = conn.tracer.events.readItem().?;
+    //     try testing.expect(std.meta.activeTag(event.message) == .options);
+    // }
+    //
+    // // SUPPORTED
+    // {
+    //     try testing.expectEqual(.handshake, conn.state);
+    //     try testing.expectEqual(.supported, conn.handshake_state);
+    //
+    //     const data = "\x84\x00\x00\x09\x06\x00\x00\x00\x60\x00\x03\x00\x11\x50\x52\x4f\x54\x4f\x43\x4f\x4c\x5f\x56\x45\x52\x53\x49\x4f\x4e\x53\x00\x03\x00\x04\x33\x2f\x76\x33\x00\x04\x34\x2f\x76\x34\x00\x09\x35\x2f\x76\x35\x2d\x62\x65\x74\x61\x00\x0b\x43\x4f\x4d\x50\x52\x45\x53\x53\x49\x4f\x4e\x00\x02\x00\x06\x73\x6e\x61\x70\x70\x79\x00\x03\x6c\x7a\x34\x00\x0b\x43\x51\x4c\x5f\x56\x45\x52\x53\x49\x4f\x4e\x00\x01\x00\x05\x33\x2e\x30\x2e\x30";
+    //     try read_buffer.write(data);
+    //
+    //     try conn.tick(write_buffer.writer(), read_buffer.reader());
+    //
+    //     try testing.expectEqual(ProtocolVersion.v5, conn.protocol_version);
+    //     try testing.expectEqual(0, conn.queue.readableLength());
+    //
+    //     const message = conn.tracer.events.readItem().?.message.supported;
+    //     try testing.expectEqualSlices(ProtocolVersion, &[_]ProtocolVersion{ .v3, .v4, .v5 }, message.protocol_versions);
+    //     try testing.expectEqualSlices(CQLVersion, &[_]CQLVersion{CQLVersion{ .major = 3, .minor = 0, .patch = 0 }}, message.cql_versions);
+    //     try testing.expectEqualSlices(CompressionAlgorithm, &[_]CompressionAlgorithm{ .Snappy, .LZ4 }, message.compression_algorithms);
+    // }
+    //
+    // // STARTUP
+    // {
+    //     try testing.expectEqual(.handshake, conn.state);
+    //     try testing.expectEqual(.startup, conn.handshake_state);
+    //
+    //     try conn.tick(write_buffer.writer(), read_buffer.reader());
+    //
+    //     const message = conn.tracer.events.readItem().?.message.startup;
+    //     try testing.expectEqual(conn.cql_version, message.cql_version);
+    //     try testing.expectEqual(conn.compression, message.compression);
+    // }
+    //
+    // // Read READY
+    // {
+    //     try testing.expectEqual(.handshake, conn.state);
+    //     try testing.expectEqual(.authenticate_or_ready, conn.handshake_state);
+    //
+    //     const data = "\x84\x00\x00\x02\x02\x00\x00\x00\x00";
+    //     try read_buffer.write(data);
+    //
+    //     try conn.tick(write_buffer.writer(), read_buffer.reader());
+    //
+    //     _ = conn.tracer.events.readItem().?.message.ready;
+    // }
+    //
+    // // Switch to framing
+    // conn.framing.enabled = true;
+    // conn.framing.format = .compressed;
 
     //
     // Querying

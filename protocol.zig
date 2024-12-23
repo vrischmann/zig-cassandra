@@ -3616,6 +3616,21 @@ test "result message: prepared select" {
     }
 }
 
+test "result message: rows with warning" {
+    var arena = testutils.arenaAllocator();
+    defer arena.deinit();
+
+    const data = "\x84\x09\x00\x00\x08\x00\x00\x00\x62\x69\xa0\x00\x01\x00\x2c\x41\x67\x67\x72\x65\x67\x61\x74\x69\x6f\x6e\x20\x71\x75\x65\x72\x79\x20\x75\x73\x65\x64\x20\x77\x69\x74\x68\x6f\x75\x74\x20\x70\x61\x72\x74\x69\x74\x01\x1d\x28\x6b\x65\x79\x00\x00\x00\x02\x00\x00\x00\x01\x05\x04\x64\x06\x66\x6f\x6f\x62\x61\x72\x00\x0a\x61\x67\x65\x5f\x74\x6f\x5f\x69\x64\x73\x00\x05\x63\x6f\x75\x6e\x74\x15\x25\x20\x08\x00\x00\x00\x00\x00\x00\x9c\x40";
+    const envelope = try testReadEnvelope(arena.allocator(), data);
+
+    try checkEnvelopeHeader(.v4, Opcode.result, data.len, envelope.header);
+
+    var mr = MessageReader.init(envelope.body);
+    const message = try ResultMessage.read(arena.allocator(), envelope.header.version, &mr);
+
+    try testing.expect(message.result == .Prepared);
+}
+
 /// SUPPORTED is sent by a node in response to a OPTIONS message.
 ///
 /// Described in the protocol spec at §4.2.4.
