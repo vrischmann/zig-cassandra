@@ -170,6 +170,14 @@ fn formatMessage(message: Message, comptime _: []const u8, _: std.fmt.FormatOpti
                 msg.compression,
             });
         },
+        .ready => |_| {
+            try writer.print("READY::[]", .{});
+        },
+        .authenticate => |msg| {
+            try writer.print("AUTHENTICATE::[authenticator={s}]", .{
+                msg.authenticator,
+            });
+        },
         .supported => |msg| {
             try writer.print("SUPPORTED::[protocol_versions={s} cql_versions={s} compression_algorithms={s}]", .{
                 msg.protocol_versions,
@@ -332,7 +340,9 @@ pub fn tick(conn: *Self) !void {
         .handshake => {
             try conn.tickInHandshake();
         },
-        .nominal => unreachable,
+        .nominal => {
+            try conn.tickNominal();
+        },
         .shutdown => unreachable,
     }
 }
@@ -391,12 +401,12 @@ fn tickInHandshake(conn: *Self) !void {
     debug.assert(conn.state == .handshake);
 
     const previous_handshake_state = conn.handshake_state;
-    defer {
+    defer if (conn.handshake_state != previous_handshake_state) {
         log.debug("transitioning handshake from {s} to {s}", .{
             @tagName(previous_handshake_state),
             @tagName(conn.handshake_state),
         });
-    }
+    };
 
     switch (conn.handshake_state) {
         .options => {
@@ -417,7 +427,7 @@ fn tickInHandshake(conn: *Self) !void {
                     },
                 };
 
-                // conn.cql_version = supported_message.cql_versions[0];
+                conn.cql_version = supported_message.cql_versions[0];
 
                 // TODO(vincent): is this always sorted ?
                 const usable_protocol_version = blk: {
@@ -442,8 +452,6 @@ fn tickInHandshake(conn: *Self) !void {
                     conn.compression = supported_message.compression_algorithms[0];
                 }
 
-                log.debug("chosen protocol version: {s}", .{conn.protocol_version});
-
                 conn.handshake_state = .startup;
             }
         },
@@ -461,7 +469,9 @@ fn tickInHandshake(conn: *Self) !void {
 
             if (conn.queue.readItem()) |message| {
                 switch (message) {
-                    .ready => |_| {},
+                    .ready => |_| {
+                        conn.handshake_state = .ready;
+                    },
                     .authenticate => |_| {},
                     .@"error" => |_| {
                         // TODO(vincent): diags
@@ -475,8 +485,14 @@ fn tickInHandshake(conn: *Self) !void {
             }
         },
         .auth_response => unreachable,
-        .ready => unreachable,
+        .ready => {
+            conn.state = .nominal;
+        },
     }
+}
+
+fn tickNominal(conn: *Self) !void {
+    _ = conn;
 }
 
 /// appendMessage writes a single message to the output
