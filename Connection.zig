@@ -560,13 +560,10 @@ fn appendMessage(conn: *Self, message: anytype) !void {
     // Compress the envelope body if protocol <= v4
     // Protocol v5 does compression using the framing format.
     //
-
     // Compression is not allowed on OPTIONS and STARTUP message because the client and server have not yet negotiated the compression algorithm.
-    if (conn.protocol_version.lessThan(.v5) and opcode != .options and opcode != .startup) {
-        log.debug("envelope body before compression: {s}", .{
-            fmt.fmtSliceHexLower(envelope.body),
-        });
+    //
 
+    if (conn.protocol_version.lessThan(.v5) and opcode != .options and opcode != .startup) {
         if (conn.compression) |compression| {
             switch (compression) {
                 .LZ4 => {
@@ -585,10 +582,6 @@ fn appendMessage(conn: *Self, message: anytype) !void {
                 },
             }
         }
-
-        log.debug("envelope body after compression: {s}", .{
-            fmt.fmtSliceHexLower(envelope.body),
-        });
     }
 
     //

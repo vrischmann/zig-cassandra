@@ -913,13 +913,6 @@ pub const Opcode = enum(u8) {
     auth_challenge = 0x0e,
     auth_response = 0x0f,
     auth_success = 0x10,
-
-    pub fn isCompressionAllowed(opcode: Opcode) bool {
-        switch (opcode) {
-            .options, .startup => false,
-            else => true,
-        }
-    }
 };
 
 pub const CompressionAlgorithm = enum {
