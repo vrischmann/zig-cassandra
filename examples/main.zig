@@ -43,30 +43,67 @@ pub fn main() anyerror!void {
 
     //
 
-    var backend = Backend{};
+    // var backend = Backend{};
 
     var conn = try Connection.init(gpa.allocator());
     defer conn.deinit();
 
-    try backend.drive(conn);
+    conn.protocol_version = .v4;
 
-    // try client.appendMessage(cassandra.Connection.Message{ .options = {} });
-    //
-    // const written = try client.connection.write.buffer.toOwnedSlice();
-    //
-    // log.err("written: {s}", .{fmt.fmtSliceHexLower(written)});
-    //
-    // try socket.writeAll(written);
-    //
-    // try client.connection.read.buffer.ensureUnusedCapacity(1 * 1024 * 1024);
-    // const read = try socket.read(client.connection.read.buffer.writableSlice(0));
-    // debug.assert(read > 0);
-    // client.connection.read.buffer.update(read);
-    //
-    // log.err("read: {d} bytes => {d} {s}", .{ read, client.connection.read.buffer.readableLength(), fmt.fmtSliceHexLower(client.connection.read.buffer.readableSlice(0)) });
-    //
-    //     const supported_message = client.connection.read.queue.readItem().?.supported;
-    //     try client.connection.updateWithSupported(supported_message.compression_algorithms, supported_message.cql_versions, supported_message.protocol_versions);
-    //
-    // try client.appendMessage(cassandra.Connection.Message{.startup = cassandra.Connection.})
+    // try backend.drive(conn);
+
+    var poll_fds: [4]posix.pollfd = undefined;
+    poll_fds[0].fd = socket.handle;
+    poll_fds[0].events = posix.POLL.IN | posix.POLL.OUT;
+
+    var count: usize = 0;
+    while (true) {
+        try conn.tick();
+
+        const ready = try posix.poll(&poll_fds, 1000);
+        if (ready <= 0) continue;
+
+        for (&poll_fds) |poll_fd| {
+            if (poll_fd.revents == 0) continue;
+
+            if (poll_fd.revents & posix.POLL.IN == posix.POLL.IN) {
+                var buf: [1024]u8 = undefined;
+                const n = try socket.read(&buf);
+
+                if (n > 0) {
+                    log.info("read {d} bytes!", .{n});
+                    try conn.feedReadable(buf[0..n]);
+                }
+            } else if (poll_fd.revents & posix.POLL.OUT == posix.POLL.OUT) {
+                if (conn.write_buffer.readableLength() > 0) {
+                    log.info("writing {d} bytes", .{conn.write_buffer.readableLength()});
+
+                    const writable = conn.getWritable();
+                    try socket.writeAll(writable);
+                    conn.write_buffer.discard(writable.len);
+                    log.info("written {d} bytes", .{writable.len});
+                }
+            }
+        }
+
+        std.time.sleep(std.time.ns_per_ms * 100);
+
+        if (conn.state == .nominal and count == 0) {
+            // const q1 = "select age from foobar.age_to_ids limit 1;";
+            const q2 = "select count(1) from foobar.age_to_ids;";
+
+            try conn.doQuery(q2, .{
+                .consistency_level = .One,
+                .values = null,
+                .skip_metadata = false,
+                .page_size = null,
+                .paging_state = null,
+                .serial_consistency_level = null,
+                .timestamp = null,
+                .keyspace = null,
+                .now_in_seconds = null,
+            });
+            count = 1;
+        }
+    }
 }

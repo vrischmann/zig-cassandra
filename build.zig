@@ -71,6 +71,7 @@ pub fn build(b: *std.Build) !void {
     const main_tests = b.addTest(.{
         .name = "main",
         .root_module = main_tests_mod,
+        .filters = b.args orelse &.{},
     });
     main_tests.linkLibC();
 
