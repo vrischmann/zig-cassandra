@@ -89,10 +89,10 @@ pub fn main() anyerror!void {
         std.time.sleep(std.time.ns_per_ms * 100);
 
         if (conn.state == .nominal and count == 0) {
-            // const q1 = "select age from foobar.age_to_ids limit 1;";
-            const q2 = "select count(1) from foobar.age_to_ids;";
+            const q1 = "select age from foobar.age_to_ids limit 1;";
+            // const q2 = "select count(1) from foobar.age_to_ids;";
 
-            try conn.doQuery(q2, .{
+            try conn.doQuery(q1, .{
                 .consistency_level = .One,
                 .values = null,
                 .skip_metadata = false,
