@@ -669,6 +669,7 @@ fn readMessagesNoEof(conn: *Self, message_allocator: mem.Allocator) !void {
     const rd = conn.read_buffer.reader();
 
     while (true) {
+        // TODO(vincent): this doesn't work without enable_tracing=true, it segfaults somewhere
         var reader: TracingReader(@TypeOf(rd)) = undefined;
         reader.init(rd);
 
