@@ -117,4 +117,31 @@ pub fn build(b: *std.Build) !void {
 
     const example_run = b.step("example", "Run the example");
     example_run.dependOn(&example_run_cmd.step);
+
+    //
+    // Add some tools
+    //
+
+    const hex_convert_mod = b.createModule(.{
+        .root_source_file = b.path("tools/hex-convert.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const hex_convert = b.addExecutable(.{
+        .name = "hex-convert",
+        .root_module = hex_convert_mod,
+    });
+
+    const hex_convert_install_artifact = b.addInstallArtifact(hex_convert, .{});
+    b.getInstallStep().dependOn(&hex_convert_install_artifact.step);
+
+    const hex_convert_run_cmd = b.addRunArtifact(hex_convert);
+    hex_convert_run_cmd.step.dependOn(b.getInstallStep());
+    if (b.args) |args| {
+        hex_convert_run_cmd.addArgs(args);
+    }
+
+    const hex_convert_run = b.step("hex-convert", "Run the `hex-convert` tool");
+    hex_convert_run.dependOn(&hex_convert_run_cmd.step);
 }
