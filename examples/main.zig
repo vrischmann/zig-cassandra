@@ -71,17 +71,13 @@ pub fn main() anyerror!void {
                 const n = try socket.read(&buf);
 
                 if (n > 0) {
-                    log.info("read {d} bytes!", .{n});
                     try conn.feedReadable(buf[0..n]);
                 }
             } else if (poll_fd.revents & posix.POLL.OUT == posix.POLL.OUT) {
                 if (conn.write_buffer.readableLength() > 0) {
-                    log.info("writing {d} bytes", .{conn.write_buffer.readableLength()});
-
                     const writable = conn.getWritable();
                     try socket.writeAll(writable);
                     conn.write_buffer.discard(writable.len);
-                    log.info("written {d} bytes", .{writable.len});
                 }
             }
         }

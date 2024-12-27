@@ -93,18 +93,18 @@ fn TracingReader(comptime ReaderType: type) type {
     return struct {
         const BufferType = fifo(u8, .{ .Static = 4 * 1024 * 1024 });
 
-        const Reader = if (build_options.enable_tracing)
+        const Reader = if (build_options.enable_tracing or build_options.enable_logging)
             TeeReader(ReaderType, BufferType.Writer).Reader
         else
             ReaderType;
 
         buffer: BufferType,
-        underlying: if (build_options.enable_tracing)
+        underlying: if (build_options.enable_tracing or build_options.enable_logging)
             TeeReader(ReaderType, BufferType.Writer)
         else
             ReaderType,
 
-        const init = if (build_options.enable_tracing)
+        const init = if (build_options.enable_tracing or build_options.enable_logging)
             initTeeReader
         else
             initReader;
@@ -124,7 +124,7 @@ fn TracingReader(comptime ReaderType: type) type {
         }
 
         fn reader(self: *@This()) Reader {
-            if (comptime build_options.enable_tracing) {
+            if (comptime build_options.enable_tracing or build_options.enable_logging) {
                 return self.underlying.reader();
             } else {
                 return self.underlying;
@@ -669,7 +669,6 @@ fn readMessagesNoEof(conn: *Self, message_allocator: mem.Allocator) !void {
     const rd = conn.read_buffer.reader();
 
     while (true) {
-        // TODO(vincent): this doesn't work without enable_tracing=true, it segfaults somewhere
         var reader: TracingReader(@TypeOf(rd)) = undefined;
         reader.init(rd);
 
@@ -695,14 +694,6 @@ fn readMessagesNoEof(conn: *Self, message_allocator: mem.Allocator) !void {
 
             break :blk tmp;
         };
-
-        {
-            const payload = reader.buffer.readableSlice(0);
-            log.debug("payload: {s}, body: {s}", .{
-                fmt.fmtSliceHexLower(payload),
-                fmt.fmtSliceHexLower(envelope.body),
-            });
-        }
 
         const message = blk: {
             var mr = MessageReader.init(envelope.body);
