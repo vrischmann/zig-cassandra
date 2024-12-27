@@ -41,7 +41,7 @@ const StartupMessage = protocol.StartupMessage;
 const SupportedMessage = protocol.SupportedMessage;
 const QueryParameters = @import("QueryParameters.zig");
 const testutils = @import("testutils.zig");
-const Iterator = @import("iterator.zig").Iterator;
+const Iterator = @import("Iterator.zig");
 
 const log = std.log.scoped(.connection);
 

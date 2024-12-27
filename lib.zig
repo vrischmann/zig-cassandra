@@ -5,10 +5,10 @@ pub const CompressionAlgorithm = @import("protocol.zig").CompressionAlgorithm;
 
 pub const Client = @import("Client.zig");
 pub const Connection = @import("Connection.zig");
-pub const Iterator = @import("iterator.zig").Iterator;
+pub const Iterator = @import("Iterator.zig");
 
 test {
     _ = @import("protocol.zig");
-    _ = @import("iterator.zig");
+    _ = @import("Iterator.zig");
     _ = @import("Connection.zig");
 }

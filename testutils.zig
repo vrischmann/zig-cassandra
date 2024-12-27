@@ -3,7 +3,6 @@ const io = std.io;
 const mem = std.mem;
 
 const protocol = @import("protocol.zig");
-const Iterator = @import("iterator.zig");
 
 pub fn printHRBytes(comptime fmt: []const u8, exp: []const u8, args: anytype) void {
     const hextable = "0123456789abcdef";

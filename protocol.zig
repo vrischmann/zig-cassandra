@@ -3883,7 +3883,7 @@ fn expectSameEnvelope(comptime T: type, fr: T, header: EnvelopeHeader, exp: []co
 fn collectRows(comptime T: type, allocator: mem.Allocator, rows: Rows) !std.ArrayList(T) {
     var result = std.ArrayList(T).init(allocator);
 
-    const Iterator = @import("iterator.zig").Iterator;
+    const Iterator = @import("Iterator.zig");
     var iter = Iterator.init(rows.metadata, rows.data);
 
     while (true) {

@@ -24,325 +24,383 @@ pub const RawBytes = struct {
     data: []const u8,
 };
 
-pub const Iterator = struct {
-    const Self = @This();
+const Self = @This();
 
-    metadata: RowsMetadata,
-    rows: []const RowData,
+metadata: RowsMetadata,
+rows: []const RowData,
 
-    pos: usize,
+pos: usize,
 
-    pub fn init(metadata: RowsMetadata, rows: []const RowData) Self {
-        return Self{
-            .metadata = metadata,
-            .rows = rows,
-            .pos = 0,
-        };
-    }
+pub fn init(metadata: RowsMetadata, rows: []const RowData) Self {
+    return Self{
+        .metadata = metadata,
+        .rows = rows,
+        .pos = 0,
+    };
+}
 
-    pub const ScanOptions = struct {
-        /// If this is provided, scan will populate some information about failures.
-        /// This will provide more detail than an error can.
-        diags: ?*Diagnostics = null,
+pub const ScanOptions = struct {
+    /// If this is provided, scan will populate some information about failures.
+    /// This will provide more detail than an error can.
+    diags: ?*Diagnostics = null,
 
-        pub const Diagnostics = struct {
-            /// If the struct type in which the CQL data should be scanned is incompatible
-            incompatible_metadata: IncompatibleMetadata = IncompatibleMetadata{},
+    pub const Diagnostics = struct {
+        /// If the struct type in which the CQL data should be scanned is incompatible
+        incompatible_metadata: IncompatibleMetadata = IncompatibleMetadata{},
 
-            pub const IncompatibleMetadata = struct {
-                /// The number of columns in the CQL result.
-                metadata_columns: usize = 0,
-                /// The number of fields in the struct to scan into.
-                struct_fields: usize = 0,
+        pub const IncompatibleMetadata = struct {
+            /// The number of columns in the CQL result.
+            metadata_columns: usize = 0,
+            /// The number of fields in the struct to scan into.
+            struct_fields: usize = 0,
 
-                /// If there was an attempt to scan a CQL type into an incompatible native type, both type names
-                /// will be provided here.
-                incompatible_types: IncompatibleTypes = IncompatibleTypes{},
+            /// If there was an attempt to scan a CQL type into an incompatible native type, both type names
+            /// will be provided here.
+            incompatible_types: IncompatibleTypes = IncompatibleTypes{},
 
-                pub const IncompatibleTypes = struct {
-                    cql_type_name: ?[]const u8 = null,
-                    native_type_name: ?[]const u8 = null,
-                };
+            pub const IncompatibleTypes = struct {
+                cql_type_name: ?[]const u8 = null,
+                native_type_name: ?[]const u8 = null,
             };
         };
     };
+};
 
-    const Diags = ScanOptions.Diagnostics;
+const Diags = ScanOptions.Diagnostics;
 
-    pub fn scan(self: *Self, allocator: mem.Allocator, options: ScanOptions, args: anytype) !bool {
-        var dummy_diags = Diags{};
-        var diags = options.diags orelse &dummy_diags;
+pub fn scan(self: *Self, allocator: mem.Allocator, options: ScanOptions, args: anytype) !bool {
+    var dummy_diags = Diags{};
+    var diags = options.diags orelse &dummy_diags;
 
-        const child = switch (@typeInfo(@TypeOf(args))) {
-            .pointer => |info| info.child,
-            else => @compileError("Expected a pointer to a tuple or struct, found " ++ @typeName(@TypeOf(args))),
-        };
-        if (@typeInfo(child) != .@"struct") {
-            @compileError("Expected tuple or struct argument, found " ++ @typeName(child) ++ " of type " ++ @tagName(@typeInfo(child)));
-        }
-
-        if (self.pos >= self.rows.len) {
-            return false;
-        }
-
-        if (self.metadata.column_specs.len != @typeInfo(child).@"struct".fields.len) {
-            diags.incompatible_metadata.metadata_columns = self.metadata.column_specs.len;
-            diags.incompatible_metadata.struct_fields = @typeInfo(child).@"struct".fields.len;
-            return error.IncompatibleMetadata;
-        }
-
-        inline for (@typeInfo(child).@"struct".fields, 0..) |struct_field, i| {
-            const column_spec = self.metadata.column_specs[i];
-            const column_data = self.rows[self.pos].slice[i];
-
-            @field(args, struct_field.name) = try self.readType(
-                allocator,
-                diags,
-                column_spec,
-                column_data.slice,
-                struct_field.type,
-            );
-        }
-
-        self.pos += 1;
-
-        return true;
+    const child = switch (@typeInfo(@TypeOf(args))) {
+        .pointer => |info| info.child,
+        else => @compileError("Expected a pointer to a tuple or struct, found " ++ @typeName(@TypeOf(args))),
+    };
+    if (@typeInfo(child) != .@"struct") {
+        @compileError("Expected tuple or struct argument, found " ++ @typeName(child) ++ " of type " ++ @tagName(@typeInfo(child)));
     }
 
-    fn readType(self: *Self, allocator: mem.Allocator, diags: *Diags, column_spec: ColumnSpec, column_data: []const u8, comptime Type: type) !Type {
-        const type_info = @typeInfo(Type);
+    if (self.pos >= self.rows.len) {
+        return false;
+    }
 
-        // TODO(vincent): if the struct is packed we could maybe read stuff directly
-        // TODO(vincent): handle packed enum
-        // TODO(vincent): handle union
+    if (self.metadata.column_specs.len != @typeInfo(child).@"struct".fields.len) {
+        diags.incompatible_metadata.metadata_columns = self.metadata.column_specs.len;
+        diags.incompatible_metadata.struct_fields = @typeInfo(child).@"struct".fields.len;
+        return error.IncompatibleMetadata;
+    }
 
-        switch (type_info) {
-            .int => return try self.readInt(diags, column_spec, column_data, Type),
-            .float => return try self.readFloat(diags, column_spec, column_data, Type),
-            .pointer => |pointer| switch (pointer.size) {
-                .One => {
-                    return try self.readType(allocator, diags, column_spec, column_data, @TypeOf(pointer.child));
-                },
-                .Slice => {
-                    return try self.readSlice(allocator, diags, column_spec, column_data, Type);
-                },
-                else => @compileError("invalid pointer size " ++ @tagName(pointer.size)),
+    inline for (@typeInfo(child).@"struct".fields, 0..) |struct_field, i| {
+        const column_spec = self.metadata.column_specs[i];
+        const column_data = self.rows[self.pos].slice[i];
+
+        @field(args, struct_field.name) = try self.readType(
+            allocator,
+            diags,
+            column_spec,
+            column_data.slice,
+            struct_field.type,
+        );
+    }
+
+    self.pos += 1;
+
+    return true;
+}
+
+fn readType(self: *Self, allocator: mem.Allocator, diags: *Diags, column_spec: ColumnSpec, column_data: []const u8, comptime Type: type) !Type {
+    const type_info = @typeInfo(Type);
+
+    // TODO(vincent): if the struct is packed we could maybe read stuff directly
+    // TODO(vincent): handle packed enum
+    // TODO(vincent): handle union
+
+    switch (type_info) {
+        .int => return try self.readInt(diags, column_spec, column_data, Type),
+        .float => return try self.readFloat(diags, column_spec, column_data, Type),
+        .pointer => |pointer| switch (pointer.size) {
+            .One => {
+                return try self.readType(allocator, diags, column_spec, column_data, @TypeOf(pointer.child));
             },
-            .@"struct" => return try self.readStruct(allocator, diags, column_spec, column_data, Type),
-            .array => return try self.readArray(diags, column_spec, column_data, Type),
-            else => @compileError("field type " ++ @typeName(Type) ++ " not handled yet"),
-        }
+            .Slice => {
+                return try self.readSlice(allocator, diags, column_spec, column_data, Type);
+            },
+            else => @compileError("invalid pointer size " ++ @tagName(pointer.size)),
+        },
+        .@"struct" => return try self.readStruct(allocator, diags, column_spec, column_data, Type),
+        .array => return try self.readArray(diags, column_spec, column_data, Type),
+        else => @compileError("field type " ++ @typeName(Type) ++ " not handled yet"),
     }
+}
 
-    fn readFloatFromSlice(comptime Type: type, slice: []const u8) Type {
-        // Compute the number of bytes needed for the float type we're trying to read.
-        const len = comptime @divExact(@typeInfo(Type).float.bits, 8);
+fn readFloatFromSlice(comptime Type: type, slice: []const u8) Type {
+    // Compute the number of bytes needed for the float type we're trying to read.
+    const len = comptime @divExact(@typeInfo(Type).float.bits, 8);
 
-        std.debug.assert(slice.len <= len);
+    std.debug.assert(slice.len <= len);
 
-        // See readIntFromSlice below for an explanation as to why we do this.
+    // See readIntFromSlice below for an explanation as to why we do this.
 
-        var buf = [_]u8{0} ** len;
+    var buf = [_]u8{0} ** len;
 
-        const padding = len - slice.len;
-        mem.copyForwards(u8, buf[padding..buf.len], slice);
+    const padding = len - slice.len;
+    mem.copyForwards(u8, buf[padding..buf.len], slice);
 
-        const bytes: *const [len]u8 = @ptrCast(&buf);
-        const ptr: *align(1) const Type = @ptrCast(bytes);
+    const bytes: *const [len]u8 = @ptrCast(&buf);
+    const ptr: *align(1) const Type = @ptrCast(bytes);
 
-        return ptr.*;
-    }
+    return ptr.*;
+}
 
-    fn readIntFromSlice(comptime Type: type, slice: []const u8) Type {
-        // Compute the number of bytes needed for the integer type we're trying to read.
-        const len = comptime @divExact(@typeInfo(Type).int.bits, 8);
+fn readIntFromSlice(comptime Type: type, slice: []const u8) Type {
+    // Compute the number of bytes needed for the integer type we're trying to read.
+    const len = comptime @divExact(@typeInfo(Type).int.bits, 8);
 
-        std.debug.assert(slice.len <= len);
+    std.debug.assert(slice.len <= len);
 
-        // This may be confusing.
-        //
-        // This function needs to be able to read a integers from
-        // the slice even if the integer type has more bytes than the slice has.
-        //
-        // For example, if we read a tinyint from Cassandra which is a u8,
-        // we need to be able to read that into a u16/u32/u64/u128.
-        //
-        // To do that we allocate a buffer of how many bytes the integer type has,
-        // then we copy the slice data in it starting from the correct position.
-        //
-        // So for example if we have a u32 and we read a u16, we allocate a 4 byte buffer:
-        //   [0x00, 0x00, 0x00, 0x00]
-        // Then to write at the correct position we compute the padding, in this case 2 bytes.
-        // With that we write the data:
-        //   [0x00, 0x00, 0x21, 0x20]
-        // Now the u32 will have to correct data.
+    // This may be confusing.
+    //
+    // This function needs to be able to read a integers from
+    // the slice even if the integer type has more bytes than the slice has.
+    //
+    // For example, if we read a tinyint from Cassandra which is a u8,
+    // we need to be able to read that into a u16/u32/u64/u128.
+    //
+    // To do that we allocate a buffer of how many bytes the integer type has,
+    // then we copy the slice data in it starting from the correct position.
+    //
+    // So for example if we have a u32 and we read a u16, we allocate a 4 byte buffer:
+    //   [0x00, 0x00, 0x00, 0x00]
+    // Then to write at the correct position we compute the padding, in this case 2 bytes.
+    // With that we write the data:
+    //   [0x00, 0x00, 0x21, 0x20]
+    // Now the u32 will have to correct data.
 
-        var buf = [_]u8{0} ** len;
+    var buf = [_]u8{0} ** len;
 
-        const padding = len - slice.len;
-        mem.copyForwards(u8, buf[padding..buf.len], slice);
+    const padding = len - slice.len;
+    mem.copyForwards(u8, buf[padding..buf.len], slice);
 
-        const bytes: *const [len]u8 = @ptrCast(&buf);
+    const bytes: *const [len]u8 = @ptrCast(&buf);
 
-        return mem.readInt(Type, bytes, .big);
-    }
+    return mem.readInt(Type, bytes, .big);
+}
 
-    fn readInt(self: *Self, diags: *Diags, column_spec: ColumnSpec, column_data: []const u8, comptime Type: type) !Type {
-        const r: Type = 0;
+fn readInt(self: *Self, diags: *Diags, column_spec: ColumnSpec, column_data: []const u8, comptime Type: type) !Type {
+    const r: Type = 0;
 
-        const option = column_spec.option;
+    const option = column_spec.option;
 
-        switch (Type) {
-            u8, i8 => {
-                switch (option) {
-                    .Tinyint => return readIntFromSlice(Type, column_data),
-                    .Custom => {
-                        if (column_spec.custom_class_name) |class_name| {
-                            const new_option = getOptionIDFromCassandraClassName(class_name) catch |err| switch (err) {};
-                            switch (new_option) {
-                                .Tinyint => {
-                                    var new_column_spec = column_spec;
-                                    new_column_spec.option = new_option;
-                                    return self.readInt(diags, new_column_spec, column_data, Type);
-                                },
-                                else => {
-                                    diags.incompatible_metadata.incompatible_types.cql_type_name = @tagName(new_option);
-                                    diags.incompatible_metadata.incompatible_types.native_type_name = @typeName(Type);
-                                    return error.IncompatibleMetadata;
-                                },
-                            }
-                        } else {
-                            return error.NoCQLCustomClassName;
+    switch (Type) {
+        u8, i8 => {
+            switch (option) {
+                .Tinyint => return readIntFromSlice(Type, column_data),
+                .Custom => {
+                    if (column_spec.custom_class_name) |class_name| {
+                        const new_option = getOptionIDFromCassandraClassName(class_name) catch |err| switch (err) {};
+                        switch (new_option) {
+                            .Tinyint => {
+                                var new_column_spec = column_spec;
+                                new_column_spec.option = new_option;
+                                return self.readInt(diags, new_column_spec, column_data, Type);
+                            },
+                            else => {
+                                diags.incompatible_metadata.incompatible_types.cql_type_name = @tagName(new_option);
+                                diags.incompatible_metadata.incompatible_types.native_type_name = @typeName(Type);
+                                return error.IncompatibleMetadata;
+                            },
                         }
-                    },
-                    else => {
-                        diags.incompatible_metadata.incompatible_types.cql_type_name = @tagName(option);
-                        diags.incompatible_metadata.incompatible_types.native_type_name = @typeName(Type);
-                        return error.IncompatibleMetadata;
-                    },
-                }
-            },
-            u16, i16 => {
-                switch (option) {
-                    .Tinyint,
-                    .Smallint,
-                    => return readIntFromSlice(Type, column_data),
-                    else => {
-                        diags.incompatible_metadata.incompatible_types.cql_type_name = @tagName(option);
-                        diags.incompatible_metadata.incompatible_types.native_type_name = @typeName(Type);
-                        return error.IncompatibleMetadata;
-                    },
-                }
-            },
-            u32, i32 => {
-                switch (option) {
-                    .Tinyint,
-                    .Smallint,
-                    .Int,
-                    .Date,
-                    => return readIntFromSlice(Type, column_data),
-                    else => {
-                        diags.incompatible_metadata.incompatible_types.cql_type_name = @tagName(option);
-                        diags.incompatible_metadata.incompatible_types.native_type_name = @typeName(Type);
-                        return error.IncompatibleMetadata;
-                    },
-                }
-            },
-            u64, i64, u128, i128 => {
-                switch (option) {
-                    .Tinyint,
-                    .Smallint,
-                    .Int,
-                    .Bigint,
-                    .Counter,
-                    .Date,
-                    .Time,
-                    .Timestamp,
-                    => return readIntFromSlice(Type, column_data),
-                    else => {
-                        diags.incompatible_metadata.incompatible_types.cql_type_name = @tagName(option);
-                        diags.incompatible_metadata.incompatible_types.native_type_name = @typeName(Type);
-                        return error.IncompatibleMetadata;
-                    },
-                }
-            },
-            else => @compileError("int type " ++ @typeName(Type) ++ " is invalid"),
-        }
-
-        return r;
+                    } else {
+                        return error.NoCQLCustomClassName;
+                    }
+                },
+                else => {
+                    diags.incompatible_metadata.incompatible_types.cql_type_name = @tagName(option);
+                    diags.incompatible_metadata.incompatible_types.native_type_name = @typeName(Type);
+                    return error.IncompatibleMetadata;
+                },
+            }
+        },
+        u16, i16 => {
+            switch (option) {
+                .Tinyint,
+                .Smallint,
+                => return readIntFromSlice(Type, column_data),
+                else => {
+                    diags.incompatible_metadata.incompatible_types.cql_type_name = @tagName(option);
+                    diags.incompatible_metadata.incompatible_types.native_type_name = @typeName(Type);
+                    return error.IncompatibleMetadata;
+                },
+            }
+        },
+        u32, i32 => {
+            switch (option) {
+                .Tinyint,
+                .Smallint,
+                .Int,
+                .Date,
+                => return readIntFromSlice(Type, column_data),
+                else => {
+                    diags.incompatible_metadata.incompatible_types.cql_type_name = @tagName(option);
+                    diags.incompatible_metadata.incompatible_types.native_type_name = @typeName(Type);
+                    return error.IncompatibleMetadata;
+                },
+            }
+        },
+        u64, i64, u128, i128 => {
+            switch (option) {
+                .Tinyint,
+                .Smallint,
+                .Int,
+                .Bigint,
+                .Counter,
+                .Date,
+                .Time,
+                .Timestamp,
+                => return readIntFromSlice(Type, column_data),
+                else => {
+                    diags.incompatible_metadata.incompatible_types.cql_type_name = @tagName(option);
+                    diags.incompatible_metadata.incompatible_types.native_type_name = @typeName(Type);
+                    return error.IncompatibleMetadata;
+                },
+            }
+        },
+        else => @compileError("int type " ++ @typeName(Type) ++ " is invalid"),
     }
 
-    fn readFloat(_: *Self, diags: *Diags, column_spec: ColumnSpec, column_data: []const u8, comptime Type: type) !Type {
-        const r: Type = 0.0;
+    return r;
+}
 
-        const option = column_spec.option;
+fn readFloat(_: *Self, diags: *Diags, column_spec: ColumnSpec, column_data: []const u8, comptime Type: type) !Type {
+    const r: Type = 0.0;
 
-        switch (Type) {
-            f32 => {
-                switch (option) {
-                    .Float => return readFloatFromSlice(f32, column_data),
-                    else => {
-                        diags.incompatible_metadata.incompatible_types.cql_type_name = @tagName(option);
-                        diags.incompatible_metadata.incompatible_types.native_type_name = @typeName(Type);
-                        return error.IncompatibleMetadata;
-                    },
-                }
-            },
-            f64 => {
-                switch (option) {
-                    .Float => {
-                        const f_32 = readFloatFromSlice(f32, column_data);
-                        return @floatCast(f_32);
-                    },
-                    .Double => return readFloatFromSlice(f64, column_data),
-                    else => {
-                        diags.incompatible_metadata.incompatible_types.cql_type_name = @tagName(option);
-                        diags.incompatible_metadata.incompatible_types.native_type_name = @typeName(Type);
-                        return error.IncompatibleMetadata;
-                    },
-                }
-            },
-            f128 => {
-                switch (option) {
-                    .Float => {
-                        const f_32 = readFloatFromSlice(f32, column_data);
-                        return @floatCast(f_32);
-                    },
-                    .Double => {
-                        const f_64 = readFloatFromSlice(f64, column_data);
-                        return @floatCast(f_64);
-                    },
-                    else => {
-                        diags.incompatible_metadata.incompatible_types.cql_type_name = @tagName(option);
-                        diags.incompatible_metadata.incompatible_types.native_type_name = @typeName(Type);
-                        return error.IncompatibleMetadata;
-                    },
-                }
-            },
-            else => @compileError("float type " ++ @typeName(Type) ++ " is invalid"),
-        }
+    const option = column_spec.option;
 
-        return r;
+    switch (Type) {
+        f32 => {
+            switch (option) {
+                .Float => return readFloatFromSlice(f32, column_data),
+                else => {
+                    diags.incompatible_metadata.incompatible_types.cql_type_name = @tagName(option);
+                    diags.incompatible_metadata.incompatible_types.native_type_name = @typeName(Type);
+                    return error.IncompatibleMetadata;
+                },
+            }
+        },
+        f64 => {
+            switch (option) {
+                .Float => {
+                    const f_32 = readFloatFromSlice(f32, column_data);
+                    return @floatCast(f_32);
+                },
+                .Double => return readFloatFromSlice(f64, column_data),
+                else => {
+                    diags.incompatible_metadata.incompatible_types.cql_type_name = @tagName(option);
+                    diags.incompatible_metadata.incompatible_types.native_type_name = @typeName(Type);
+                    return error.IncompatibleMetadata;
+                },
+            }
+        },
+        f128 => {
+            switch (option) {
+                .Float => {
+                    const f_32 = readFloatFromSlice(f32, column_data);
+                    return @floatCast(f_32);
+                },
+                .Double => {
+                    const f_64 = readFloatFromSlice(f64, column_data);
+                    return @floatCast(f_64);
+                },
+                else => {
+                    diags.incompatible_metadata.incompatible_types.cql_type_name = @tagName(option);
+                    diags.incompatible_metadata.incompatible_types.native_type_name = @typeName(Type);
+                    return error.IncompatibleMetadata;
+                },
+            }
+        },
+        else => @compileError("float type " ++ @typeName(Type) ++ " is invalid"),
     }
 
-    fn readSlice(self: *Self, allocator: mem.Allocator, diags: *Diags, column_spec: ColumnSpec, column_data: []const u8, comptime Type: type) !Type {
-        const type_info = @typeInfo(Type);
-        const ChildType = std.meta.Elem(Type);
-        if (@typeInfo(ChildType) == .array) {
-            @compileError("cannot read a slice of arrays, use a slice instead as the element type");
+    return r;
+}
+
+fn readSlice(self: *Self, allocator: mem.Allocator, diags: *Diags, column_spec: ColumnSpec, column_data: []const u8, comptime Type: type) !Type {
+    const type_info = @typeInfo(Type);
+    const ChildType = std.meta.Elem(Type);
+    if (@typeInfo(ChildType) == .array) {
+        @compileError("cannot read a slice of arrays, use a slice instead as the element type");
+    }
+
+    const id = column_spec.option;
+
+    // Special case the u8 type because it's used for strings.
+    // We can simply reuse the column data slice for this so make sure the
+    // user uses a []const u8 in its struct.
+    if (type_info.pointer.is_const and ChildType == u8) {
+        var slice: Type = undefined;
+
+        switch (id) {
+            .Blob, .UUID, .Timeuuid, .Ascii, .Varchar => {
+                slice = column_data;
+            },
+            else => {
+                diags.incompatible_metadata.incompatible_types.cql_type_name = @tagName(id);
+                diags.incompatible_metadata.incompatible_types.native_type_name = @typeName(Type);
+                return error.IncompatibleMetadata;
+            },
         }
 
-        const id = column_spec.option;
+        return slice;
+    }
 
-        // Special case the u8 type because it's used for strings.
-        // We can simply reuse the column data slice for this so make sure the
-        // user uses a []const u8 in its struct.
-        if (type_info.pointer.is_const and ChildType == u8) {
-            var slice: Type = undefined;
+    switch (ChildType) {
+        u8, i8, u16, i16, u32, i32, i64, u64 => {
+            const NonConstType = @Type(std.builtin.Type{
+                .pointer = .{
+                    .size = .Slice,
+                    .is_const = false,
+                    .is_volatile = type_info.pointer.is_volatile,
+                    .alignment = type_info.pointer.alignment,
+                    .address_space = type_info.pointer.address_space,
+                    .child = ChildType,
+                    .is_allowzero = type_info.pointer.is_allowzero,
+                    .sentinel = type_info.pointer.sentinel,
+                },
+            });
+
+            var slice: NonConstType = undefined;
 
             switch (id) {
-                .Blob, .UUID, .Timeuuid, .Ascii, .Varchar => {
-                    slice = column_data;
+                .Set, .List => {
+                    if (column_spec.listset_element_type_option == null) {
+                        return error.InvalidColumnSpec;
+                    }
+
+                    const child_option = column_spec.listset_element_type_option.?;
+
+                    const child_column_spec = switch (child_option) {
+                        .Custom => ColumnSpec{
+                            .custom_class_name = column_spec.custom_class_name.?,
+                            .option = child_option,
+                        },
+                        else => ColumnSpec{
+                            .option = child_option,
+                        },
+                    };
+
+                    var mr = MessageReader.init(column_data);
+                    const n = try mr.readInt(u32);
+
+                    slice = try allocator.alloc(ChildType, @as(usize, n));
+                    errdefer allocator.free(slice);
+
+                    var i: usize = 0;
+                    while (i < n) : (i += 1) {
+                        const bytes = (try mr.readBytes(allocator)) orelse unreachable;
+                        defer allocator.free(bytes);
+
+                        slice[i] = try self.readType(allocator, diags, child_column_spec, bytes, ChildType);
+                    }
                 },
                 else => {
                     diags.incompatible_metadata.incompatible_types.cql_type_name = @tagName(id);
@@ -352,121 +410,61 @@ pub const Iterator = struct {
             }
 
             return slice;
-        }
+        },
+        else => @compileError("type " ++ @typeName(Type) ++ " is invalid"),
+    }
+}
 
-        switch (ChildType) {
-            u8, i8, u16, i16, u32, i32, i64, u64 => {
-                const NonConstType = @Type(std.builtin.Type{
-                    .pointer = .{
-                        .size = .Slice,
-                        .is_const = false,
-                        .is_volatile = type_info.pointer.is_volatile,
-                        .alignment = type_info.pointer.alignment,
-                        .address_space = type_info.pointer.address_space,
-                        .child = ChildType,
-                        .is_allowzero = type_info.pointer.is_allowzero,
-                        .sentinel = type_info.pointer.sentinel,
-                    },
-                });
-
-                var slice: NonConstType = undefined;
-
-                switch (id) {
-                    .Set, .List => {
-                        if (column_spec.listset_element_type_option == null) {
-                            return error.InvalidColumnSpec;
-                        }
-
-                        const child_option = column_spec.listset_element_type_option.?;
-
-                        const child_column_spec = switch (child_option) {
-                            .Custom => ColumnSpec{
-                                .custom_class_name = column_spec.custom_class_name.?,
-                                .option = child_option,
-                            },
-                            else => ColumnSpec{
-                                .option = child_option,
-                            },
-                        };
-
-                        var mr = MessageReader.init(column_data);
-                        const n = try mr.readInt(u32);
-
-                        slice = try allocator.alloc(ChildType, @as(usize, n));
-                        errdefer allocator.free(slice);
-
-                        var i: usize = 0;
-                        while (i < n) : (i += 1) {
-                            const bytes = (try mr.readBytes(allocator)) orelse unreachable;
-                            defer allocator.free(bytes);
-
-                            slice[i] = try self.readType(allocator, diags, child_column_spec, bytes, ChildType);
-                        }
-                    },
-                    else => {
-                        diags.incompatible_metadata.incompatible_types.cql_type_name = @tagName(id);
-                        diags.incompatible_metadata.incompatible_types.native_type_name = @typeName(Type);
-                        return error.IncompatibleMetadata;
-                    },
-                }
-
-                return slice;
-            },
-            else => @compileError("type " ++ @typeName(Type) ++ " is invalid"),
-        }
+fn readStruct(_: *Self, allocator: mem.Allocator, _: *Diags, column_spec: ColumnSpec, column_data: []const u8, comptime Type: type) !Type {
+    if (Type == big.int.Const) {
+        var m = try bigint.fromBytes(allocator, column_data);
+        return m.toConst();
     }
 
-    fn readStruct(_: *Self, allocator: mem.Allocator, _: *Diags, column_spec: ColumnSpec, column_data: []const u8, comptime Type: type) !Type {
-        if (Type == big.int.Const) {
-            var m = try bigint.fromBytes(allocator, column_data);
-            return m.toConst();
-        }
-
-        if (Type == RawBytes) {
-            return RawBytes{
-                .data = column_data,
-            };
-        }
-
-        if (comptime std.meta.hasFn(Type, "scan")) {
-            var res: Type = undefined;
-
-            try res.scan(allocator, column_spec, column_data);
-
-            return res;
-        }
-
-        @compileError("type " ++ @typeName(Type) ++ " is invalid");
+    if (Type == RawBytes) {
+        return RawBytes{
+            .data = column_data,
+        };
     }
 
-    fn readArray(_: *Self, diags: *Diags, column_spec: ColumnSpec, column_data: []const u8, comptime Type: type) !Type {
-        var array: Type = undefined;
+    if (comptime std.meta.hasFn(Type, "scan")) {
+        var res: Type = undefined;
 
-        const option = column_spec.option;
+        try res.scan(allocator, column_spec, column_data);
 
-        // NOTE(vincent): Arrays are fixed size and the only thing we know has a fixed size with CQL is a UUID.
-        // Maybe in the future we could allow more advanced stuff like reading blobs for arrays of packed struct/union/enum
-        // Maybe we can also allow reading strings and adding zeroes to tne end ?
-
-        switch (option) {
-            .UUID, .Timeuuid => mem.copyForwards(u8, &array, column_data[0..array.len]),
-            else => {
-                diags.incompatible_metadata.incompatible_types.cql_type_name = @tagName(option);
-                diags.incompatible_metadata.incompatible_types.native_type_name = @typeName(Type);
-                return error.IncompatibleMetadata;
-            },
-        }
-
-        return array;
+        return res;
     }
 
-    fn getOptionIDFromCassandraClassName(name: []const u8) !OptionID {
-        if (mem.eql(u8, "org.apache.cassandra.db.marshal.ByteType", name)) {
-            return .Tinyint;
-        }
-        return .Custom;
+    @compileError("type " ++ @typeName(Type) ++ " is invalid");
+}
+
+fn readArray(_: *Self, diags: *Diags, column_spec: ColumnSpec, column_data: []const u8, comptime Type: type) !Type {
+    var array: Type = undefined;
+
+    const option = column_spec.option;
+
+    // NOTE(vincent): Arrays are fixed size and the only thing we know has a fixed size with CQL is a UUID.
+    // Maybe in the future we could allow more advanced stuff like reading blobs for arrays of packed struct/union/enum
+    // Maybe we can also allow reading strings and adding zeroes to tne end ?
+
+    switch (option) {
+        .UUID, .Timeuuid => mem.copyForwards(u8, &array, column_data[0..array.len]),
+        else => {
+            diags.incompatible_metadata.incompatible_types.cql_type_name = @tagName(option);
+            diags.incompatible_metadata.incompatible_types.native_type_name = @typeName(Type);
+            return error.IncompatibleMetadata;
+        },
     }
-};
+
+    return array;
+}
+
+fn getOptionIDFromCassandraClassName(name: []const u8) !OptionID {
+    if (mem.eql(u8, "org.apache.cassandra.db.marshal.ByteType", name)) {
+        return .Tinyint;
+    }
+    return .Custom;
+}
 
 fn columnSpec(id: OptionID) ColumnSpec {
     return ColumnSpec{
@@ -481,7 +479,7 @@ fn columnSpec(id: OptionID) ColumnSpec {
     };
 }
 
-fn testIteratorScan(allocator: mem.Allocator, column_specs: []const ColumnSpec, data: []const []const u8, diags: ?*Iterator.ScanOptions.Diagnostics, row: anytype) !void {
+fn testIteratorScan(allocator: mem.Allocator, column_specs: []const ColumnSpec, data: []const []const u8, diags: ?*Self.ScanOptions.Diagnostics, row: anytype) !void {
     const metadata = RowsMetadata{
         .paging_state = null,
         .new_metadata_id = null,
@@ -502,8 +500,8 @@ fn testIteratorScan(allocator: mem.Allocator, column_specs: []const ColumnSpec, 
         RowData{ .slice = try column_data.toOwnedSlice() },
     };
 
-    var iterator = Iterator.init(metadata, row_data);
-    const options = Iterator.ScanOptions{
+    var iterator = Self.init(metadata, row_data);
+    const options = Self.ScanOptions{
         .diags = diags,
     };
     try testing.expect(try iterator.scan(allocator, options, row));
@@ -513,7 +511,7 @@ test "iterator scan: incompatible metadata" {
     var arena = testutils.arenaAllocator();
     defer arena.deinit();
 
-    var diags = Iterator.ScanOptions.Diagnostics{};
+    var diags = Self.ScanOptions.Diagnostics{};
 
     {
         const Row = struct {
