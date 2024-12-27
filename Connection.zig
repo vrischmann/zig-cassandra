@@ -199,11 +199,7 @@ fn formatMessage(message: Message, comptime _: []const u8, _: std.fmt.FormatOpti
                 try writer.print("RESULT/void::[]", .{});
             },
             .rows => |rows| {
-                for (rows.data) |row_data| {
-                    _ = row_data;
-                }
-
-                try writer.print("RESULT/rows::[]", .{});
+                try writer.print("RESULT/rows::[nb_rows={d}]", .{rows.data.len});
             },
             .set_keyspace => |keyspace| {
                 try writer.print("RESULT/set_keyspace::[keyspace={s}]", .{
@@ -211,12 +207,19 @@ fn formatMessage(message: Message, comptime _: []const u8, _: std.fmt.FormatOpti
                 });
             },
             .prepared => |prepared| {
-                _ = prepared;
-                try writer.print("RESULT/prepared::[]", .{});
+                try writer.print("RESULT/prepared::[query_id={s}, result_metadata_id={?s}]", .{
+                    prepared.query_id,
+                    prepared.result_metadata_id,
+                });
             },
             .schema_change => |event| {
-                _ = event;
-                try writer.print("RESULT/event::[]", .{});
+                try writer.print("RESULT/event::[target={s} type={s} options_arguments={?s}, options_keyspace={s} options_object_name={s}]", .{
+                    @tagName(event.target),
+                    @tagName(event.type),
+                    event.options.arguments,
+                    event.options.keyspace,
+                    event.options.object_name,
+                });
             },
         },
         else => try writer.print("{any}", .{message}),
