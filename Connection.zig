@@ -194,6 +194,31 @@ fn formatMessage(message: Message, comptime _: []const u8, _: std.fmt.FormatOpti
                 msg.query_parameters,
             });
         },
+        .result => |msg| switch (msg.result) {
+            .void => {
+                try writer.print("RESULT/void::[]", .{});
+            },
+            .rows => |rows| {
+                for (rows.data) |row_data| {
+                    _ = row_data;
+                }
+
+                try writer.print("RESULT/rows::[]", .{});
+            },
+            .set_keyspace => |keyspace| {
+                try writer.print("RESULT/set_keyspace::[keyspace={s}]", .{
+                    keyspace,
+                });
+            },
+            .prepared => |prepared| {
+                _ = prepared;
+                try writer.print("RESULT/prepared::[]", .{});
+            },
+            .schema_change => |event| {
+                _ = event;
+                try writer.print("RESULT/event::[]", .{});
+            },
+        },
         else => try writer.print("{any}", .{message}),
     }
 }
@@ -509,9 +534,7 @@ fn tickNominal(conn: *Self) !void {
     try conn.readMessagesNoEof(conn.arena.allocator());
 
     while (conn.queue.readItem()) |message| {
-        log.debug("message: {s}", .{
-            messageFormatter(message),
-        });
+        _ = message;
     }
 }
 
