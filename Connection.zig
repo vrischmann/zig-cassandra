@@ -41,6 +41,7 @@ const StartupMessage = protocol.StartupMessage;
 const SupportedMessage = protocol.SupportedMessage;
 const QueryParameters = @import("QueryParameters.zig");
 const testutils = @import("testutils.zig");
+const Iterator = @import("iterator.zig").Iterator;
 
 const log = std.log.scoped(.connection);
 
@@ -926,7 +927,7 @@ test "protocol v4" {
         try testing.expectEqual(.ready, conn.handshake_state);
 
         const query = "select age from foobar.age_to_ids limit 1;";
-        try conn.doQuery(query, .{
+        const query_parameters = QueryParameters{
             .consistency_level = .One,
             .values = null,
             .skip_metadata = false,
@@ -936,9 +937,14 @@ test "protocol v4" {
             .timestamp = null,
             .keyspace = null,
             .now_in_seconds = null,
-        });
+        };
 
+        try conn.doQuery(query, query_parameters);
         try conn.tick();
+
+        const message = conn.tracer.events.readItem().?.message.query;
+        try testing.expectEqual(query, message.query);
+        try testing.expectEqual(query_parameters, message.query_parameters);
 
         //
 
@@ -946,5 +952,32 @@ test "protocol v4" {
         defer allocator.free(written);
 
         try testing.expectEqualSlices(u8, "\x04\x01\x00\x00\x07\x00\x00\x00\x33\x31\xc0\x00\x00\x00\x2a\x73\x65\x6c\x65\x63\x74\x20\x61\x67\x65\x20\x66\x72\x6f\x6d\x20\x66\x6f\x6f\x62\x61\x72\x2e\x61\x67\x65\x5f\x74\x6f\x5f\x69\x64\x73\x20\x6c\x69\x6d\x69\x74\x20\x31\x3b\x00\x01\x00", written);
+    }
+
+    // Read RESULT
+    {
+        try testing.expectEqual(.nominal, conn.state);
+        try testing.expectEqual(.ready, conn.handshake_state);
+
+        const data = "\x84\x01\x00\x00\x08\x00\x00\x00\x33\x33\x1c\x00\x00\x00\x02\x00\x00\x00\x01\x05\x04\x94\x06\x66\x6f\x6f\x62\x61\x72\x00\x0a\x61\x67\x65\x5f\x74\x6f\x5f\x69\x64\x73\x00\x03\x61\x67\x65\x00\x09\x00\x00\x00\x01\x00\x00\x00\x04\x00\x00\x25\xa8";
+        try conn.feedReadable(data);
+
+        try conn.tick();
+
+        const message: ResultMessage = conn.tracer.events.readItem().?.message.result;
+        const rows = message.result.rows;
+        try testing.expectEqual(1, rows.data.len);
+
+        var iterator = Iterator.init(rows.metadata, rows.data);
+
+        const Row = struct {
+            n: i64,
+        };
+        var row: Row = undefined;
+
+        try testing.expect(
+            try iterator.scan(allocator, .{}, &row),
+        );
+        try testing.expectEqual(9640, row.n);
     }
 }
