@@ -426,7 +426,7 @@ test "frame reader: RESULT message" {
         const rows = try collectRows(
             MyRow,
             arena.allocator(),
-            result_message.result.Rows,
+            result_message.result.rows,
         );
         try testing.expectEqual(10, rows.items.len);
 
@@ -467,7 +467,7 @@ test "frame reader: RESULT message" {
         const rows = try collectRows(
             MyRow,
             arena.allocator(),
-            result_message.result.Rows,
+            result_message.result.rows,
         );
         try testing.expectEqual(100, rows.items.len);
     }
@@ -3341,22 +3341,22 @@ test "register message" {
 }
 
 pub const Result = union(ResultKind) {
-    Void: void,
-    Rows: Rows,
-    SetKeyspace: []const u8,
-    Prepared: Prepared,
-    SchemaChange: event.SchemaChange,
+    void: void,
+    rows: Rows,
+    set_keyspace: []const u8,
+    prepared: Prepared,
+    schema_change: event.SchemaChange,
 };
 
 /// RESULT is the result to a query (QUERY, PREPARE, EXECUTE or BATCH messages).
 ///
 /// Described in the protocol spec at §4.2.5.
 const ResultKind = enum(u32) {
-    Void = 0x0001,
-    Rows = 0x0002,
-    SetKeyspace = 0x0003,
-    Prepared = 0x0004,
-    SchemaChange = 0x0005,
+    void = 0x0001,
+    rows = 0x0002,
+    set_keyspace = 0x0003,
+    prepared = 0x0004,
+    schema_change = 0x0005,
 };
 
 const Rows = struct {
@@ -3448,22 +3448,22 @@ pub const ResultMessage = struct {
         const kind: ResultKind = @enumFromInt(n);
 
         switch (kind) {
-            .Void => message.result = Result{ .Void = {} },
-            .Rows => {
+            .void => message.result = Result{ .void = {} },
+            .rows => {
                 const rows = try Rows.read(allocator, protocol_version, br);
-                message.result = Result{ .Rows = rows };
+                message.result = Result{ .rows = rows };
             },
-            .SetKeyspace => {
+            .set_keyspace => {
                 const keyspace = try br.readString(allocator);
-                message.result = Result{ .SetKeyspace = keyspace };
+                message.result = Result{ .set_keyspace = keyspace };
             },
-            .Prepared => {
+            .prepared => {
                 const prepared = try Prepared.read(allocator, protocol_version, br);
-                message.result = Result{ .Prepared = prepared };
+                message.result = Result{ .prepared = prepared };
             },
-            .SchemaChange => {
+            .schema_change => {
                 const schema_change = try event.SchemaChange.read(allocator, br);
-                message.result = Result{ .SchemaChange = schema_change };
+                message.result = Result{ .schema_change = schema_change };
             },
         }
 
@@ -3483,7 +3483,7 @@ test "result message: void" {
     var mr = MessageReader.init(envelope.body);
     const message = try ResultMessage.read(arena.allocator(), envelope.header.version, &mr);
 
-    try testing.expect(message.result == .Void);
+    try testing.expect(message.result == .void);
 }
 
 test "result message: rows" {
@@ -3498,11 +3498,11 @@ test "result message: rows" {
     var mr = MessageReader.init(envelope.body);
     const message = try ResultMessage.read(arena.allocator(), envelope.header.version, &mr);
 
-    try testing.expect(message.result == .Rows);
+    try testing.expect(message.result == .rows);
 
     // check metadata
 
-    const rows_metadata = message.result.Rows.metadata;
+    const rows_metadata = message.result.rows.metadata;
     try testing.expect(rows_metadata.paging_state == null);
     try testing.expect(rows_metadata.new_metadata_id == null);
     try testing.expectEqualStrings("foobar", rows_metadata.global_table_spec.?.keyspace);
@@ -3521,7 +3521,7 @@ test "result message: rows" {
 
     // check data
 
-    const rows = message.result.Rows;
+    const rows = message.result.rows;
     try testing.expectEqual(@as(usize, 3), rows.data.len);
 
     const row1 = rows.data[0].slice;
@@ -3552,11 +3552,11 @@ test "result message: rows, don't skip metadata" {
     var mr = MessageReader.init(envelope.body);
     const message = try ResultMessage.read(arena.allocator(), envelope.header.version, &mr);
 
-    try testing.expect(message.result == .Rows);
+    try testing.expect(message.result == .rows);
 
     // check metadata
 
-    const rows_metadata = message.result.Rows.metadata;
+    const rows_metadata = message.result.rows.metadata;
     try testing.expect(rows_metadata.paging_state == null);
     try testing.expect(rows_metadata.new_metadata_id == null);
     try testing.expectEqualStrings("foobar", rows_metadata.global_table_spec.?.keyspace);
@@ -3575,7 +3575,7 @@ test "result message: rows, don't skip metadata" {
 
     // check data
 
-    const rows = message.result.Rows;
+    const rows = message.result.rows;
     try testing.expectEqual(@as(usize, 13), rows.data.len);
 
     const row1 = rows.data[0].slice;
@@ -3596,11 +3596,11 @@ test "result message: rows, list of uuid" {
     var mr = MessageReader.init(envelope.body);
     const message = try ResultMessage.read(arena.allocator(), envelope.header.version, &mr);
 
-    try testing.expect(message.result == .Rows);
+    try testing.expect(message.result == .rows);
 
     // check metadata
 
-    const rows_metadata = message.result.Rows.metadata;
+    const rows_metadata = message.result.rows.metadata;
     try testing.expect(rows_metadata.paging_state == null);
     try testing.expect(rows_metadata.new_metadata_id == null);
     try testing.expectEqualStrings("foobar", rows_metadata.global_table_spec.?.keyspace);
@@ -3616,7 +3616,7 @@ test "result message: rows, list of uuid" {
 
     // check data
 
-    const rows = message.result.Rows;
+    const rows = message.result.rows;
     try testing.expectEqual(@as(usize, 1), rows.data.len);
 
     const row1 = rows.data[0].slice;
@@ -3636,8 +3636,8 @@ test "result message: set keyspace" {
     var mr = MessageReader.init(envelope.body);
     const message = try ResultMessage.read(arena.allocator(), envelope.header.version, &mr);
 
-    try testing.expect(message.result == .SetKeyspace);
-    try testing.expectEqualStrings("foobar", message.result.SetKeyspace);
+    try testing.expect(message.result == .set_keyspace);
+    try testing.expectEqualStrings("foobar", message.result.set_keyspace);
 }
 
 test "result message: prepared insert" {
@@ -3652,12 +3652,12 @@ test "result message: prepared insert" {
     var mr = MessageReader.init(envelope.body);
     const message = try ResultMessage.read(arena.allocator(), envelope.header.version, &mr);
 
-    try testing.expect(message.result == .Prepared);
+    try testing.expect(message.result == .prepared);
 
     // check prepared metadata
 
     {
-        const prepared_metadata = message.result.Prepared.metadata;
+        const prepared_metadata = message.result.prepared.metadata;
         try testing.expectEqualStrings("foobar", prepared_metadata.global_table_spec.?.keyspace);
         try testing.expectEqualStrings("user", prepared_metadata.global_table_spec.?.table);
         try testing.expectEqual(@as(usize, 1), prepared_metadata.pk_indexes.len);
@@ -3678,7 +3678,7 @@ test "result message: prepared insert" {
     // check rows metadata
 
     {
-        const rows_metadata = message.result.Prepared.rows_metadata;
+        const rows_metadata = message.result.prepared.rows_metadata;
         try testing.expect(rows_metadata.global_table_spec == null);
         try testing.expectEqual(@as(usize, 0), rows_metadata.column_specs.len);
     }
@@ -3696,12 +3696,12 @@ test "result message: prepared select" {
     var mr = MessageReader.init(envelope.body);
     const message = try ResultMessage.read(arena.allocator(), envelope.header.version, &mr);
 
-    try testing.expect(message.result == .Prepared);
+    try testing.expect(message.result == .prepared);
 
     // check prepared metadata
 
     {
-        const prepared_metadata = message.result.Prepared.metadata;
+        const prepared_metadata = message.result.prepared.metadata;
         try testing.expectEqualStrings("foobar", prepared_metadata.global_table_spec.?.keyspace);
         try testing.expectEqualStrings("user", prepared_metadata.global_table_spec.?.table);
         try testing.expectEqual(@as(usize, 1), prepared_metadata.pk_indexes.len);
@@ -3716,7 +3716,7 @@ test "result message: prepared select" {
     // check rows metadata
 
     {
-        const rows_metadata = message.result.Prepared.rows_metadata;
+        const rows_metadata = message.result.prepared.rows_metadata;
         try testing.expectEqualStrings("foobar", rows_metadata.global_table_spec.?.keyspace);
         try testing.expectEqualStrings("user", rows_metadata.global_table_spec.?.table);
         try testing.expectEqual(@as(usize, 3), rows_metadata.column_specs.len);
@@ -3748,7 +3748,7 @@ test "result message: rows with warning" {
     var mr = MessageReader.init(envelope.body);
     const message = try ResultMessage.read(arena.allocator(), envelope.header.version, &mr);
 
-    try testing.expect(message.result == .Rows);
+    try testing.expect(message.result == .rows);
 }
 
 /// SUPPORTED is sent by a node in response to a OPTIONS message.
