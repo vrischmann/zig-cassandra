@@ -81,42 +81,42 @@ pub fn build(b: *std.Build) !void {
     test_step.dependOn(&run_main_tests.step);
 
     //
-    // Add the example
+    // Add cqldebug
     //
 
-    const example_mod = b.createModule(.{
-        .root_source_file = b.path("examples/main.zig"),
+    const cqldebug_mod = b.createModule(.{
+        .root_source_file = b.path("cqldebug/main.zig"),
         .target = target,
         .optimize = optimize,
     });
-    example_mod.linkLibrary(lz4);
-    example_mod.linkLibrary(snappy);
+    cqldebug_mod.linkLibrary(lz4);
+    cqldebug_mod.linkLibrary(snappy);
 
-    const example_options = b.addOptions();
-    example_options.addOption(bool, "enable_tracing", enable_tracing);
-    example_options.addOption(bool, "enable_logging", enable_logging);
+    const cqldebug_options = b.addOptions();
+    cqldebug_options.addOption(bool, "enable_tracing", enable_tracing);
+    cqldebug_options.addOption(bool, "enable_logging", enable_logging);
 
-    example_mod.addImport("cassandra", module);
-    example_mod.addImport("snappy", snappy_mod);
-    example_mod.addImport("build_options", example_options.createModule());
+    cqldebug_mod.addImport("cassandra", module);
+    cqldebug_mod.addImport("snappy", snappy_mod);
+    cqldebug_mod.addImport("build_options", cqldebug_options.createModule());
 
-    const example = b.addExecutable(.{
-        .name = "example",
-        .root_module = example_mod,
+    const cqldebug = b.addExecutable(.{
+        .name = "cqldebug",
+        .root_module = cqldebug_mod,
     });
-    example.linkLibC();
+    cqldebug.linkLibC();
 
-    const example_install_artifact = b.addInstallArtifact(example, .{});
-    b.getInstallStep().dependOn(&example_install_artifact.step);
+    const cqldebug_install_artifact = b.addInstallArtifact(cqldebug, .{});
+    b.getInstallStep().dependOn(&cqldebug_install_artifact.step);
 
-    const example_run_cmd = b.addRunArtifact(example);
-    example_run_cmd.step.dependOn(b.getInstallStep());
+    const cqldebug_run_cmd = b.addRunArtifact(cqldebug);
+    cqldebug_run_cmd.step.dependOn(b.getInstallStep());
     if (b.args) |args| {
-        example_run_cmd.addArgs(args);
+        cqldebug_run_cmd.addArgs(args);
     }
 
-    const example_run = b.step("example", "Run the example");
-    example_run.dependOn(&example_run_cmd.step);
+    const cqldebug_run = b.step("cqldebug", "Run cqldebug");
+    cqldebug_run.dependOn(&cqldebug_run_cmd.step);
 
     //
     // Add some tools
