@@ -76,38 +76,6 @@ pub const Frame = struct {
         return crc;
     }
 
-    const PayloadAndTrailer = struct {
-        payload: []const u8,
-        trailer: [4]u8,
-
-        pub fn length(self: PayloadAndTrailer) usize {
-            return self.payload.len + self.trailer.len;
-        }
-    };
-
-    fn readHeader(reader: anytype, comptime N: comptime_int) ![N]u8 {
-        var buf: [N]u8 = undefined;
-        const n = try reader.readAll(&buf);
-        if (n != N) return error.UnexpectedEOF;
-
-        return buf;
-    }
-
-    const ReadPayloadAndTrailerError = error{
-        UnexpectedEOF,
-    } || mem.Allocator.Error || std.posix.ReadError;
-
-    fn readPayloadAndTrailer(buffer: []const u8, payload_length: usize) ReadPayloadAndTrailerError!PayloadAndTrailer {
-        return .{
-            .payload = buffer[0..payload_length],
-            .trailer = blk: {
-                var tmp: [4]u8 = undefined;
-                @memcpy(&tmp, buffer[payload_length..]);
-                break :blk tmp;
-            },
-        };
-    }
-
     fn computeCR32(payload: []const u8) u32 {
         var hash = std.hash.Crc32.init();
         hash.update(initial_crc32_bytes);
