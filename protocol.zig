@@ -97,18 +97,12 @@ pub const Frame = struct {
         UnexpectedEOF,
     } || mem.Allocator.Error || std.posix.ReadError;
 
-    fn readPayloadAndTrailer(reader: anytype, allocator: mem.Allocator, payload_length: usize) ReadPayloadAndTrailerError!PayloadAndTrailer {
-        const size = payload_length + trailer_size;
-
-        const res = try allocator.alloc(u8, size);
-        const n = try reader.readAll(res);
-        if (n != size) return error.UnexpectedEOF;
-
+    fn readPayloadAndTrailer(buffer: []const u8, payload_length: usize) ReadPayloadAndTrailerError!PayloadAndTrailer {
         return .{
-            .payload = res[0 .. res.len - trailer_size],
+            .payload = buffer[0..payload_length],
             .trailer = blk: {
                 var tmp: [4]u8 = undefined;
-                @memcpy(&tmp, res[res.len - trailer_size ..]);
+                @memcpy(&tmp, buffer[payload_length..]);
                 break :blk tmp;
             },
         };
@@ -121,9 +115,9 @@ pub const Frame = struct {
         return hash.final();
     }
 
-    fn computeAndVerifyCRC32(payload_and_trailer: PayloadAndTrailer) !void {
-        const computed_crc32 = computeCR32(payload_and_trailer.payload);
-        const expected_crc32 = mem.readInt(u32, &payload_and_trailer.trailer, .little);
+    fn computeAndVerifyCRC32(payload: []const u8, trailer: *const [4]u8) !void {
+        const computed_crc32 = computeCR32(payload);
+        const expected_crc32 = mem.readInt(u32, trailer, .little);
         if (computed_crc32 != expected_crc32) {
             return error.InvalidPayloadChecksum;
         }
@@ -145,11 +139,9 @@ pub const Frame = struct {
     /// If there's not enough data or if the input data is corrupted somehow, an error is returned.
     /// Otherwise a result containing both the frame and the number of bytes consumed is returned.
     pub fn decode(allocator: mem.Allocator, data: []const u8, format: Format) Frame.DecodeError!DecodeResult {
-        var fbs = io.fixedBufferStream(data);
-
         switch (format) {
-            .compressed => return decodeCompressed(allocator, fbs.reader()),
-            .uncompressed => return decodeUncompressed(allocator, fbs.reader()),
+            .compressed => return decodeCompressed(allocator, data),
+            .uncompressed => return decodeUncompressed(data),
         }
     }
 
@@ -165,9 +157,14 @@ pub const Frame = struct {
         }
     }
 
-    fn decodeUncompressed(allocator: mem.Allocator, reader: anytype) Frame.DecodeError!DecodeResult {
+    fn decodeUncompressed(input: []const u8) Frame.DecodeError!DecodeResult {
         // Read and parse header
-        const header_data = try readHeader(reader, uncompressed_header_size);
+        const header_data, const buffer = if (input.len >= uncompressed_header_size)
+            .{ input[0..uncompressed_header_size], input[uncompressed_header_size..] }
+        else
+            return error.UnexpectedEOF;
+
+        debug.assert(header_data.len == uncompressed_header_size);
 
         const header3b: u24 = mem.readInt(u24, header_data[0..3], .little);
         const header_expected_crc = @as(usize, @intCast(mem.readInt(u24, header_data[3..uncompressed_header_size], .little)));
@@ -180,26 +177,38 @@ pub const Frame = struct {
         }
 
         // Read payload and trailer
-        const payload_and_trailer = try readPayloadAndTrailer(reader, allocator, payload_length);
+        const payload, const trailer = if (buffer.len >= payload_length + trailer_size)
+            .{ buffer[0..payload_length], @as(*const [4]u8, @ptrCast(buffer[payload_length..])) }
+        else
+            return error.UnexpectedEOF;
+
+        debug.assert(payload_length < input.len);
+        debug.assert(payload.len == payload_length);
+        debug.assert(trailer.len == trailer_size);
 
         // Verify payload CRC32
-        try computeAndVerifyCRC32(payload_and_trailer);
+        try computeAndVerifyCRC32(payload, trailer);
 
         return .{
             .frame = .{
-                .payload = payload_and_trailer.payload,
+                .payload = payload,
                 .is_self_contained = is_self_contained,
             },
-            .consumed = uncompressed_header_size + payload_and_trailer.length(),
+            .consumed = uncompressed_header_size + payload_length + trailer_size,
         };
     }
 
-    fn decodeCompressed(allocator: mem.Allocator, reader: anytype) Frame.DecodeError!DecodeResult {
+    fn decodeCompressed(allocator: mem.Allocator, input: []const u8) Frame.DecodeError!DecodeResult {
         // Read and parse header
-        const header = try readHeader(reader, compressed_header_size);
+        const header_data, const buffer = if (input.len >= compressed_header_size)
+            .{ input[0..compressed_header_size], input[compressed_header_size..] }
+        else
+            return error.UnexpectedEOF;
 
-        const header5b: u40 = mem.readInt(u40, header[0..5], .little);
-        const header_expected_crc = @as(usize, @intCast(mem.readInt(u24, header[5..compressed_header_size], .little)));
+        debug.assert(header_data.len == compressed_header_size);
+
+        const header5b: u40 = mem.readInt(u40, header_data[0..5], .little);
+        const header_expected_crc = @as(usize, @intCast(mem.readInt(u24, header_data[5..compressed_header_size], .little)));
 
         const compressed_length: u17 = @intCast(header5b & 0x1FFFF);
         const uncompressed_length: u17 = @intCast(header5b >> 17 & 0x1FFFF);
@@ -211,23 +220,30 @@ pub const Frame = struct {
         }
 
         // Read payload and trailer
-        const payload_and_trailer = try readPayloadAndTrailer(reader, allocator, compressed_length);
+        const payload, const trailer = if (buffer.len >= compressed_length + trailer_size)
+            .{ buffer[0..compressed_length], @as(*const [4]u8, @ptrCast(buffer[compressed_length..])) }
+        else
+            return error.UnexpectedEOF;
+
+        debug.assert(compressed_length < input.len);
+        debug.assert(payload.len == compressed_length);
+        debug.assert(trailer.len == trailer_size);
 
         // Verify compressed payload CRC32
-        try computeAndVerifyCRC32(payload_and_trailer);
+        try computeAndVerifyCRC32(payload, trailer);
 
         // Decompress payload if necessary
-        const payload = if (uncompressed_length == 0)
-            payload_and_trailer.payload
+        const final_payload = if (uncompressed_length == 0)
+            payload
         else
-            try lz4.decompress(allocator, payload_and_trailer.payload, @as(usize, @intCast(uncompressed_length)));
+            try lz4.decompress(allocator, payload, @as(usize, @intCast(uncompressed_length)));
 
         return .{
             .frame = .{
-                .payload = payload,
+                .payload = final_payload,
                 .is_self_contained = is_self_contained,
             },
-            .consumed = compressed_header_size + payload_and_trailer.length(),
+            .consumed = compressed_header_size + payload.len + trailer_size,
         };
     }
 
