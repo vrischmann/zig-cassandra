@@ -600,7 +600,7 @@ pub const Envelope = struct {
         };
 
         if (res.header.flags != 0) {
-            if (compression_algorithm != .none and (res.header.flags & EnvelopeFlags.compression == EnvelopeFlags.compression)) {
+            if (res.header.flags & EnvelopeFlags.compression == EnvelopeFlags.compression) {
                 switch (compression_algorithm) {
                     .lz4 => {
                         const decompressed_data = try lz4.decompress(allocator, res.body, res.body.len * 3);
@@ -610,7 +610,7 @@ pub const Envelope = struct {
                         const decompressed_data = try snappy.decompress(allocator, res.body);
                         res.body = decompressed_data;
                     },
-                    .none => unreachable, // We can't come in this branch if compression_algorithm is none
+                    .none => return error.EnvelopeBodyIsCompressed,
                 }
             }
 
