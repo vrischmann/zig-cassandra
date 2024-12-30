@@ -1050,6 +1050,7 @@ test "split reads, multiple ticks" {
     conn.handshake_state = .ready;
     conn.state = .nominal;
 
+    // Feed the data in chunks
     var i: usize = 0;
     while (i < data.len) : (i += 200) {
         const len = @min(data.len - i, 200);
