@@ -71,10 +71,6 @@ pub fn main() anyerror!void {
                 const n = try socket.read(&buf);
 
                 if (n > 0) {
-                    log.err("read: {any}, {s}", .{
-                        buf[0..n],
-                        fmt.fmtSliceHexLower(buf[0..n]),
-                    });
                     try conn.feedReadable(buf[0..n]);
                 }
             } else if (poll_fd.revents & posix.POLL.OUT == posix.POLL.OUT) {
@@ -89,7 +85,7 @@ pub fn main() anyerror!void {
         std.time.sleep(std.time.ns_per_ms * 100);
 
         if (conn.state == .nominal and count == 0) {
-            const q1 = "select age from foobar.age_to_ids limit 216;";
+            const q1 = "select age from foobar.age_to_ids limit 40000;";
             // const q2 = "select count(1) from foobar.age_to_ids;";
 
             try conn.doQuery(q1, .{
