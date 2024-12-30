@@ -571,7 +571,12 @@ pub const Envelope = struct {
         allocator.free(self.body);
     }
 
-    pub fn read(allocator: mem.Allocator, reader: anytype, compression_algorithm: CompressionAlgorithm) !Envelope {
+    const ReadError = error{
+        UnexpectedEOF,
+        EnvelopeBodyIsCompressed,
+    } || mem.Allocator.Error || lz4.DecompressError || snappy.DecompressError || MessageReader.Error || ProtocolVersion.Error;
+
+    pub fn read(allocator: mem.Allocator, reader: anytype, compression_algorithm: CompressionAlgorithm) (Envelope.ReadError || @TypeOf(reader).Error)!Envelope {
         var res: Envelope = undefined;
 
         res.header = hdr: {
@@ -858,7 +863,11 @@ pub const ProtocolVersion = enum(u8) {
     v5 = 0x5,
     v6 = 0x6,
 
-    pub fn init(b: u8) error{InvalidProtocolVersion}!ProtocolVersion {
+    const Error = error{
+        InvalidProtocolVersion,
+    };
+
+    pub fn init(b: u8) Error!ProtocolVersion {
         const tmp = b & 0x7;
         if (tmp < 3 or tmp > 6) {
             return error.InvalidProtocolVersion;
@@ -1259,12 +1268,13 @@ pub const MessageReader = struct {
     }
 
     const Error = error{
-        UnexpectedEOF,
-    };
+        InvalidValueLength,
+        InvalidInetSize,
+    } || mem.Allocator.Error || Reader.NoEofError;
 
-    const Reader = io.Reader(*MessageReader, Error, read);
+    const Reader = io.Reader(*MessageReader, error{UnexpectedEOF}, read);
 
-    fn read(self: *MessageReader, buf: []u8) Error!usize {
+    fn read(self: *MessageReader, buf: []u8) error{UnexpectedEOF}!usize {
         if (self.bytes_read >= self.buffer.len) {
             return error.UnexpectedEOF;
         }
@@ -1297,18 +1307,18 @@ pub const MessageReader = struct {
 
     /// Read a length-prefixed byte slice from the stream. The length is 2 bytes.
     /// The slice can be null.
-    pub fn readShortBytes(self: *MessageReader, allocator: mem.Allocator) !?[]const u8 {
+    pub fn readShortBytes(self: *MessageReader, allocator: mem.Allocator) Error!?[]const u8 {
         return self.readBytesGeneric(allocator, i16);
     }
 
     /// Read a length-prefixed byte slice from the stream. The length is 4 bytes.
     /// The slice can be null.
-    pub fn readBytes(self: *MessageReader, allocator: mem.Allocator) !?[]const u8 {
+    pub fn readBytes(self: *MessageReader, allocator: mem.Allocator) Error!?[]const u8 {
         return self.readBytesGeneric(allocator, i32);
     }
 
     /// Read bytes from the stream in a generic way.
-    fn readBytesGeneric(self: *MessageReader, allocator: mem.Allocator, comptime LenType: type) !?[]const u8 {
+    fn readBytesGeneric(self: *MessageReader, allocator: mem.Allocator, comptime LenType: type) Error!?[]const u8 {
         const len = try self.readInt(LenType);
         if (len < 0) {
             return null;
@@ -1329,7 +1339,7 @@ pub const MessageReader = struct {
 
     /// Read a length-prefixed string from the stream. The length is 2 bytes.
     /// The string can't be null.
-    pub fn readString(self: *MessageReader, allocator: mem.Allocator) ![]const u8 {
+    pub fn readString(self: *MessageReader, allocator: mem.Allocator) Error![]const u8 {
         if (try self.readBytesGeneric(allocator, i16)) |v| {
             return v;
         } else {
@@ -1339,7 +1349,7 @@ pub const MessageReader = struct {
 
     /// Read a length-prefixed string from the stream. The length is 4 bytes.
     /// The string can't be null.
-    pub fn readLongString(self: *MessageReader, allocator: mem.Allocator) ![]const u8 {
+    pub fn readLongString(self: *MessageReader, allocator: mem.Allocator) Error![]const u8 {
         if (try self.readBytesGeneric(allocator, i32)) |v| {
             return v;
         } else {
@@ -1348,18 +1358,18 @@ pub const MessageReader = struct {
     }
 
     /// Read a UUID from the stream.
-    pub fn readUUID(self: *MessageReader) ![16]u8 {
+    pub fn readUUID(self: *MessageReader) Error![16]u8 {
         var buf: [16]u8 = undefined;
         _ = try self.reader().readAll(&buf);
         return buf;
     }
 
-    pub fn readUUIDInto(self: *MessageReader, buf: *[16]u8) !void {
+    pub fn readUUIDInto(self: *MessageReader, buf: *[16]u8) Error!void {
         _ = try self.reader().readAll(buf);
     }
 
     /// Read a list of string from the stream.
-    pub fn readStringList(self: *MessageReader, allocator: mem.Allocator) ![]const []const u8 {
+    pub fn readStringList(self: *MessageReader, allocator: mem.Allocator) Error![]const []const u8 {
         const len = @as(usize, try self.readInt(u16));
 
         var list = try std.ArrayList([]const u8).initCapacity(allocator, len);
@@ -1376,7 +1386,7 @@ pub const MessageReader = struct {
     }
 
     /// Read a value from the stream.
-    pub fn readValue(self: *MessageReader, allocator: mem.Allocator) !Value {
+    pub fn readValue(self: *MessageReader, allocator: mem.Allocator) Error!Value {
         const len = try self.readInt(i32);
 
         if (len >= 0) {
@@ -1393,7 +1403,7 @@ pub const MessageReader = struct {
         }
     }
 
-    pub fn readUnsignedVint(self: *MessageReader, comptime IntType: type) !IntType {
+    pub fn readUnsignedVint(self: *MessageReader, comptime IntType: type) Error!IntType {
         const bits = switch (@typeInfo(IntType)) {
             .int => |info| blk: {
                 comptime assert(info.bits >= 16);
@@ -1424,7 +1434,7 @@ pub const MessageReader = struct {
         return res;
     }
 
-    pub fn readVint(self: *MessageReader, comptime IntType: type) !IntType {
+    pub fn readVint(self: *MessageReader, comptime IntType: type) Error!IntType {
         const bits = switch (@typeInfo(IntType)) {
             .int => |info| blk: {
                 comptime assert(info.signedness == .signed);
@@ -1447,14 +1457,14 @@ pub const MessageReader = struct {
         return n;
     }
 
-    pub inline fn readInetaddr(self: *MessageReader) !net.Address {
+    pub inline fn readInetaddr(self: *MessageReader) Error!net.Address {
         return self.readInetGeneric(false);
     }
-    pub inline fn readInet(self: *MessageReader) !net.Address {
+    pub inline fn readInet(self: *MessageReader) Error!net.Address {
         return self.readInetGeneric(true);
     }
 
-    fn readInetGeneric(self: *MessageReader, comptime with_port: bool) !net.Address {
+    fn readInetGeneric(self: *MessageReader, comptime with_port: bool) Error!net.Address {
         const n = try self.readByte();
 
         return switch (n) {
@@ -1478,12 +1488,12 @@ pub const MessageReader = struct {
         };
     }
 
-    pub fn readConsistency(self: *MessageReader) !Consistency {
+    pub fn readConsistency(self: *MessageReader) Error!Consistency {
         const n = try self.readInt(u16);
         return @enumFromInt(n);
     }
 
-    pub fn readStringMap(self: *MessageReader, allocator: mem.Allocator) !Map {
+    pub fn readStringMap(self: *MessageReader, allocator: mem.Allocator) Error!Map {
         const n = try self.readInt(u16);
 
         var map = Map.init(allocator);
@@ -1499,7 +1509,7 @@ pub const MessageReader = struct {
         return map;
     }
 
-    pub fn readStringMultimap(self: *MessageReader, allocator: mem.Allocator) !Multimap {
+    pub fn readStringMultimap(self: *MessageReader, allocator: mem.Allocator) Error!Multimap {
         const n = try self.readInt(u16);
 
         var map = Multimap.init(allocator);
@@ -1515,7 +1525,7 @@ pub const MessageReader = struct {
         return map;
     }
 
-    pub fn readBytesMap(self: *MessageReader, allocator: mem.Allocator) !BytesMap {
+    pub fn readBytesMap(self: *MessageReader, allocator: mem.Allocator) Error!BytesMap {
         const n = try self.readInt(u16);
 
         var map = BytesMap.init(allocator);
