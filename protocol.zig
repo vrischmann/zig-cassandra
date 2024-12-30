@@ -576,7 +576,12 @@ pub const Envelope = struct {
         EnvelopeBodyIsCompressed,
     } || mem.Allocator.Error || lz4.DecompressError || snappy.DecompressError || MessageReader.Error || ProtocolVersion.Error;
 
-    pub fn read(allocator: mem.Allocator, reader: anytype, compression_algorithm: CompressionAlgorithm) (Envelope.ReadError || @TypeOf(reader).Error)!Envelope {
+    const ReadResult = struct {
+        envelope: Envelope,
+        consumed: usize,
+    };
+
+    pub fn read(allocator: mem.Allocator, reader: anytype, compression_algorithm: CompressionAlgorithm) (Envelope.ReadError || @TypeOf(reader).Error)!ReadResult {
         var res: Envelope = undefined;
 
         res.header = hdr: {
@@ -638,7 +643,10 @@ pub const Envelope = struct {
             res.body = res.body[mr.bytes_read..];
         }
 
-        return res;
+        return .{
+            .envelope = res,
+            .consumed = header_size + res.header.body_len,
+        };
     }
 };
 
@@ -2186,8 +2194,9 @@ test "envelope header: read and write" {
 
     // deserialize the header
 
-    const envelope = try Envelope.read(testing.allocator, fbs.reader(), .none);
-    const header = envelope.header;
+    const result = try Envelope.read(testing.allocator, fbs.reader(), .none);
+    try testing.expectEqual(exp.len, result.consumed);
+    const header = result.envelope.header;
 
     try testing.expect(header.version == .v4);
     try testing.expectEqual(@as(u8, 0), header.flags);
@@ -3851,7 +3860,9 @@ test "supported message" {
 fn testReadEnvelope(allocator: mem.Allocator, data: []const u8, compression_algorithm: CompressionAlgorithm) !Envelope {
     var fbs = io.fixedBufferStream(data);
 
-    return Envelope.read(allocator, fbs.reader(), compression_algorithm);
+    const result = try Envelope.read(allocator, fbs.reader(), compression_algorithm);
+    try testing.expectEqual(data.len, result.consumed);
+    return result.envelope;
 }
 
 fn expectSameEnvelope(comptime T: type, fr: T, header: EnvelopeHeader, exp: []const u8) !void {

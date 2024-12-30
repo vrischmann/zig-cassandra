@@ -710,16 +710,17 @@ fn readMessagesNoEof(conn: *Self, message_allocator: mem.Allocator) !void {
             debug.assert(result.frame.payload.len > 0);
 
             var fbs = io.StreamSource{ .const_buffer = io.fixedBufferStream(result.frame.payload) };
-            const tmp = try Envelope.read(scratch_allocator, fbs.reader(), .none);
 
-            break :blk tmp;
+            const result2 = try Envelope.read(scratch_allocator, fbs.reader(), .none);
+
+            break :blk result2.envelope;
         } else blk: {
-            const tmp = Envelope.read(scratch_allocator, reader.reader(), conn.compression) catch |err| switch (err) {
+            const result = Envelope.read(scratch_allocator, reader.reader(), conn.compression) catch |err| switch (err) {
                 error.UnexpectedEOF => return,
                 else => return err,
             };
 
-            break :blk tmp;
+            break :blk result.envelope;
         };
 
         const message = blk: {
