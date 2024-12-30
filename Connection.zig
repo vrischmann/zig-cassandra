@@ -87,53 +87,6 @@ const Tracer = if (build_options.enable_tracing) struct {
     }
 } else void{};
 
-/// TracingReader wraps a reader and depending if tracing is enabled, uses a TeeReader to write the data that is read to a writer.
-///
-/// This is currently only used in tests.
-fn TracingReader(comptime ReaderType: type) type {
-    return struct {
-        const BufferType = fifo(u8, .{ .Static = 4 * 1024 * 1024 });
-
-        const Reader = if (build_options.enable_tracing or build_options.enable_logging)
-            TeeReader(ReaderType, BufferType.Writer).Reader
-        else
-            ReaderType;
-
-        buffer: BufferType,
-        underlying: if (build_options.enable_tracing or build_options.enable_logging)
-            TeeReader(ReaderType, BufferType.Writer)
-        else
-            ReaderType,
-
-        const init = if (build_options.enable_tracing or build_options.enable_logging)
-            initTeeReader
-        else
-            initReader;
-
-        fn initReader(self: *@This(), underlying: ReaderType) void {
-            self.* = .{
-                .buffer = undefined,
-                .underlying = underlying,
-            };
-        }
-
-        fn initTeeReader(self: *@This(), underlying: ReaderType) void {
-            self.* = .{
-                .buffer = BufferType.init(),
-                .underlying = teeReader(underlying, self.buffer.writer()),
-            };
-        }
-
-        fn reader(self: *@This()) Reader {
-            if (comptime build_options.enable_tracing or build_options.enable_logging) {
-                return self.underlying.reader();
-            } else {
-                return self.underlying;
-            }
-        }
-    };
-}
-
 pub const Message = union(Opcode) {
     @"error": ErrorMessage,
     startup: StartupMessage,
