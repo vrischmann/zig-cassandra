@@ -314,10 +314,6 @@ pub fn feedReadable(conn: *Self, data: []const u8) !void {
     try conn.read_buffer.write(data);
 }
 
-pub fn getWritable(conn: *Self) []const u8 {
-    return conn.write_buffer.readableSlice(0);
-}
-
 /// Tick drives the connection state machines.
 ///
 /// Depending on the current state it can:
