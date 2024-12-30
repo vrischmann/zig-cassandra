@@ -554,8 +554,6 @@ pub const EnvelopeHeader = packed struct {
     stream: i16,
     opcode: Opcode,
     body_len: u32,
-
-    const size = 9;
 };
 
 pub const Envelope = struct {
@@ -566,6 +564,8 @@ pub const Envelope = struct {
     warnings: ?[]const []const u8 = null,
     custom_payload: ?BytesMap = null,
     body: []const u8,
+
+    const header_size = 9;
 
     pub fn deinit(self: @This(), allocator: mem.Allocator) void {
         allocator.free(self.body);
@@ -580,10 +580,10 @@ pub const Envelope = struct {
         var res: Envelope = undefined;
 
         res.header = hdr: {
-            var buf: [EnvelopeHeader.size]u8 = undefined;
+            var buf: [header_size]u8 = undefined;
 
             const n = try reader.readAll(&buf);
-            if (n != EnvelopeHeader.size) return error.UnexpectedEOF;
+            if (n != header_size) return error.UnexpectedEOF;
 
             break :hdr EnvelopeHeader{
                 .version = try ProtocolVersion.init(buf[0]),
@@ -647,7 +647,7 @@ pub const WriteEnvelopeError = error{} || mem.Allocator.Error;
 pub fn writeEnvelope(envelope: Envelope, out: *std.ArrayList(u8)) WriteEnvelopeError![]const u8 {
     out.clearRetainingCapacity();
 
-    var buf: [EnvelopeHeader.size]u8 = undefined;
+    var buf: [Envelope.header_size]u8 = undefined;
 
     buf[0] = @intFromEnum(envelope.header.version);
     buf[1] = envelope.header.flags;
@@ -2177,7 +2177,7 @@ fn checkEnvelopeHeader(version: ProtocolVersion, opcode: Opcode, input_len: usiz
     // Don't care about the flags here
     // Don't care about the stream
     try testing.expectEqual(opcode, header.opcode);
-    try testing.expectEqual(input_len - EnvelopeHeader.size, @as(usize, header.body_len));
+    try testing.expectEqual(input_len - Envelope.header_size, @as(usize, header.body_len));
 }
 
 test "envelope header: read and write" {
@@ -2194,7 +2194,7 @@ test "envelope header: read and write" {
     try testing.expectEqual(@as(i16, 215), header.stream);
     try testing.expectEqual(Opcode.options, header.opcode);
     try testing.expectEqual(@as(u32, 0), header.body_len);
-    try testing.expectEqual(@as(usize, 0), exp.len - EnvelopeHeader.size);
+    try testing.expectEqual(@as(usize, 0), exp.len - Envelope.header_size);
 }
 
 //
