@@ -11,6 +11,10 @@
             .url = "git+https://github.com/allyourcodebase/lz4.git?ref=1.10.0-1#12b7e6d70a54a5c0f984abdde02449aa2131c0f0",
             .hash = "122070136dfb55e09993ea332aad05eed39a150e624d195bb4397a80531d50a8d176",
         },
+        .linenoise = .{
+            .url = "git+https://codeberg.org/raddari/zig-linenoise.git?ref=main#a81f79b507a16c0de85bee1d58f59ab1d7e8b9ec",
+            .hash = "12207704373a5861f934feee0eff5dd67fff27968f800eeb25d30f91da7cd97cd07a",
+        },
     },
     .paths = .{
         "build.zig",

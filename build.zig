@@ -18,6 +18,11 @@ pub fn build(b: *std.Build) !void {
     });
     const lz4 = lz4_dep.artifact("lz4");
 
+    const linenoise_dep = b.lazyDependency("linenoise", .{
+        .target = target,
+        .optimize = optimize,
+    });
+
     // Define options
 
     const with_cassandra = b.option(bool, "with_cassandra", "Run tests which need a Cassandra node running to work.") orelse false;
@@ -98,6 +103,9 @@ pub fn build(b: *std.Build) !void {
 
     cqldebug_mod.addImport("cassandra", module);
     cqldebug_mod.addImport("snappy", snappy_mod);
+    if (linenoise_dep) |dep| {
+        cqldebug_mod.addImport("linenoise", dep.module("linenoise"));
+    }
     cqldebug_mod.addImport("build_options", cqldebug_options.createModule());
 
     const cqldebug = b.addExecutable(.{
