@@ -392,7 +392,7 @@ fn tickInHandshake(conn: *Self) !void {
     debug.assert(conn.state == .handshake);
 
     const previous_handshake_state = conn.handshake_state;
-    defer if (conn.handshake_state != previous_handshake_state) {
+    defer if (comptime build_options.enable_logging and conn.handshake_state != previous_handshake_state) {
         log.debug("transitioning handshake from {s} to {s}", .{
             @tagName(previous_handshake_state),
             @tagName(conn.handshake_state),

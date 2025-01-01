@@ -28,6 +28,7 @@ pub fn build(b: *std.Build) !void {
     const with_cassandra = b.option(bool, "with_cassandra", "Run tests which need a Cassandra node running to work.") orelse false;
     const enable_tracing = b.option(bool, "enable_tracing", "Enable tracing") orelse false;
     const enable_logging = b.option(bool, "enable_logging", "Enable logging") orelse false;
+    const enable_poll_debugging = b.option(bool, "enable_poll_debugging", "Enable poll(2) debugging") orelse false;
 
     //
     // Create the public 'cassandra' module
@@ -100,6 +101,7 @@ pub fn build(b: *std.Build) !void {
     const cqldebug_options = b.addOptions();
     cqldebug_options.addOption(bool, "enable_tracing", enable_tracing);
     cqldebug_options.addOption(bool, "enable_logging", enable_logging);
+    cqldebug_options.addOption(bool, "enable_poll_debugging", enable_poll_debugging);
 
     cqldebug_mod.addImport("cassandra", module);
     cqldebug_mod.addImport("snappy", snappy_mod);

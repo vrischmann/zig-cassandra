@@ -6,6 +6,7 @@ const fmt = std.fmt;
 const heap = std.heap;
 const net = std.net;
 const posix = std.posix;
+const build_options = @import("build_options");
 
 const cassandra = @import("cassandra");
 const Connection = cassandra.Connection;
@@ -137,9 +138,11 @@ const REPL = struct {
         for (&repl.poll_fds) |*poll_fd| {
             if (poll_fd.revents == 0) continue;
 
-            repl.ls.edit.hide();
-            log.info("poll fd: {any}", .{poll_fd});
-            repl.ls.edit.show();
+            if (comptime build_options.enable_poll_debugging) {
+                repl.ls.edit.hide();
+                log.info("poll fd: {any}", .{poll_fd});
+                repl.ls.edit.show();
+            }
 
             if (poll_fd.fd == stdin.handle) {
                 // stdin is ready
@@ -206,9 +209,11 @@ const REPL = struct {
             const ready = try posix.poll(&repl.poll_fds, 1000);
             if (ready <= 0) continue;
 
-            repl.ls.edit.hide();
-            log.info("ready: {d}", .{ready});
-            repl.ls.edit.show();
+            if (comptime build_options.enable_poll_debugging) {
+                repl.ls.edit.hide();
+                log.info("ready: {d}", .{ready});
+                repl.ls.edit.show();
+            }
 
             repl.processPollFds() catch |err| switch (err) {
                 error.Stop => return,
