@@ -138,12 +138,6 @@ const REPL = struct {
         for (&repl.poll_fds) |*poll_fd| {
             if (poll_fd.revents == 0) continue;
 
-            if (comptime build_options.enable_poll_debugging) {
-                repl.ls.edit.hide();
-                log.info("poll fd: {any}", .{poll_fd});
-                repl.ls.edit.show();
-            }
-
             if (poll_fd.fd == stdin.handle) {
                 // stdin is ready
 
@@ -182,22 +176,6 @@ const REPL = struct {
                     conn.write_buffer.discard(writable.len);
                 }
 
-                // Make some progress with the connection, if possible
-                {
-                    // Disable the linenoise prompt for this call because the connection might log stuff.
-                    repl.ls.edit.hide();
-                    defer repl.ls.edit.show();
-
-                    try conn.tick();
-                }
-
-                // If we have something to write register for the OUT event
-                if (conn.write_buffer.readableLength() > 0) {
-                    poll_fd.events |= posix.POLL.OUT;
-                } else {
-                    poll_fd.events &= ~@as(i16, posix.POLL.OUT);
-                }
-
                 // Clear the events for the next poll
                 poll_fd.revents = 0;
             }
@@ -207,18 +185,30 @@ const REPL = struct {
     fn run(repl: *REPL) !void {
         while (true) {
             const ready = try posix.poll(&repl.poll_fds, 1000);
-            if (ready <= 0) continue;
 
-            if (comptime build_options.enable_poll_debugging) {
-                repl.ls.edit.hide();
-                log.info("ready: {d}", .{ready});
-                repl.ls.edit.show();
+            if (ready > 0) {
+                repl.processPollFds() catch |err| switch (err) {
+                    error.Stop => return,
+                    else => return err,
+                };
             }
 
-            repl.processPollFds() catch |err| switch (err) {
-                error.Stop => return,
-                else => return err,
-            };
+            // Make some progress with the connection, if possible
+            if (repl.endpoint) |endpoint| {
+                const conn = endpoint.conn;
+
+                // Disable the linenoise prompt for this call because the connection might log stuff.
+                repl.ls.edit.hide();
+                try conn.tick();
+                repl.ls.edit.show();
+
+                // If we have something to write register for the OUT event on the pollfd
+                if (conn.write_buffer.readableLength() > 0) {
+                    repl.poll_fds[1].events |= posix.POLL.OUT;
+                } else {
+                    repl.poll_fds[1].events &= ~@as(i16, posix.POLL.OUT);
+                }
+            }
 
             std.time.sleep(std.time.ns_per_ms * 100);
         }
