@@ -757,41 +757,6 @@ fn TeeReader(comptime ReaderType: type, comptime WriterType: type) type {
     };
 }
 
-/// Create a new TeeReader reading from `reader` and writing to `writer`.
-fn teeReader(reader: anytype, writer: anytype) TeeReader(@TypeOf(reader), @TypeOf(writer)) {
-    return .{
-        .child_reader = reader,
-        .writer = writer,
-    };
-}
-
-test teeReader {
-    // var arena = testutils.arenaAllocator();
-    // defer arena.deinit();
-    // const allocator = arena.allocator();
-
-    var fbs = io.fixedBufferStream("foobar");
-    var out = fifo(u8, .{ .Static = 200 }).init();
-
-    var tee_reader = teeReader(fbs.reader(), out.writer());
-    var reader = tee_reader.reader();
-
-    var buf: [20]u8 = undefined;
-    const n = try reader.readAll(&buf);
-
-    try testing.expectEqual(6, n);
-    try testing.expectEqualStrings("foobar", buf[0..n]);
-    try testing.expectEqualStrings("foobar", out.readableSlice(0));
-}
-
-fn collectTracingEvents(allocator: mem.Allocator, _: *Tracer) ![]const Message {
-    var tmp = std.ArrayList(Message).init(allocator);
-
-    return tmp.toOwnedSlice();
-
-    // readMessagesNoEof()
-}
-
 test "protocol v4" {
     const allocator = std.testing.allocator;
 
