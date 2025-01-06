@@ -203,11 +203,11 @@ queue: fifo(Message, .Dynamic) = undefined,
 /// Each call to `tickInHandshake` (from a call to `tick`) handles this state machine.
 /// See the `tickInHandshake` documentation for a sequence diagram of the handshake.
 handshake_state: enum {
-    options,
+    initial,
     supported,
     authenticate_or_ready,
     done,
-} = .options,
+} = .initial,
 
 /// The framing state.
 /// This MUST NOT be modified by the user.
@@ -376,7 +376,7 @@ fn tickHandshake(conn: *Self) !void {
     };
 
     switch (conn.handshake_state) {
-        .options => {
+        .initial => {
             try conn.appendMessage(OptionsMessage{});
 
             conn.handshake_state = .supported;
@@ -735,9 +735,9 @@ test "protocol v4" {
 
     // OPTIONS
 
-    {
-        try testing.expectEqual(.options, conn.handshake_state);
+    try testing.expectEqual(.initial, conn.handshake_state);
 
+    {
         try conn.tick();
 
         const event = conn.tracer.events.readItem().?;
@@ -753,11 +753,10 @@ test "protocol v4" {
 
     try testing.expect(conn.read_buffer.readableLength() == 0);
     try testing.expect(conn.write_buffer.readableLength() == 0);
+    try testing.expectEqual(.supported, conn.handshake_state);
 
     // SUPPORTED
     {
-        try testing.expectEqual(.supported, conn.handshake_state);
-
         const data = "\x84\x00\x00\x09\x06\x00\x00\x00\x60\x00\x03\x00\x11\x50\x52\x4f\x54\x4f\x43\x4f\x4c\x5f\x56\x45\x52\x53\x49\x4f\x4e\x53\x00\x03\x00\x04\x33\x2f\x76\x33\x00\x04\x34\x2f\x76\x34\x00\x09\x35\x2f\x76\x35\x2d\x62\x65\x74\x61\x00\x0b\x43\x4f\x4d\x50\x52\x45\x53\x53\x49\x4f\x4e\x00\x02\x00\x06\x73\x6e\x61\x70\x70\x79\x00\x03\x6c\x7a\x34\x00\x0b\x43\x51\x4c\x5f\x56\x45\x52\x53\x49\x4f\x4e\x00\x01\x00\x05\x33\x2e\x30\x2e\x30";
         try conn.feedReadable(data);
 
@@ -796,10 +795,10 @@ test "protocol v4" {
     try testing.expect(conn.read_buffer.readableLength() == 0);
     try testing.expect(conn.write_buffer.readableLength() == 0);
 
+    try testing.expectEqual(.authenticate_or_ready, conn.handshake_state);
+
     // Read READY
     {
-        try testing.expectEqual(.authenticate_or_ready, conn.handshake_state);
-
         const data = "\x84\x01\x00\x00\x02\x00\x00\x00\x01\x00";
         try conn.feedReadable(data);
 
@@ -808,10 +807,10 @@ test "protocol v4" {
         _ = conn.tracer.events.readItem().?.message.ready;
     }
 
+    try testing.expectEqual(.done, conn.handshake_state);
+
     // Do QUERY
     {
-        try testing.expectEqual(.done, conn.handshake_state);
-
         const query = "select age from foobar.age_to_ids limit 1;";
         const query_parameters = QueryParameters{
             .consistency_level = .One,
@@ -842,8 +841,6 @@ test "protocol v4" {
 
     // Read RESULT
     {
-        try testing.expectEqual(.done, conn.handshake_state);
-
         const data = "\x84\x01\x00\x00\x08\x00\x00\x00\x33\x33\x1c\x00\x00\x00\x02\x00\x00\x00\x01\x05\x04\x94\x06\x66\x6f\x6f\x62\x61\x72\x00\x0a\x61\x67\x65\x5f\x74\x6f\x5f\x69\x64\x73\x00\x03\x61\x67\x65\x00\x09\x00\x00\x00\x01\x00\x00\x00\x04\x00\x00\x25\xa8";
         try conn.feedReadable(data);
 
