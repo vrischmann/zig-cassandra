@@ -101,6 +101,13 @@ const REPL = struct {
 
             save_line = true;
 
+            // Close and free the current connection if there is one
+            if (repl.endpoint) |*endpoint| {
+                endpoint.conn.deinit();
+                endpoint.socket.close();
+                endpoint.address = undefined;
+            }
+
             const address = try resolveSingleAddress(repl.gpa, hostname, port);
             const socket = try net.tcpConnectToAddress(address);
 
@@ -210,7 +217,7 @@ const REPL = struct {
                 }
             }
 
-            std.time.sleep(std.time.ns_per_ms * 100);
+            // std.time.sleep(std.time.ns_per_ms * 100);
         }
     }
 };
