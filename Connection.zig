@@ -196,23 +196,6 @@ read_buffer: fifo(u8, .Dynamic) = undefined,
 /// TODO(vincent): does this need to be dynamic ?
 queue: fifo(Message, .Dynamic) = undefined,
 
-/// The state the connection is in.
-///
-/// The handshake state is the first step to get a usable connection.
-/// It is a multi step process and its state is tracked in `handshake_state`.
-///
-/// The nominal state is the state in which a connection will be the vast majority of the time.
-/// In this state a connection can send queries, receive responses, register for events.
-///
-/// Finally the shutdown state indicates the connection will shut down.
-///
-/// Each call to `tick` handles this state machine.
-state: enum {
-    handshake,
-    nominal,
-    shutdown,
-} = .handshake,
-
 /// The state of the initial handshake.
 ///
 /// This is used while a connection is in the handshake state to track _where_ in a handshake the connection is.
@@ -326,15 +309,8 @@ pub fn feedReadable(conn: *Self, data: []const u8) !void {
 pub fn tick(conn: *Self) !void {
     // TODO(vincent): diags
 
-    switch (conn.state) {
-        .handshake => {
-            try conn.tickInHandshake();
-        },
-        .nominal => {
-            try conn.tickNominal();
-        },
-        .shutdown => unreachable,
-    }
+    try conn.tickHandshake();
+    try conn.tickNominal();
 }
 
 /// Handles the handshake state machine
@@ -387,8 +363,8 @@ pub fn tick(conn: *Self) !void {
 ///   |                                        |
 ///
 ///
-fn tickInHandshake(conn: *Self) !void {
-    debug.assert(conn.state == .handshake);
+fn tickHandshake(conn: *Self) !void {
+    if (conn.handshake_state == .ready) return;
 
     const previous_handshake_state = conn.handshake_state;
     defer if (comptime build_options.enable_logging) {
@@ -462,7 +438,6 @@ fn tickInHandshake(conn: *Self) !void {
                 switch (message) {
                     .ready => |_| {
                         conn.handshake_state = .ready;
-                        conn.state = .nominal;
                     },
                     .authenticate => |_| {},
                     .@"error" => |_| {
@@ -476,10 +451,11 @@ fn tickInHandshake(conn: *Self) !void {
                 }
             }
         },
-        .auth_response => unreachable,
-        .ready => {
-            conn.state = .nominal;
+        .auth_response => {
+            // TODO(vincent): implement me
+            unreachable;
         },
+        .ready => unreachable,
     }
 }
 
@@ -746,7 +722,6 @@ test "protocol v4" {
     // OPTIONS
 
     {
-        try testing.expectEqual(.handshake, conn.state);
         try testing.expectEqual(.options, conn.handshake_state);
 
         try conn.tick();
@@ -767,7 +742,6 @@ test "protocol v4" {
 
     // SUPPORTED
     {
-        try testing.expectEqual(.handshake, conn.state);
         try testing.expectEqual(.supported, conn.handshake_state);
 
         const data = "\x84\x00\x00\x09\x06\x00\x00\x00\x60\x00\x03\x00\x11\x50\x52\x4f\x54\x4f\x43\x4f\x4c\x5f\x56\x45\x52\x53\x49\x4f\x4e\x53\x00\x03\x00\x04\x33\x2f\x76\x33\x00\x04\x34\x2f\x76\x34\x00\x09\x35\x2f\x76\x35\x2d\x62\x65\x74\x61\x00\x0b\x43\x4f\x4d\x50\x52\x45\x53\x53\x49\x4f\x4e\x00\x02\x00\x06\x73\x6e\x61\x70\x70\x79\x00\x03\x6c\x7a\x34\x00\x0b\x43\x51\x4c\x5f\x56\x45\x52\x53\x49\x4f\x4e\x00\x01\x00\x05\x33\x2e\x30\x2e\x30";
@@ -778,41 +752,38 @@ test "protocol v4" {
         try testing.expectEqual(ProtocolVersion.v4, conn.protocol_version);
         try testing.expectEqual(0, conn.queue.readableLength());
 
-        const message = conn.tracer.events.readItem().?.message.supported;
-        try testing.expectEqualSlices(ProtocolVersion, &[_]ProtocolVersion{ .v3, .v4, .v5 }, message.protocol_versions);
-        try testing.expectEqualSlices(CQLVersion, &[_]CQLVersion{CQLVersion{ .major = 3, .minor = 0, .patch = 0 }}, message.cql_versions);
-        try testing.expectEqualSlices(CompressionAlgorithm, &[_]CompressionAlgorithm{ .snappy, .lz4 }, message.compression_algorithms);
+        {
+            const message = conn.tracer.events.readItem().?.message.supported;
+            try testing.expectEqualSlices(ProtocolVersion, &[_]ProtocolVersion{ .v3, .v4, .v5 }, message.protocol_versions);
+            try testing.expectEqualSlices(CQLVersion, &[_]CQLVersion{CQLVersion{ .major = 3, .minor = 0, .patch = 0 }}, message.cql_versions);
+            try testing.expectEqualSlices(CompressionAlgorithm, &[_]CompressionAlgorithm{ .snappy, .lz4 }, message.compression_algorithms);
+        }
+
+        {
+            // STARTUP
+
+            const message = conn.tracer.events.readItem().?.message.startup;
+            try testing.expectEqual(conn.cql_version, message.cql_version);
+            try testing.expectEqual(conn.compression, message.compression);
+
+            //
+
+            const written = try conn.write_buffer.toOwnedSlice();
+            defer allocator.free(written);
+
+            // TODO(vincent): check the actual payload
+            try testing.expect(written.len > 0);
+        }
     }
 
     try testing.expect(conn.read_buffer.readableLength() == 0);
     try testing.expect(conn.write_buffer.readableLength() == 0);
-
-    // STARTUP
-    {
-        try testing.expectEqual(.handshake, conn.state);
-        try testing.expectEqual(.startup, conn.handshake_state);
-
-        try conn.tick();
-
-        const message = conn.tracer.events.readItem().?.message.startup;
-        try testing.expectEqual(conn.cql_version, message.cql_version);
-        try testing.expectEqual(conn.compression, message.compression);
-
-        //
-
-        const written = try conn.write_buffer.toOwnedSlice();
-        defer allocator.free(written);
-
-        // TODO(vincent): check the actual payload
-        try testing.expect(written.len > 0);
-    }
 
     try testing.expect(conn.read_buffer.readableLength() == 0);
     try testing.expect(conn.write_buffer.readableLength() == 0);
 
     // Read READY
     {
-        try testing.expectEqual(.handshake, conn.state);
         try testing.expectEqual(.authenticate_or_ready, conn.handshake_state);
 
         const data = "\x84\x01\x00\x00\x02\x00\x00\x00\x01\x00";
@@ -825,7 +796,6 @@ test "protocol v4" {
 
     // Do QUERY
     {
-        try testing.expectEqual(.nominal, conn.state);
         try testing.expectEqual(.ready, conn.handshake_state);
 
         const query = "select age from foobar.age_to_ids limit 1;";
@@ -858,7 +828,6 @@ test "protocol v4" {
 
     // Read RESULT
     {
-        try testing.expectEqual(.nominal, conn.state);
         try testing.expectEqual(.ready, conn.handshake_state);
 
         const data = "\x84\x01\x00\x00\x08\x00\x00\x00\x33\x33\x1c\x00\x00\x00\x02\x00\x00\x00\x01\x05\x04\x94\x06\x66\x6f\x6f\x62\x61\x72\x00\x0a\x61\x67\x65\x5f\x74\x6f\x5f\x69\x64\x73\x00\x03\x61\x67\x65\x00\x09\x00\x00\x00\x01\x00\x00\x00\x04\x00\x00\x25\xa8";
@@ -935,7 +904,6 @@ test "split reads, multiple ticks" {
 
     // Pretend the handshake is already done
     conn.handshake_state = .ready;
-    conn.state = .nominal;
 
     // Feed the data in chunks
     var i: usize = 0;

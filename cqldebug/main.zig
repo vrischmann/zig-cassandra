@@ -210,7 +210,7 @@ const REPL = struct {
                 }
             }
 
-            std.time.sleep(std.time.ns_per_ms * 100);
+            // std.time.sleep(std.time.ns_per_ms * 100);
         }
     }
 };
