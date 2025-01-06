@@ -101,6 +101,13 @@ const REPL = struct {
 
             save_line = true;
 
+            // Close and free the current connection if there is one
+            if (repl.endpoint) |*endpoint| {
+                endpoint.conn.deinit();
+                endpoint.socket.close();
+                endpoint.address = undefined;
+            }
+
             const address = try resolveSingleAddress(repl.gpa, hostname, port);
             const socket = try net.tcpConnectToAddress(address);
 
