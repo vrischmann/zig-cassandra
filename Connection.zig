@@ -206,7 +206,7 @@ handshake_state: enum {
     options,
     supported,
     authenticate_or_ready,
-    ready,
+    done,
 } = .options,
 
 /// The framing state.
@@ -363,7 +363,7 @@ pub fn tick(conn: *Self) !void {
 ///
 ///
 fn tickHandshake(conn: *Self) !void {
-    if (conn.handshake_state == .ready) return;
+    if (conn.handshake_state == .done) return;
 
     const previous_handshake_state = conn.handshake_state;
     defer if (comptime build_options.enable_logging) {
@@ -435,8 +435,8 @@ fn tickHandshake(conn: *Self) !void {
 
             if (conn.queue.readItem()) |message| {
                 switch (message) {
-                    .ready => |_| {
-                        conn.handshake_state = .ready;
+                    .ready, .auth_success => {
+                        conn.handshake_state = .done;
                     },
                     .authenticate => |authenticate_message| {
                         if (mem.eql(u8, "org.apache.cassandra.auth.PasswordAuthenticator", authenticate_message.authenticator)) {
@@ -458,9 +458,6 @@ fn tickHandshake(conn: *Self) !void {
                             return error.UnexepectedAuthenticator;
                         }
                     },
-                    .auth_success => {
-                        conn.handshake_state = .ready;
-                    },
                     .@"error" => |_| {
                         // TODO(vincent): diags
                         return error.UnexpectedMessageType;
@@ -472,7 +469,7 @@ fn tickHandshake(conn: *Self) !void {
                 }
             }
         },
-        .ready => unreachable,
+        .done => unreachable,
     }
 }
 
@@ -813,7 +810,7 @@ test "protocol v4" {
 
     // Do QUERY
     {
-        try testing.expectEqual(.ready, conn.handshake_state);
+        try testing.expectEqual(.done, conn.handshake_state);
 
         const query = "select age from foobar.age_to_ids limit 1;";
         const query_parameters = QueryParameters{
@@ -845,7 +842,7 @@ test "protocol v4" {
 
     // Read RESULT
     {
-        try testing.expectEqual(.ready, conn.handshake_state);
+        try testing.expectEqual(.done, conn.handshake_state);
 
         const data = "\x84\x01\x00\x00\x08\x00\x00\x00\x33\x33\x1c\x00\x00\x00\x02\x00\x00\x00\x01\x05\x04\x94\x06\x66\x6f\x6f\x62\x61\x72\x00\x0a\x61\x67\x65\x5f\x74\x6f\x5f\x69\x64\x73\x00\x03\x61\x67\x65\x00\x09\x00\x00\x00\x01\x00\x00\x00\x04\x00\x00\x25\xa8";
         try conn.feedReadable(data);
@@ -920,7 +917,7 @@ test "split reads, multiple ticks" {
     defer conn.deinit();
 
     // Pretend the handshake is already done
-    conn.handshake_state = .ready;
+    conn.handshake_state = .done;
 
     // Feed the data in chunks
     var i: usize = 0;
