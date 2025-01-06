@@ -205,7 +205,7 @@ queue: fifo(Message, .Dynamic) = undefined,
 handshake_state: enum {
     initial,
     negotiation,
-    authentication_or_ready,
+    startup,
     done,
 } = .initial,
 
@@ -424,11 +424,10 @@ fn tickHandshake(conn: *Self) !void {
                     .compression = conn.compression,
                     .cql_version = conn.cql_version,
                 });
-
-                conn.handshake_state = .authentication_or_ready;
+                conn.handshake_state = .startup;
             }
         },
-        .authentication_or_ready => {
+        .startup => {
             // TODO(vincent): correct allocator ?
             try conn.readMessagesNoEof(conn.arena.allocator());
 
@@ -790,7 +789,7 @@ test "protocol v4" {
 
     try testing.expect(conn.read_buffer.readableLength() == 0);
     try testing.expect(conn.write_buffer.readableLength() == 0);
-    try testing.expectEqual(.authentication_or_ready, conn.handshake_state);
+    try testing.expectEqual(.startup, conn.handshake_state);
 
     // Read READY
     {
