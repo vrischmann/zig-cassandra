@@ -222,7 +222,6 @@ state: enum {
 handshake_state: enum {
     options,
     supported,
-    startup,
     authenticate_or_ready,
     auth_response,
     ready,
@@ -445,16 +444,15 @@ fn tickInHandshake(conn: *Self) !void {
                     conn.compression = supported_message.compression_algorithms[0];
                 }
 
-                conn.handshake_state = .startup;
-            }
-        },
-        .startup => {
-            try conn.appendMessage(StartupMessage{
-                .compression = conn.compression,
-                .cql_version = conn.cql_version,
-            });
+                // The connection is setup: send the STARTUP message
 
-            conn.handshake_state = .authenticate_or_ready;
+                try conn.appendMessage(StartupMessage{
+                    .compression = conn.compression,
+                    .cql_version = conn.cql_version,
+                });
+
+                conn.handshake_state = .authenticate_or_ready;
+            }
         },
         .authenticate_or_ready => {
             // TODO(vincent): correct allocator ?
