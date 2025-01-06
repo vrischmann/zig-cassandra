@@ -732,31 +732,6 @@ fn readMessagesNoEof(conn: *Self, message_allocator: mem.Allocator) !void {
     }
 }
 
-/// TeeReader creates a reader type that wraps a reader and writes the data read to a writer.
-fn TeeReader(comptime ReaderType: type, comptime WriterType: type) type {
-    return struct {
-        const Error = error{OutOfMemory} || std.posix.ReadError;
-        pub const Reader = std.io.Reader(*@This(), Error, readFn);
-
-        child_reader: ReaderType,
-        writer: WriterType,
-
-        fn readFn(self: *@This(), dest: []u8) Error!usize {
-            const n = try self.child_reader.read(dest);
-            if (n == 0) return 0;
-
-            const data = dest[0..n];
-            try self.writer.writeAll(data);
-
-            return n;
-        }
-
-        pub fn reader(self: *@This()) Reader {
-            return .{ .context = self };
-        }
-    };
-}
-
 test "protocol v4" {
     const allocator = std.testing.allocator;
 
