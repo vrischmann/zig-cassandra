@@ -438,12 +438,28 @@ fn tickHandshake(conn: *Self) !void {
                     .ready => |_| {
                         conn.handshake_state = .ready;
                     },
-                    .authenticate => |_| {
-                        // TODO(vincent): implement me, do actual authentication
+                    .authenticate => |authenticate_message| {
+                        if (mem.eql(u8, "org.apache.cassandra.auth.PasswordAuthenticator", authenticate_message.authenticator)) {
+                            // This is the SASL PLAIN encoding which is disgusting
+                            //
+                            // TODO(vincent): manage memory, right now the token is never freed until the connection is done
+                            var token_builder = std.ArrayList(u8).init(conn.arena.allocator());
 
-                        try conn.appendMessage(AuthResponseMessage{
-                            .token = "foobar",
-                        });
+                            // TODO(vincent): get the credentials from input parameters
+                            try token_builder.append(0);
+                            try token_builder.appendSlice("vincent"); // username
+                            try token_builder.append(0);
+                            try token_builder.appendSlice("vincent"); // password
+
+                            try conn.appendMessage(AuthResponseMessage{
+                                .token = try token_builder.toOwnedSlice(),
+                            });
+                        } else {
+                            return error.UnexepectedAuthenticator;
+                        }
+                    },
+                    .auth_success => {
+                        conn.handshake_state = .ready;
                     },
                     .@"error" => |_| {
                         // TODO(vincent): diags
