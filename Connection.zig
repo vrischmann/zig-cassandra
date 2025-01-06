@@ -206,7 +206,6 @@ handshake_state: enum {
     options,
     supported,
     authenticate_or_ready,
-    auth_response,
     ready,
 } = .options,
 
@@ -439,7 +438,13 @@ fn tickHandshake(conn: *Self) !void {
                     .ready => |_| {
                         conn.handshake_state = .ready;
                     },
-                    .authenticate => |_| {},
+                    .authenticate => |_| {
+                        // TODO(vincent): implement me, do actual authentication
+
+                        try conn.appendMessage(AuthResponseMessage{
+                            .token = "foobar",
+                        });
+                    },
                     .@"error" => |_| {
                         // TODO(vincent): diags
                         return error.UnexpectedMessageType;
@@ -450,10 +455,6 @@ fn tickHandshake(conn: *Self) !void {
                     },
                 }
             }
-        },
-        .auth_response => {
-            // TODO(vincent): implement me
-            unreachable;
         },
         .ready => unreachable,
     }
