@@ -204,8 +204,8 @@ queue: fifo(Message, .Dynamic) = undefined,
 /// See the `tickInHandshake` documentation for a sequence diagram of the handshake.
 handshake_state: enum {
     initial,
-    supported,
-    authenticate_or_ready,
+    negotiation,
+    authentication_or_ready,
     done,
 } = .initial,
 
@@ -378,10 +378,9 @@ fn tickHandshake(conn: *Self) !void {
     switch (conn.handshake_state) {
         .initial => {
             try conn.appendMessage(OptionsMessage{});
-
-            conn.handshake_state = .supported;
+            conn.handshake_state = .negotiation;
         },
-        .supported => {
+        .negotiation => {
             // TODO(vincent): correct allocator ?
             try conn.readMessagesNoEof(conn.arena.allocator());
 
@@ -426,10 +425,10 @@ fn tickHandshake(conn: *Self) !void {
                     .cql_version = conn.cql_version,
                 });
 
-                conn.handshake_state = .authenticate_or_ready;
+                conn.handshake_state = .authentication_or_ready;
             }
         },
-        .authenticate_or_ready => {
+        .authentication_or_ready => {
             // TODO(vincent): correct allocator ?
             try conn.readMessagesNoEof(conn.arena.allocator());
 
@@ -753,7 +752,7 @@ test "protocol v4" {
 
     try testing.expect(conn.read_buffer.readableLength() == 0);
     try testing.expect(conn.write_buffer.readableLength() == 0);
-    try testing.expectEqual(.supported, conn.handshake_state);
+    try testing.expectEqual(.negotiation, conn.handshake_state);
 
     // SUPPORTED
     {
@@ -791,11 +790,7 @@ test "protocol v4" {
 
     try testing.expect(conn.read_buffer.readableLength() == 0);
     try testing.expect(conn.write_buffer.readableLength() == 0);
-
-    try testing.expect(conn.read_buffer.readableLength() == 0);
-    try testing.expect(conn.write_buffer.readableLength() == 0);
-
-    try testing.expectEqual(.authenticate_or_ready, conn.handshake_state);
+    try testing.expectEqual(.authentication_or_ready, conn.handshake_state);
 
     // Read READY
     {
@@ -807,6 +802,8 @@ test "protocol v4" {
         _ = conn.tracer.events.readItem().?.message.ready;
     }
 
+    try testing.expect(conn.read_buffer.readableLength() == 0);
+    try testing.expect(conn.write_buffer.readableLength() == 0);
     try testing.expectEqual(.done, conn.handshake_state);
 
     // Do QUERY
