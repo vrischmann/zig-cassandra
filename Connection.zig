@@ -684,9 +684,7 @@ fn readMessagesNoEof(conn: *Self, message_allocator: mem.Allocator) !void {
             };
         };
 
-        defer {
-            conn.read_buffer.discard(consumed);
-        }
+        defer conn.read_buffer.discard(consumed);
 
         //
 
