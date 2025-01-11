@@ -243,6 +243,14 @@ protocol_version: ProtocolVersion = ProtocolVersion.v4,
 /// Defaults to no compression.
 compression: CompressionAlgorithm = .none,
 
+/// The authentication parameters. Not required.
+///
+/// Only the the password authenticator from Cassandra is supported for now.
+authentication: ?struct {
+    username: []const u8,
+    password: []const u8,
+} = null,
+
 /// If tracing is enabled this will be used to trace messages written and read.
 tracer: if (build_options.enable_tracing) *Tracer else struct {} = undefined,
 
@@ -438,6 +446,8 @@ fn tickHandshake(conn: *Self) !void {
                     },
                     .authenticate => |authenticate_message| {
                         if (mem.eql(u8, "org.apache.cassandra.auth.PasswordAuthenticator", authenticate_message.authenticator)) {
+                            const auth = conn.authentication orelse return error.NoAuthenticationParameters;
+
                             // This is the SASL PLAIN encoding which is disgusting
                             //
                             // TODO(vincent): manage memory, right now the token is never freed until the connection is done
@@ -445,9 +455,9 @@ fn tickHandshake(conn: *Self) !void {
 
                             // TODO(vincent): get the credentials from input parameters
                             try token_builder.append(0);
-                            try token_builder.appendSlice("vincent"); // username
+                            try token_builder.appendSlice(auth.username);
                             try token_builder.append(0);
-                            try token_builder.appendSlice("vincent"); // password
+                            try token_builder.appendSlice(auth.password); // password
 
                             try conn.appendMessage(AuthResponseMessage{
                                 .token = try token_builder.toOwnedSlice(),

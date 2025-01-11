@@ -116,6 +116,11 @@ const REPL = struct {
 
             var conn = try Connection.init(repl.gpa);
             conn.protocol_version = .v4;
+            // TODO(vincent): read this from args
+            conn.authentication = .{
+                .username = "vincent",
+                .password = "vincent",
+            };
 
             repl.endpoint = .{
                 .address = address,
