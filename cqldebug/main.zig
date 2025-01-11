@@ -23,10 +23,13 @@ const REPL = struct {
     scratch_arena: heap.ArenaAllocator,
 
     ls: struct {
-        buf: [1024]u8,
-        edit: linenoise.Edit,
+        prompt_buf: [1024]u8 = undefined,
+        prompt: [:0]const u8 = "cqldebug> ",
 
-        history_filename: []const u8,
+        buf: [1024]u8 = undefined,
+        edit: linenoise.Edit = undefined,
+
+        history_filename: []const u8 = undefined,
     },
 
     poll_fds: [2]posix.pollfd,
@@ -37,13 +40,15 @@ const REPL = struct {
         conn: *Connection,
     } = null,
 
-    fn init(gpa: mem.Allocator) !*REPL {
+    fn init(gpa: mem.Allocator, history_filename: []const u8) !*REPL {
         var repl = try gpa.create(REPL);
 
         repl.* = .{
             .gpa = gpa,
             .scratch_arena = heap.ArenaAllocator.init(gpa),
-            .ls = undefined,
+            .ls = .{
+                .history_filename = history_filename,
+            },
             .poll_fds = undefined,
             .endpoint = null,
         };
@@ -68,7 +73,7 @@ const REPL = struct {
     }
 
     fn linenoiseReset(repl: *REPL) !void {
-        repl.ls.edit = try linenoise.Edit.start(io.getStdIn(), io.getStdOut(), &repl.ls.buf, "cqldebug> ");
+        repl.ls.edit = try linenoise.Edit.start(io.getStdIn(), io.getStdOut(), &repl.ls.buf, repl.ls.prompt);
     }
 
     const DoAction = enum { do_nothing, save_line };
@@ -114,6 +119,9 @@ const REPL = struct {
             .username = "vincent",
             .password = "vincent",
         };
+
+        // Replace the prompt
+        repl.ls.prompt = try fmt.bufPrintZ(&repl.ls.prompt_buf, "{any}> ", .{address});
 
         repl.endpoint = .{
             .address = address,
@@ -304,8 +312,7 @@ pub fn main() anyerror!void {
 
     // Initialize and start the REPL loop
 
-    var repl = try REPL.init(allocator);
-    repl.ls.history_filename = history_filename;
+    var repl = try REPL.init(allocator, history_filename);
 
     defer repl.deinit();
 
