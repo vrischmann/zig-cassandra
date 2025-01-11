@@ -18,13 +18,14 @@ const stdin = io.getStdIn();
 
 const REPL = struct {
     const scratch_arena_max_size = 1024;
+    const default_prompt = "cqldebug> ";
 
     gpa: mem.Allocator,
     scratch_arena: heap.ArenaAllocator,
 
     ls: struct {
         prompt_buf: [1024]u8 = undefined,
-        prompt: [:0]const u8 = "cqldebug> ",
+        prompt: [:0]const u8 = default_prompt,
 
         buf: [1024]u8 = undefined,
         edit: linenoise.Edit = undefined,
@@ -132,11 +133,27 @@ const REPL = struct {
         return .save_line;
     }
 
+    fn doDisconnect(repl: *REPL) !DoAction {
+        if (repl.endpoint) |*endpoint| {
+            // Close and free the current connection if there is one
+            endpoint.conn.deinit();
+            endpoint.socket.close();
+
+            repl.endpoint = null;
+
+            repl.ls.prompt = default_prompt;
+        }
+
+        return .save_line;
+    }
+
     fn processLine(repl: *REPL, input: []const u8) !void {
         const line = mem.trim(u8, input, " ");
 
         const action = if (mem.startsWith(u8, line, "connect"))
             try repl.doConnect(line)
+        else if (mem.eql(u8, line, "disconnect"))
+            try repl.doDisconnect()
         else
             return;
 
