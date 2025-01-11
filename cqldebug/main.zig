@@ -71,65 +71,68 @@ const REPL = struct {
         repl.ls.edit = try linenoise.Edit.start(io.getStdIn(), io.getStdOut(), &repl.ls.buf, "cqldebug> ");
     }
 
+    const DoAction = enum { do_nothing, save_line };
+
+    fn doConnect(repl: *REPL, line: []const u8) !DoAction {
+        // Command: connect <hostname> [port>
+        //
+        // Parse the endpoint to validate it
+
+        var iter = mem.splitScalar(u8, line, ' ');
+
+        const command = iter.next() orelse "";
+        const hostname = iter.next() orelse "";
+        const port_s = iter.next() orelse "";
+
+        if (!mem.eql(u8, "connect", command) or hostname.len <= 0) {
+            print("\x1b[1mUsage\x1b[0m: connect <hostname>", .{});
+            return .do_nothing;
+        }
+
+        const port: u16 = if (port_s.len > 0)
+            try fmt.parseInt(u16, port_s, 10)
+        else
+            9042;
+
+        // Close and free the current connection if there is one
+        if (repl.endpoint) |*endpoint| {
+            endpoint.conn.deinit();
+            endpoint.socket.close();
+            endpoint.address = undefined;
+        }
+
+        const address = try resolveSingleAddress(repl.gpa, hostname, port);
+        const socket = try net.tcpConnectToAddress(address);
+
+        repl.poll_fds[1].fd = socket.handle;
+        repl.poll_fds[1].events = posix.POLL.IN | posix.POLL.OUT;
+
+        var conn = try Connection.init(repl.gpa);
+        conn.protocol_version = .v4;
+        // TODO(vincent): read this from args
+        conn.authentication = .{
+            .username = "vincent",
+            .password = "vincent",
+        };
+
+        repl.endpoint = .{
+            .address = address,
+            .socket = socket,
+            .conn = conn,
+        };
+
+        return .save_line;
+    }
+
     fn processLine(repl: *REPL, input: []const u8) !void {
         const line = mem.trim(u8, input, " ");
 
-        var save_line: bool = false;
+        const action = if (mem.startsWith(u8, line, "connect"))
+            try repl.doConnect(line)
+        else
+            return;
 
-        if (mem.startsWith(u8, line, "connect")) {
-            //
-            // Command: connect <hostname> [port>
-            //
-            // Parse the endpoint to validate it
-
-            var iter = mem.splitScalar(u8, line, ' ');
-
-            const command = iter.next() orelse "";
-            const hostname = iter.next() orelse "";
-            const port_s = iter.next() orelse "";
-
-            if (!mem.eql(u8, "connect", command) or hostname.len <= 0) {
-                print("\x1b[1mUsage\x1b[0m: connect <hostname>", .{});
-
-                return;
-            }
-
-            const port: u16 = if (port_s.len > 0)
-                try fmt.parseInt(u16, port_s, 10)
-            else
-                9042;
-
-            save_line = true;
-
-            // Close and free the current connection if there is one
-            if (repl.endpoint) |*endpoint| {
-                endpoint.conn.deinit();
-                endpoint.socket.close();
-                endpoint.address = undefined;
-            }
-
-            const address = try resolveSingleAddress(repl.gpa, hostname, port);
-            const socket = try net.tcpConnectToAddress(address);
-
-            repl.poll_fds[1].fd = socket.handle;
-            repl.poll_fds[1].events = posix.POLL.IN | posix.POLL.OUT;
-
-            var conn = try Connection.init(repl.gpa);
-            conn.protocol_version = .v4;
-            // TODO(vincent): read this from args
-            conn.authentication = .{
-                .username = "vincent",
-                .password = "vincent",
-            };
-
-            repl.endpoint = .{
-                .address = address,
-                .socket = socket,
-                .conn = conn,
-            };
-        }
-
-        if (save_line) {
+        if (action == .save_line) {
             defer _ = repl.scratch_arena.reset(.{ .retain_with_limit = scratch_arena_max_size });
 
             const c_line = try repl.scratch_arena.allocator().dupeZ(u8, line);
