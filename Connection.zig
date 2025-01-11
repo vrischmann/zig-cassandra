@@ -303,6 +303,18 @@ pub fn feedReadable(conn: *Self, data: []const u8) !void {
     try conn.read_buffer.write(data);
 }
 
+/// Diagnostics contains error diagnostics when a call to t
+pub const Diagnostics = struct {
+    // TODO(vincent): may be change this to take an allocator ?
+    buf: [1024]u8 = undefined,
+
+    message: []const u8 = "",
+
+    pub fn format(diags: Diagnostics, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
+        try writer.print("{s}", .{diags.message});
+    }
+};
+
 /// Tick drives the connection state machines.
 ///
 /// Depending on the current state it can:
@@ -313,11 +325,12 @@ pub fn feedReadable(conn: *Self, data: []const u8) !void {
 /// There is no expectation that any message can be read from `reader`,
 /// if there's nothing to read or the message is incomplete then the state
 /// will simply not change and the next call to `tick` will try to make more progress.
-pub fn tick(conn: *Self) !void {
-    // TODO(vincent): diags
+pub fn tick(conn: *Self, diags: ?*Diagnostics) !void {
+    var scratch_diags = Diagnostics{};
+    const my_diags = diags orelse &scratch_diags;
 
-    try conn.tickHandshake();
-    try conn.tickNominal();
+    try conn.tickHandshake(my_diags);
+    try conn.tickNominal(my_diags);
 }
 
 /// Handles the handshake state machine
@@ -370,7 +383,7 @@ pub fn tick(conn: *Self) !void {
 ///   |                                        |
 ///
 ///
-fn tickHandshake(conn: *Self) !void {
+fn tickHandshake(conn: *Self, diags: *Diagnostics) !void {
     if (conn.handshake_state == .done) return;
 
     const previous_handshake_state = conn.handshake_state;
@@ -396,7 +409,7 @@ fn tickHandshake(conn: *Self) !void {
                 const supported_message = switch (message) {
                     .supported => |tmp| tmp,
                     else => {
-                        // TODO(vincent): diags
+                        diags.message = try fmt.bufPrint(&diags.buf, "unexpected message type '{s}'", .{@tagName(message)});
                         return error.UnexpectedMessageType;
                     },
                 };
@@ -481,7 +494,7 @@ fn tickHandshake(conn: *Self) !void {
     }
 }
 
-fn tickNominal(conn: *Self) !void {
+fn tickNominal(conn: *Self, _: *Diagnostics) !void {
     // TODO(vincent): how do we clear the memory after the message is consumed ??
     try conn.readMessagesNoEof(conn.arena.allocator());
 
@@ -737,6 +750,8 @@ test "protocol v4" {
     defer conn.deinit();
     conn.protocol_version = ProtocolVersion.v4;
 
+    var diags = Diagnostics{};
+
     //
     // Handshake
     //
@@ -746,7 +761,7 @@ test "protocol v4" {
     try testing.expectEqual(.initial, conn.handshake_state);
 
     {
-        try conn.tick();
+        try conn.tick(&diags);
 
         const event = conn.tracer.events.readItem().?;
         try testing.expect(std.meta.activeTag(event.message) == .options);
@@ -768,7 +783,7 @@ test "protocol v4" {
         const data = "\x84\x00\x00\x09\x06\x00\x00\x00\x60\x00\x03\x00\x11\x50\x52\x4f\x54\x4f\x43\x4f\x4c\x5f\x56\x45\x52\x53\x49\x4f\x4e\x53\x00\x03\x00\x04\x33\x2f\x76\x33\x00\x04\x34\x2f\x76\x34\x00\x09\x35\x2f\x76\x35\x2d\x62\x65\x74\x61\x00\x0b\x43\x4f\x4d\x50\x52\x45\x53\x53\x49\x4f\x4e\x00\x02\x00\x06\x73\x6e\x61\x70\x70\x79\x00\x03\x6c\x7a\x34\x00\x0b\x43\x51\x4c\x5f\x56\x45\x52\x53\x49\x4f\x4e\x00\x01\x00\x05\x33\x2e\x30\x2e\x30";
         try conn.feedReadable(data);
 
-        try conn.tick();
+        try conn.tick(&diags);
 
         try testing.expectEqual(ProtocolVersion.v4, conn.protocol_version);
         try testing.expectEqual(0, conn.queue.readableLength());
@@ -806,7 +821,7 @@ test "protocol v4" {
         const data = "\x84\x01\x00\x00\x02\x00\x00\x00\x01\x00";
         try conn.feedReadable(data);
 
-        try conn.tick();
+        try conn.tick(&diags);
 
         _ = conn.tracer.events.readItem().?.message.ready;
     }
@@ -831,7 +846,7 @@ test "protocol v4" {
         };
 
         try conn.doQuery(query, query_parameters);
-        try conn.tick();
+        try conn.tick(&diags);
 
         const message = conn.tracer.events.readItem().?.message.query;
         try testing.expectEqual(query, message.query);
@@ -850,7 +865,7 @@ test "protocol v4" {
         const data = "\x84\x01\x00\x00\x08\x00\x00\x00\x33\x33\x1c\x00\x00\x00\x02\x00\x00\x00\x01\x05\x04\x94\x06\x66\x6f\x6f\x62\x61\x72\x00\x0a\x61\x67\x65\x5f\x74\x6f\x5f\x69\x64\x73\x00\x03\x61\x67\x65\x00\x09\x00\x00\x00\x01\x00\x00\x00\x04\x00\x00\x25\xa8";
         try conn.feedReadable(data);
 
-        try conn.tick();
+        try conn.tick(&diags);
 
         const message: ResultMessage = conn.tracer.events.readItem().?.message.result;
         const rows = message.result.rows;
@@ -929,7 +944,7 @@ test "split reads, multiple ticks" {
         const part = data[i .. i + len];
 
         try conn.feedReadable(part);
-        try conn.tick();
+        try conn.tick(null);
     }
 
     try testing.expectEqual(1, conn.tracer.events.readableLength());

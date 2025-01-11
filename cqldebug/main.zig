@@ -222,7 +222,11 @@ const REPL = struct {
 
                 // Disable the linenoise prompt for this call because the connection might log stuff.
                 repl.ls.edit.hide();
-                try conn.tick();
+                var diags = cassandra.Connection.Diagnostics{};
+                conn.tick(&diags) catch |err| {
+                    log.err("diagnostics: {s}", .{diags});
+                    return err;
+                };
                 repl.ls.edit.show();
 
                 // If we have something to write register for the OUT event on the pollfd
