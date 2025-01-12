@@ -1,5 +1,6 @@
 const std = @import("std");
 const io = std.io;
+const fs = std.fs;
 const debug = std.debug;
 const mem = std.mem;
 const fmt = std.fmt;
@@ -41,8 +42,18 @@ const REPL = struct {
         conn: *Connection,
     } = null,
 
+    // TODO(vincent): stop hardcoding the path
+    trace_file: fs.File,
+    tracer: cassandra.tracing.WriterTracer(fs.File.Writer),
+
     fn init(gpa: mem.Allocator, history_filename: []const u8) !*REPL {
         var repl = try gpa.create(REPL);
+
+        // TODO(vincent): stop hardcoding the path
+        const trace_file = try fs.cwd().createFile("/home/vincent/tmp/cqldebug_trace.jsonl", .{
+            .truncate = false,
+        });
+        try trace_file.seekFromEnd(0);
 
         repl.* = .{
             .gpa = gpa,
@@ -52,7 +63,11 @@ const REPL = struct {
             },
             .poll_fds = undefined,
             .endpoint = null,
+            .trace_file = trace_file,
+            .tracer = cassandra.tracing.writerTracer(trace_file.writer()),
         };
+
+        //
 
         try repl.linenoiseReset();
 
@@ -63,6 +78,8 @@ const REPL = struct {
     }
 
     fn deinit(repl: *REPL) void {
+        repl.trace_file.close();
+
         if (repl.endpoint) |endpoint| {
             // TODO(vincent): drain conn
             endpoint.conn.deinit();
@@ -120,6 +137,7 @@ const REPL = struct {
             .username = "vincent",
             .password = "vincent",
         };
+        conn.tracer = repl.tracer.tracer();
 
         // Replace the prompt
         repl.ls.prompt = try fmt.bufPrintZ(&repl.ls.prompt_buf, "{any}> ", .{address});

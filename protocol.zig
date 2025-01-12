@@ -533,11 +533,11 @@ pub const EnvelopeHeader = packed struct {
 pub const Envelope = struct {
     const TracingID = [16]u8;
 
-    header: EnvelopeHeader,
+    header: EnvelopeHeader = undefined,
     tracing_id: ?TracingID = null,
     warnings: ?[]const []const u8 = null,
     custom_payload: ?BytesMap = null,
-    body: []const u8,
+    body: []const u8 = undefined,
 
     const header_size = 9;
 
@@ -556,7 +556,7 @@ pub const Envelope = struct {
     };
 
     pub fn read(allocator: mem.Allocator, reader: anytype, compression_algorithm: CompressionAlgorithm) (Envelope.ReadError || @TypeOf(reader).Error)!ReadResult {
-        var res: Envelope = undefined;
+        var res = Envelope{};
 
         res.header = hdr: {
             var buf: [header_size]u8 = undefined;
@@ -3918,4 +3918,102 @@ fn collectRows(comptime T: type, allocator: mem.Allocator, rows: Rows) !std.Arra
     }
 
     return result;
+}
+
+//
+//
+//
+//
+
+pub const Message = union(Opcode) {
+    @"error": ErrorMessage,
+    startup: StartupMessage,
+    ready: ReadyMessage,
+    authenticate: AuthenticateMessage,
+    options: OptionsMessage,
+    supported: SupportedMessage,
+    query: QueryMessage,
+    result: ResultMessage,
+    prepare: PrepareMessage,
+    execute: ExecuteMessage,
+    register: RegisterMessage,
+    event: EventMessage,
+    batch: BatchMessage,
+    auth_challenge: AuthChallengeMessage,
+    auth_response: AuthResponseMessage,
+    auth_success: AuthSuccessMessage,
+};
+
+pub fn messageFormatter(message: Message) fmt.Formatter(formatMessage) {
+    return .{ .data = message };
+}
+
+fn formatMessage(message: Message, comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
+    switch (message) {
+        .@"error" => |msg| {
+            try writer.print("ERROR::[error_code={s} message={s}]", .{
+                @tagName(msg.error_code),
+                msg.message,
+            });
+        },
+        .startup => |msg| {
+            try writer.print("STARTUP::[cql_version={?} compression={?}]", .{
+                msg.cql_version,
+                msg.compression,
+            });
+        },
+        .ready => |_| {
+            try writer.print("READY::[]", .{});
+        },
+        .authenticate => |msg| {
+            try writer.print("AUTHENTICATE::[authenticator={s}]", .{
+                msg.authenticator,
+            });
+        },
+        .options => |_| {
+            try writer.print("OPTIONS::[]", .{});
+        },
+        .supported => |msg| {
+            try writer.print("SUPPORTED::[protocol_versions={s} cql_versions={s} compression_algorithms={s}]", .{
+                msg.protocol_versions,
+                msg.cql_versions,
+                msg.compression_algorithms,
+            });
+        },
+        .query => |msg| {
+            try writer.print("QUERY::[query={s} query_parameters={any}]", .{
+                msg.query,
+                msg.query_parameters,
+            });
+        },
+        .result => |msg| switch (msg.result) {
+            .void => {
+                try writer.print("RESULT/void::[]", .{});
+            },
+            .rows => |rows| {
+                try writer.print("RESULT/rows::[nb_rows={d}]", .{rows.data.len});
+            },
+            .set_keyspace => |keyspace| {
+                try writer.print("RESULT/set_keyspace::[keyspace={s}]", .{
+                    keyspace,
+                });
+            },
+            .prepared => |prepared| {
+                try writer.print("RESULT/prepared::[query_id={s}, result_metadata_id={?s}]", .{
+                    prepared.query_id,
+                    prepared.result_metadata_id,
+                });
+            },
+            .schema_change => |evt| {
+                try writer.print("RESULT/event::[target={s} type={s} options_arguments={?s}, options_keyspace={s} options_object_name={s}]", .{
+                    @tagName(evt.target),
+                    @tagName(evt.type),
+                    evt.options.arguments,
+                    evt.options.keyspace,
+                    evt.options.object_name,
+                });
+            },
+        },
+        else => try writer.print("{any}", .{message}),
+    }
 }
