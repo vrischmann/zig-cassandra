@@ -81,7 +81,6 @@ pub fn build(b: *std.Build) void {
     // Define options
 
     const with_cassandra = b.option(bool, "with_cassandra", "Run tests which need a Cassandra node running to work.") orelse false;
-    const enable_tracing = b.option(bool, "enable_tracing", "Enable tracing") orelse false;
     const enable_logging = b.option(bool, "enable_logging", "Enable logging") orelse false;
 
     //
@@ -97,7 +96,6 @@ pub fn build(b: *std.Build) void {
     module.linkLibrary(lz4_artifact);
 
     const module_options = b.addOptions();
-    module_options.addOption(bool, "enable_tracing", enable_tracing);
     module_options.addOption(bool, "enable_logging", enable_logging);
     module_options.addOption(bool, "with_cassandra", with_cassandra);
 
@@ -116,7 +114,6 @@ pub fn build(b: *std.Build) void {
     main_tests_mod.linkLibrary(lz4_artifact);
 
     const main_tests_options = b.addOptions();
-    main_tests_options.addOption(bool, "enable_tracing", true);
     main_tests_options.addOption(bool, "enable_logging", true);
     main_tests_options.addOption(bool, "with_cassandra", with_cassandra);
 
