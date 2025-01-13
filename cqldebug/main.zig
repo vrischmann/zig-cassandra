@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const io = std.io;
 const fs = std.fs;
 const debug = std.debug;
@@ -43,17 +44,14 @@ const REPL = struct {
     } = null,
 
     // TODO(vincent): stop hardcoding the path
-    trace_file: fs.File,
-    tracer: cassandra.tracing.WriterTracer(fs.File.Writer),
+    tracing: ?struct {
+        file: fs.File,
+        tracer: cassandra.tracing.WriterTracer(fs.File.Writer),
+    } = null,
 
     fn init(gpa: mem.Allocator, history_filename: []const u8) !*REPL {
         var repl = try gpa.create(REPL);
-
-        // TODO(vincent): stop hardcoding the path
-        const trace_file = try fs.cwd().createFile("/home/vincent/tmp/cqldebug_trace.jsonl", .{
-            .truncate = false,
-        });
-        try trace_file.seekFromEnd(0);
+        errdefer gpa.destroy(repl);
 
         repl.* = .{
             .gpa = gpa,
@@ -62,9 +60,6 @@ const REPL = struct {
                 .history_filename = history_filename,
             },
             .poll_fds = undefined,
-            .endpoint = null,
-            .trace_file = trace_file,
-            .tracer = cassandra.tracing.writerTracer(trace_file.writer()),
         };
 
         //
@@ -78,8 +73,6 @@ const REPL = struct {
     }
 
     fn deinit(repl: *REPL) void {
-        repl.trace_file.close();
-
         if (repl.endpoint) |endpoint| {
             // TODO(vincent): drain conn
             endpoint.conn.deinit();
@@ -137,7 +130,9 @@ const REPL = struct {
             .username = "vincent",
             .password = "vincent",
         };
-        conn.tracer = repl.tracer.tracer();
+        if (repl.tracing) |*tracing| {
+            conn.tracer = tracing.tracer.tracer();
+        }
 
         // Replace the prompt
         repl.ls.prompt = try fmt.bufPrintZ(&repl.ls.prompt_buf, "{any}> ", .{address});
@@ -325,35 +320,57 @@ pub fn main() anyerror!void {
 
     const allocator = gpa.allocator();
 
+    // Initial setup
+
+    const filenames = blk: {
+        const app_data_dir = try std.fs.getAppDataDir(allocator, "cqldebug");
+        defer allocator.free(app_data_dir);
+
+        const history_filename = try std.fs.path.join(allocator, &[_][]const u8{ app_data_dir, "history" });
+        const trace_filename = try std.fs.path.join(allocator, &[_][]const u8{ app_data_dir, "trace.jsonl" });
+
+        break :blk .{
+            .history_filename = history_filename,
+            .trace_filename = trace_filename,
+        };
+    };
+    defer {
+        allocator.free(filenames.history_filename);
+        allocator.free(filenames.trace_filename);
+    }
+
     // Initialize linenoise
 
     linenoise.setHintsCallback(replHintsCallback);
     linenoise.setCompletionCallback(replCompletionCallback);
 
-    const history_filename = blk: {
-        const home = std.zig.EnvVar.HOME.getPosix() orelse unreachable;
-        const history_filename = try std.fs.path.join(allocator, &[_][]const u8{ home, ".local", "share", "cqldebug", "history" });
-
-        break :blk history_filename;
-    };
-    defer allocator.free(history_filename);
-
     {
         try linenoise.setMaxHistoryLen(128);
 
-        const c_ptr = try allocator.dupeZ(u8, history_filename);
+        const c_ptr = try allocator.dupeZ(u8, filenames.history_filename);
         defer allocator.free(c_ptr);
 
         linenoise.loadHistory(c_ptr) catch {
-            log.err("history file {s} could not be read", .{history_filename});
+            log.err("history file {s} could not be read", .{filenames.history_filename});
         };
     }
 
     // Initialize and start the REPL loop
 
-    var repl = try REPL.init(allocator, history_filename);
-
+    var repl = try REPL.init(allocator, filenames.history_filename);
     defer repl.deinit();
+
+    // Setup tracing
+
+    const trace_file = try fs.cwd().createFile(filenames.trace_filename, .{
+        .truncate = false,
+    });
+    try trace_file.seekFromEnd(0);
+
+    repl.tracing = .{
+        .file = trace_file,
+        .tracer = cassandra.tracing.writerTracer(trace_file.writer()),
+    };
 
     try repl.run();
 }
