@@ -119,10 +119,10 @@ fn readType(self: *Self, allocator: mem.Allocator, diags: *Diags, column_spec: C
         .int => return try self.readInt(diags, column_spec, column_data, Type),
         .float => return try self.readFloat(diags, column_spec, column_data, Type),
         .pointer => |pointer| switch (pointer.size) {
-            .One => {
+            .one => {
                 return try self.readType(allocator, diags, column_spec, column_data, @TypeOf(pointer.child));
             },
-            .Slice => {
+            .slice => {
                 return try self.readSlice(allocator, diags, column_spec, column_data, Type);
             },
             else => @compileError("invalid pointer size " ++ @tagName(pointer.size)),
@@ -357,14 +357,14 @@ fn readSlice(self: *Self, allocator: mem.Allocator, diags: *Diags, column_spec: 
         u8, i8, u16, i16, u32, i32, i64, u64 => {
             const NonConstType = @Type(std.builtin.Type{
                 .pointer = .{
-                    .size = .Slice,
+                    .size = .slice,
                     .is_const = false,
                     .is_volatile = type_info.pointer.is_volatile,
                     .alignment = type_info.pointer.alignment,
                     .address_space = type_info.pointer.address_space,
                     .child = ChildType,
                     .is_allowzero = type_info.pointer.is_allowzero,
-                    .sentinel = type_info.pointer.sentinel,
+                    .sentinel_ptr = if (type_info.pointer.sentinel()) |s| &s else null,
                 },
             });
 
