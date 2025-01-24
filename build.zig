@@ -62,6 +62,27 @@ fn setupCqldebug(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.
     cqldebug_run.dependOn(&cqldebug_run_cmd.step);
 }
 
+fn setupBenchmark(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, cassandra_mod: *std.Build.Module) void {
+    const mod = b.createModule(.{
+        .root_source_file = b.path("benchmark/main.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    mod.addImport("cassandra", cassandra_mod);
+
+    const benchmark = b.addExecutable(.{
+        .name = "benchmark",
+        .root_module = mod,
+    });
+
+    const benchmark_run_cmd = b.addRunArtifact(benchmark);
+    b.getInstallStep().dependOn(&benchmark_run_cmd.step);
+
+    const benchmark_run = b.step("benchmark", "Run the benchmark program with hyperfine");
+    benchmark_run.dependOn(&benchmark_run_cmd.step);
+}
+
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
@@ -133,5 +154,6 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_main_tests.step);
 
     setupCqldebug(b, target, optimize, module);
+    setupBenchmark(b, target, optimize, module);
     setupTools(b, target, optimize);
 }
