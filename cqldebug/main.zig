@@ -18,6 +18,121 @@ const log = std.log.scoped(.main);
 
 const stdin = io.getStdIn();
 
+const ExecuteResult = enum {
+    save_history_line,
+    do_nothing,
+};
+
+const Command = *const fn (repl: *REPL, input: []const u8) anyerror!ExecuteResult;
+
+fn executeHelp(repl: *REPL, input: []const u8) anyerror!ExecuteResult {
+    _ = repl;
+
+    if (!mem.startsWith(u8, input, "help")) {
+        return error.DoesNoMatch;
+    }
+
+    var iter = mem.splitScalar(u8, input, ' ');
+
+    _ = iter.next() orelse "";
+    const topic = iter.next() orelse "";
+
+    if (mem.eql(u8, topic, "connect")) {
+        print("\x1b[33mUsage\x1b[0m: connect <hostname> [port]", .{});
+    } else {
+        // TODO
+    }
+
+    return .save_history_line;
+}
+
+fn executeConnect(repl: *REPL, input: []const u8) anyerror!ExecuteResult {
+    // Command: connect <hostname> [port]
+
+    if (!mem.startsWith(u8, input, "connect")) {
+        return error.DoesNoMatch;
+    }
+
+    // Parse the endpoint to validate it
+
+    var iter = mem.splitScalar(u8, input, ' ');
+
+    const command = iter.next() orelse "";
+    const hostname = iter.next() orelse "";
+    const port_s = iter.next() orelse "";
+
+    if (!mem.eql(u8, "connect", command) or hostname.len <= 0) {
+        print("\x1b[1mUsage\x1b[0m: connect <hostname> [port]", .{});
+        return .do_nothing;
+    }
+
+    const port: u16 = if (port_s.len > 0)
+        try fmt.parseInt(u16, port_s, 10)
+    else
+        9042;
+
+    // Close and free the current connection if there is one
+    if (repl.endpoint) |*endpoint| {
+        endpoint.conn.deinit();
+        endpoint.socket.close();
+        endpoint.address = undefined;
+    }
+
+    const address = try resolveSingleAddress(repl.gpa, hostname, port);
+    const socket = try net.tcpConnectToAddress(address);
+
+    repl.poll_fds[1].fd = socket.handle;
+    repl.poll_fds[1].events = posix.POLL.IN | posix.POLL.OUT;
+
+    var conn = try Connection.init(repl.gpa);
+    conn.protocol_version = .v4;
+    // TODO(vincent): read this from args
+    conn.authentication = .{
+        .username = "vincent",
+        .password = "vincent",
+    };
+    if (repl.tracing) |*tracing| {
+        conn.tracer = tracing.tracer.tracer();
+    }
+
+    // Replace the prompt
+    repl.ls.prompt = try fmt.bufPrintZ(&repl.ls.prompt_buf, "{any}> ", .{address});
+
+    repl.endpoint = .{
+        .address = address,
+        .socket = socket,
+        .conn = conn,
+    };
+
+    return .save_history_line;
+}
+
+fn executeDisconnect(repl: *REPL, input: []const u8) anyerror!ExecuteResult {
+    // Command: disconnect
+
+    if (!mem.startsWith(u8, input, "disconnect")) {
+        return error.DoesNoMatch;
+    }
+
+    if (repl.endpoint) |*endpoint| {
+        // Close and free the current connection if there is one
+        endpoint.conn.deinit();
+        endpoint.socket.close();
+
+        repl.endpoint = null;
+
+        repl.ls.prompt = REPL.default_prompt;
+    }
+
+    return .save_history_line;
+}
+
+const AllCommands = &[_]Command{
+    executeHelp,
+    executeConnect,
+    executeDisconnect,
+};
+
 const REPL = struct {
     const scratch_arena_max_size = 1024;
     const default_prompt = "cqldebug> ";
@@ -87,105 +202,24 @@ const REPL = struct {
         repl.ls.edit = try linenoise.Edit.start(io.getStdIn(), io.getStdOut(), &repl.ls.buf, repl.ls.prompt);
     }
 
-    const DoAction = enum { do_nothing, save_line };
-
-    fn doHelp(_: *REPL, line: []const u8) !DoAction {
-        var iter = mem.splitScalar(u8, line, ' ');
-
-        _ = iter.next() orelse "";
-        const topic = iter.next() orelse "";
-
-        if (mem.eql(u8, topic, "connect")) {
-            print("\x1b[33mUsage\x1b[0m: connect <hostname> [port]", .{});
-        } else {}
-
-        return .save_line;
-    }
-
-    fn doConnect(repl: *REPL, line: []const u8) !DoAction {
-        // Command: connect <hostname> [port]
-        //
-        // Parse the endpoint to validate it
-
-        var iter = mem.splitScalar(u8, line, ' ');
-
-        const command = iter.next() orelse "";
-        const hostname = iter.next() orelse "";
-        const port_s = iter.next() orelse "";
-
-        if (!mem.eql(u8, "connect", command) or hostname.len <= 0) {
-            print("\x1b[1mUsage\x1b[0m: connect <hostname> [port]", .{});
-            return .do_nothing;
-        }
-
-        const port: u16 = if (port_s.len > 0)
-            try fmt.parseInt(u16, port_s, 10)
-        else
-            9042;
-
-        // Close and free the current connection if there is one
-        if (repl.endpoint) |*endpoint| {
-            endpoint.conn.deinit();
-            endpoint.socket.close();
-            endpoint.address = undefined;
-        }
-
-        const address = try resolveSingleAddress(repl.gpa, hostname, port);
-        const socket = try net.tcpConnectToAddress(address);
-
-        repl.poll_fds[1].fd = socket.handle;
-        repl.poll_fds[1].events = posix.POLL.IN | posix.POLL.OUT;
-
-        var conn = try Connection.init(repl.gpa);
-        conn.protocol_version = .v4;
-        // TODO(vincent): read this from args
-        conn.authentication = .{
-            .username = "vincent",
-            .password = "vincent",
-        };
-        if (repl.tracing) |*tracing| {
-            conn.tracer = tracing.tracer.tracer();
-        }
-
-        // Replace the prompt
-        repl.ls.prompt = try fmt.bufPrintZ(&repl.ls.prompt_buf, "{any}> ", .{address});
-
-        repl.endpoint = .{
-            .address = address,
-            .socket = socket,
-            .conn = conn,
-        };
-
-        return .save_line;
-    }
-
-    fn doDisconnect(repl: *REPL) !DoAction {
-        if (repl.endpoint) |*endpoint| {
-            // Close and free the current connection if there is one
-            endpoint.conn.deinit();
-            endpoint.socket.close();
-
-            repl.endpoint = null;
-
-            repl.ls.prompt = default_prompt;
-        }
-
-        return .save_line;
-    }
-
     fn processLine(repl: *REPL, input: []const u8) !void {
         const line = mem.trim(u8, input, " ");
 
-        const action = if (mem.startsWith(u8, line, "help"))
-            try repl.doHelp(line)
-        else if (mem.startsWith(u8, line, "connect"))
-            try repl.doConnect(line)
-        else if (mem.eql(u8, line, "disconnect"))
-            try repl.doDisconnect()
-        else
-            return;
+        const result = for (AllCommands) |func| {
+            const result_err = func(repl, line);
 
-        if (action == .save_line) {
+            const result = result_err catch |err| switch (err) {
+                error.DoesNoMatch => continue,
+                else => return err,
+            };
+
+            break result;
+        } else {
+            log.err("no command matching {s}", .{line});
+            return;
+        };
+
+        if (result == .save_history_line) {
             defer _ = repl.scratch_arena.reset(.{ .retain_with_limit = scratch_arena_max_size });
 
             const c_line = try repl.scratch_arena.allocator().dupeZ(u8, line);
