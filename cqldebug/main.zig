@@ -272,19 +272,38 @@ const REPL = struct {
     }
 };
 
-fn replHintsCallback(buf: [*:0]const u8, color: *c_int, bold: *c_int) callconv(.C) ?[*:0]u8 {
-    const input = mem.span(buf);
+fn getHint(input: []const u8) mem.Allocator.Error!?[:0]u8 {
+    const allocator = hints_arena.allocator();
 
-    if (mem.eql(u8, input, "co")) {
-        color.* = 35;
-        bold.* = 1;
-
-        const res = " <endpoint>";
-
-        return @constCast(res).ptr;
+    if (mem.startsWith(u8, input, "co")) {
+        return try allocator.dupeZ(u8, " <endpoint>");
     }
 
     return null;
+}
+
+fn replHintsCallback(buf: [*:0]const u8, color: *c_int, bold: *c_int) callconv(.C) ?[*:0]u8 {
+    const input = mem.span(buf);
+
+    const hint_opt = getHint(input) catch |err| switch (err) {
+        error.OutOfMemory => return null,
+    };
+    if (hint_opt) |hint| {
+        color.* = 90;
+        bold.* = 0;
+        return @constCast(hint).ptr;
+    }
+
+    return null;
+}
+
+var hints_arena: heap.ArenaAllocator = undefined;
+
+fn replFreeHintsCallback(ptr: ?*anyopaque) callconv(.C) void {
+    const buf: [*c]u8 = @ptrCast(@alignCast(ptr));
+    const slice = mem.span(buf);
+
+    hints_arena.allocator().free(slice);
 }
 
 fn replCompletionCallback(buf: [*:0]const u8, lc: *linenoise.Completions) callconv(.C) void {
@@ -341,7 +360,12 @@ pub fn main() anyerror!void {
 
     // Initialize linenoise
 
+    hints_arena = heap.ArenaAllocator.init(allocator);
+    defer hints_arena.deinit();
+
     linenoise.setHintsCallback(replHintsCallback);
+    linenoise.setFreeHintsCallback(replFreeHintsCallback);
+
     linenoise.setCompletionCallback(replCompletionCallback);
 
     {
