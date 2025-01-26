@@ -90,7 +90,7 @@ const REPL = struct {
     const DoAction = enum { do_nothing, save_line };
 
     fn doConnect(repl: *REPL, line: []const u8) !DoAction {
-        // Command: connect <hostname> [port>
+        // Command: connect <hostname> [port]
         //
         // Parse the endpoint to validate it
 
@@ -101,7 +101,7 @@ const REPL = struct {
         const port_s = iter.next() orelse "";
 
         if (!mem.eql(u8, "connect", command) or hostname.len <= 0) {
-            print("\x1b[1mUsage\x1b[0m: connect <hostname>", .{});
+            print("\x1b[1mUsage\x1b[0m: connect <hostname> [port]", .{});
             return .do_nothing;
         }
 
