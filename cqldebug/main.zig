@@ -89,6 +89,19 @@ const REPL = struct {
 
     const DoAction = enum { do_nothing, save_line };
 
+    fn doHelp(_: *REPL, line: []const u8) !DoAction {
+        var iter = mem.splitScalar(u8, line, ' ');
+
+        _ = iter.next() orelse "";
+        const topic = iter.next() orelse "";
+
+        if (mem.eql(u8, topic, "connect")) {
+            print("\x1b[33mUsage\x1b[0m: connect <hostname> [port]", .{});
+        } else {}
+
+        return .save_line;
+    }
+
     fn doConnect(repl: *REPL, line: []const u8) !DoAction {
         // Command: connect <hostname> [port]
         //
@@ -163,7 +176,9 @@ const REPL = struct {
     fn processLine(repl: *REPL, input: []const u8) !void {
         const line = mem.trim(u8, input, " ");
 
-        const action = if (mem.startsWith(u8, line, "connect"))
+        const action = if (mem.startsWith(u8, line, "help"))
+            try repl.doHelp(line)
+        else if (mem.startsWith(u8, line, "connect"))
             try repl.doConnect(line)
         else if (mem.eql(u8, line, "disconnect"))
             try repl.doDisconnect()
