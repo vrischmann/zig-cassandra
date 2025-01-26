@@ -76,9 +76,9 @@ fn setupBenchmark(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std
         .root_module = mod,
     });
 
-    const benchmark_run_cmd = b.addRunArtifact(benchmark);
-    benchmark_run_cmd.addArg("foo");
-    b.getInstallStep().dependOn(&benchmark_run_cmd.step);
+    const benchmark_run_cmd = b.addSystemCommand(&.{"hyperfine"});
+    benchmark_run_cmd.addFileArg(benchmark.getEmittedBin());
+    benchmark_run_cmd.step.dependOn(&benchmark.step);
 
     const benchmark_run = b.step("benchmark", "Run the benchmark program with hyperfine");
     benchmark_run.dependOn(&benchmark_run_cmd.step);
