@@ -324,8 +324,19 @@ const REPL = struct {
 fn getHint(input: []const u8) mem.Allocator.Error!?[:0]u8 {
     const allocator = hints_arena.allocator();
 
-    if (mem.startsWith(u8, input, "co")) {
-        return try allocator.dupeZ(u8, " <endpoint>");
+    var iter = mem.splitScalar(u8, input, ' ');
+
+    const command = iter.next() orelse return null;
+
+    if (mem.startsWith(u8, command, "co")) {
+        const endpoint = iter.next() orelse "";
+        const port = iter.next() orelse "";
+
+        if (endpoint.len > 0 and port.len == 0) {
+            return try allocator.dupeZ(u8, " <port>");
+        } else if (endpoint.len == 0 and port.len == 0) {
+            return try allocator.dupeZ(u8, " <endpoint> <port>");
+        }
     }
 
     return null;
