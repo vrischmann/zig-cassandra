@@ -65,9 +65,18 @@ const HelpCommand = struct {
         var out = std.ArrayList(u8).init(repl.scratch_arena.allocator());
 
         var iter = mem.splitScalar(u8, input, ' ');
-
         _ = iter.next() orelse "";
-        const topic = iter.next() orelse "";
+
+        const topic = blk: {
+            var parts = std.ArrayList([]const u8).init(repl.scratch_arena.allocator());
+            while (iter.next()) |part| {
+                try parts.append(part);
+            }
+
+            const res = try mem.join(repl.scratch_arena.allocator(), " ", parts.items);
+
+            break :blk res;
+        };
 
         inline for (AllCommands) |cmd| {
             if (@TypeOf(cmd) == HelpCommand) continue;
