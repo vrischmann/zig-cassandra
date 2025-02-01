@@ -392,53 +392,53 @@ const DisconnectCommand = struct {
     }
 };
 
-const FrameDumpCommand = struct {
-    fn help() []const u8 {
-        return fmt.comptimePrint(
-            \\
-            \\    frame dump {s}
-            \\    {s} Enable or disable frame dumping
-            \\
-            \\
-        , .{
-            gray("[enable|disable]"),
-            yellow("summary:"),
-        });
-    }
-
-    fn execute(repl: *Self, input: []const u8) anyerror!ExecuteResult {
-        _ = repl;
-
-        if (!mem.startsWith(u8, input, "frame dump")) {
-            return error.DoesNoMatch;
-        }
-
-        var iter = mem.splitScalar(u8, input, ' ');
-
-        _ = iter.next() orelse "";
-        _ = iter.next() orelse "";
-
-        if (iter.next()) |action| {
-            if (mem.eql(u8, action, "enable")) {
-                print("frame dumping enabled", .{});
-            } else if (mem.eql(u8, action, "disable")) {
-                print("frame dumping disabled ", .{});
-            } else {
-                print("invalid frame dumping action \"{s}\"", .{action});
-            }
-        } else {
-            print("frame dumping currently disabled", .{});
-        }
-
-        return .save_history_line;
-    }
-};
+// const FrameDumpCommand = struct {
+//     fn help() []const u8 {
+//         return fmt.comptimePrint(
+//             \\
+//             \\    frame dump {s}
+//             \\    {s} Enable or disable frame dumping
+//             \\
+//             \\
+//         , .{
+//             gray("[enable|disable]"),
+//             yellow("summary:"),
+//         });
+//     }
+//
+//     fn execute(repl: *Self, input: []const u8) anyerror!ExecuteResult {
+//         _ = repl;
+//
+//         if (!mem.startsWith(u8, input, "frame dump")) {
+//             return error.DoesNoMatch;
+//         }
+//
+//         var iter = mem.splitScalar(u8, input, ' ');
+//
+//         _ = iter.next() orelse "";
+//         _ = iter.next() orelse "";
+//
+//         if (iter.next()) |action| {
+//             if (mem.eql(u8, action, "enable")) {
+//                 print("frame dumping enabled", .{});
+//             } else if (mem.eql(u8, action, "disable")) {
+//                 print("frame dumping disabled ", .{});
+//             } else {
+//                 print("invalid frame dumping action \"{s}\"", .{action});
+//             }
+//         } else {
+//             print("frame dumping currently disabled", .{});
+//         }
+//
+//         return .save_history_line;
+//     }
+// };
 
 const AllCommands = &[_]Command{
     .{ .name = "help", .help = HelpCommand.help, .execute = HelpCommand.execute },
     .{ .name = "connect", .help = ConnectCommand.help, .execute = ConnectCommand.execute },
     .{ .name = "disconnect", .help = DisconnectCommand.help, .execute = DisconnectCommand.execute },
-    .{ .name = "frame dump", .help = FrameDumpCommand.help, .execute = FrameDumpCommand.execute },
+    // .{ .name = "frame dump", .help = FrameDumpCommand.help, .execute = FrameDumpCommand.execute },
 };
 
 const Color = enum(usize) {
