@@ -25,27 +25,35 @@ const ExecuteResult = enum {
 
 const Command = struct {
     name: []const u8,
-    help: *const fn (out: *std.ArrayList(u8)) anyerror!void,
+    help: *const fn () []const u8,
     execute: *const fn (repl: *REPL, input: []const u8) anyerror!ExecuteResult,
 };
 
 const HelpCommand = struct {
-    fn help(out: *std.ArrayList(u8)) anyerror!void {
-        try fmt.format(out.writer(),
-            \\Usage
+    fn help() []const u8 {
+        return fmt.comptimePrint(
+            \\{s}
             \\
             \\    help {s}
             \\
-            \\Commands
+            \\{s}
+            \\
+            \\    {s: <40}
+            \\    {s: <40}
+            \\
+            \\{s}
+            \\
+            \\    {s: <40}
             \\
         , .{
+            yellow("Usage"),
             gray("[topic]"),
+            yellow("Connection"),
+            fmt.comptimePrint("connect {s}", .{gray("<hostname> [port]")}),
+            "disconnect",
+            yellow("Framing"),
+            fmt.comptimePrint("frame dump {s}", .{gray("[enable|disable]")}),
         });
-
-        for (AllCommands) |cmd| {
-            if (mem.eql(u8, cmd.name, "help")) continue;
-            try cmd.help(out);
-        }
     }
 
     fn execute(repl: *REPL, input: []const u8) anyerror!ExecuteResult {
@@ -65,11 +73,11 @@ const HelpCommand = struct {
             if (@TypeOf(cmd) == HelpCommand) continue;
 
             if (mem.eql(u8, topic, cmd.name)) {
-                try cmd.help(&out);
+                try out.appendSlice(cmd.help());
                 break;
             }
         } else {
-            try HelpCommand.help(&out);
+            try out.appendSlice(HelpCommand.help());
         }
 
         debug.print("{s}", .{out.items});
@@ -79,11 +87,12 @@ const HelpCommand = struct {
 };
 
 const ConnectCommand = struct {
-    fn help(out: *std.ArrayList(u8)) anyerror!void {
-        return fmt.format(out.writer(),
+    fn help() []const u8 {
+        return fmt.comptimePrint(
             \\
             \\    connect {s}
-            \\    {s} connect to a Cassandra node
+            \\    {s} Connect to a Cassandra node
+            \\
             \\
         , .{
             gray("<hostname> [port]"),
@@ -155,11 +164,12 @@ const ConnectCommand = struct {
 };
 
 const DisconnectCommand = struct {
-    fn help(out: *std.ArrayList(u8)) anyerror!void {
-        return fmt.format(out.writer(),
+    fn help() []const u8 {
+        return fmt.comptimePrint(
             \\
             \\    disconnect
-            \\    {s} disconnect the current connection
+            \\    {s} Disconnect the current connection
+            \\
             \\
         , .{
             yellow("summary:"),
@@ -188,11 +198,12 @@ const DisconnectCommand = struct {
 };
 
 const FrameDumpCommand = struct {
-    fn help(out: *std.ArrayList(u8)) anyerror!void {
-        return fmt.format(out.writer(),
+    fn help() []const u8 {
+        return fmt.comptimePrint(
             \\
             \\    frame dump {s}
             \\    {s} Enable or disable frame dumping
+            \\
             \\
         , .{
             gray("[enable|disable]"),
