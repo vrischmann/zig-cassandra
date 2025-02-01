@@ -203,8 +203,25 @@ const FrameDumpCommand = struct {
     fn execute(repl: *REPL, input: []const u8) anyerror!ExecuteResult {
         _ = repl;
 
-        if (input.len == 0) {
-            print("frame dumping disabled", .{});
+        if (!mem.startsWith(u8, input, "frame dump")) {
+            return error.DoesNoMatch;
+        }
+
+        var iter = mem.splitScalar(u8, input, ' ');
+
+        _ = iter.next() orelse "";
+        _ = iter.next() orelse "";
+
+        if (iter.next()) |action| {
+            if (mem.eql(u8, action, "enable")) {
+                print("frame dumping enabled", .{});
+            } else if (mem.eql(u8, action, "disable")) {
+                print("frame dumping disabled ", .{});
+            } else {
+                print("invalid frame dumping action \"{s}\"", .{action});
+            }
+        } else {
+            print("frame dumping currently disabled", .{});
         }
 
         return .save_history_line;
