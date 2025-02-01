@@ -155,9 +155,9 @@ const DisconnectCommand = struct {
             \\    disconnect
             \\    {s} disconnect the current connection
             \\
-        ,
-            .{yellow("summary:")},
-        );
+        , .{
+            yellow("summary:"),
+        });
     }
 
     fn execute(repl: *REPL, input: []const u8) anyerror!ExecuteResult {
@@ -181,10 +181,35 @@ const DisconnectCommand = struct {
     }
 };
 
+const FrameDumpCommand = struct {
+    fn help() []const u8 {
+        return fmt.comptimePrint(
+            \\
+            \\    frame dump {s}
+            \\    {s} Enable or disable frame dumping
+            \\
+        , .{
+            gray("[enable|disable]"),
+            yellow("summary:"),
+        });
+    }
+
+    fn execute(repl: *REPL, input: []const u8) anyerror!ExecuteResult {
+        _ = repl;
+
+        if (input.len == 0) {
+            print("frame dumping disabled", .{});
+        }
+
+        return .save_history_line;
+    }
+};
+
 const AllCommands = &[_]Command{
     .{ .name = "help", .help = HelpCommand.help, .execute = HelpCommand.execute },
     .{ .name = "connect", .help = ConnectCommand.help, .execute = ConnectCommand.execute },
     .{ .name = "disconnect", .help = DisconnectCommand.help, .execute = DisconnectCommand.execute },
+    .{ .name = "frame dump", .help = FrameDumpCommand.help, .execute = FrameDumpCommand.execute },
 };
 
 const REPL = struct {
