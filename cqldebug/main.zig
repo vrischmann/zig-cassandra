@@ -204,6 +204,7 @@ const REPL = struct {
 
     fn processLine(repl: *REPL, input: []const u8) !void {
         const line = mem.trim(u8, input, " ");
+        if (line.len == 0) return;
 
         const result = for (AllCommands) |func| {
             const result_err = func(repl, line);
