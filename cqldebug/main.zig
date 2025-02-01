@@ -23,114 +23,160 @@ const ExecuteResult = enum {
     do_nothing,
 };
 
-const Command = *const fn (repl: *REPL, input: []const u8) anyerror!ExecuteResult;
+const Command = struct {
+    help: *const fn () []const u8,
+    execute: *const fn (repl: *REPL, input: []const u8) anyerror!ExecuteResult,
+};
 
-fn executeHelp(repl: *REPL, input: []const u8) anyerror!ExecuteResult {
-    _ = repl;
-
-    if (!mem.startsWith(u8, input, "help")) {
-        return error.DoesNoMatch;
+const HelpCommand = struct {
+    fn help() []const u8 {
+        return fmt.comptimePrint(
+            \\
+            \\    help {s}
+            \\
+        , .{
+            gray("[topic]"),
+        });
     }
 
-    var iter = mem.splitScalar(u8, input, ' ');
+    fn execute(repl: *REPL, input: []const u8) anyerror!ExecuteResult {
+        _ = repl;
 
-    _ = iter.next() orelse "";
-    const topic = iter.next() orelse "";
+        if (!mem.startsWith(u8, input, "help")) {
+            return error.DoesNoMatch;
+        }
 
-    if (mem.eql(u8, topic, "connect")) {
-        print("\x1b[33mUsage\x1b[0m: connect <hostname> [port]", .{});
-    } else {
-        // TODO
+        var iter = mem.splitScalar(u8, input, ' ');
+
+        _ = iter.next() orelse "";
+        const topic = iter.next() orelse "";
+
+        if (mem.eql(u8, topic, "connect")) {
+            print(ConnectCommand.help(), .{});
+        } else {
+            print("Usage", .{});
+            print("", .{});
+            print("    connect \x1b[90m<hostname> [port]\x1b[0m", .{});
+            // TODO
+        }
+
+        return .save_history_line;
+    }
+};
+
+const ConnectCommand = struct {
+    fn help() []const u8 {
+        return fmt.comptimePrint(
+            \\
+            \\    connect {s}
+            \\    {s} connect to a Cassandra node
+            \\
+        , .{
+            gray("<hostname> [port]"),
+            yellow("summary:"),
+        });
     }
 
-    return .save_history_line;
-}
+    fn execute(repl: *REPL, input: []const u8) anyerror!ExecuteResult {
+        // Command: connect <hostname> [port]
 
-fn executeConnect(repl: *REPL, input: []const u8) anyerror!ExecuteResult {
-    // Command: connect <hostname> [port]
+        if (!mem.startsWith(u8, input, "connect")) {
+            return error.DoesNoMatch;
+        }
 
-    if (!mem.startsWith(u8, input, "connect")) {
-        return error.DoesNoMatch;
-    }
+        // Parse the endpoint to validate it
 
-    // Parse the endpoint to validate it
+        var iter = mem.splitScalar(u8, input, ' ');
 
-    var iter = mem.splitScalar(u8, input, ' ');
+        const command = iter.next() orelse "";
+        const hostname = iter.next() orelse "";
+        const port_s = iter.next() orelse "";
 
-    const command = iter.next() orelse "";
-    const hostname = iter.next() orelse "";
-    const port_s = iter.next() orelse "";
+        if (!mem.eql(u8, "connect", command) or hostname.len <= 0) {
+            print("    connect " ++ gray("<hostname> [port]"), .{});
+            print("    " ++ yellow("summary:") ++ " connect to a Cassandra node", .{});
+            return .do_nothing;
+        }
 
-    if (!mem.eql(u8, "connect", command) or hostname.len <= 0) {
-        print("\x1b[1mUsage\x1b[0m: connect <hostname> [port]", .{});
-        return .do_nothing;
-    }
+        const port: u16 = if (port_s.len > 0)
+            try fmt.parseInt(u16, port_s, 10)
+        else
+            9042;
 
-    const port: u16 = if (port_s.len > 0)
-        try fmt.parseInt(u16, port_s, 10)
-    else
-        9042;
-
-    // Close and free the current connection if there is one
-    if (repl.endpoint) |*endpoint| {
-        endpoint.conn.deinit();
-        endpoint.socket.close();
-        endpoint.address = undefined;
-    }
-
-    const address = try resolveSingleAddress(repl.gpa, hostname, port);
-    const socket = try net.tcpConnectToAddress(address);
-
-    repl.poll_fds[1].fd = socket.handle;
-    repl.poll_fds[1].events = posix.POLL.IN | posix.POLL.OUT;
-
-    var conn = try Connection.init(repl.gpa);
-    conn.protocol_version = .v4;
-    // TODO(vincent): read this from args
-    conn.authentication = .{
-        .username = "vincent",
-        .password = "vincent",
-    };
-    if (repl.tracing) |*tracing| {
-        conn.tracer = tracing.tracer.tracer();
-    }
-
-    // Replace the prompt
-    repl.ls.prompt = try fmt.bufPrintZ(&repl.ls.prompt_buf, "{any}> ", .{address});
-
-    repl.endpoint = .{
-        .address = address,
-        .socket = socket,
-        .conn = conn,
-    };
-
-    return .save_history_line;
-}
-
-fn executeDisconnect(repl: *REPL, input: []const u8) anyerror!ExecuteResult {
-    // Command: disconnect
-
-    if (!mem.startsWith(u8, input, "disconnect")) {
-        return error.DoesNoMatch;
-    }
-
-    if (repl.endpoint) |*endpoint| {
         // Close and free the current connection if there is one
-        endpoint.conn.deinit();
-        endpoint.socket.close();
+        if (repl.endpoint) |*endpoint| {
+            endpoint.conn.deinit();
+            endpoint.socket.close();
+            endpoint.address = undefined;
+        }
 
-        repl.endpoint = null;
+        const address = try resolveSingleAddress(repl.gpa, hostname, port);
+        const socket = try net.tcpConnectToAddress(address);
 
-        repl.ls.prompt = REPL.default_prompt;
+        repl.poll_fds[1].fd = socket.handle;
+        repl.poll_fds[1].events = posix.POLL.IN | posix.POLL.OUT;
+
+        var conn = try Connection.init(repl.gpa);
+        conn.protocol_version = .v4;
+        // TODO(vincent): read this from args
+        conn.authentication = .{
+            .username = "vincent",
+            .password = "vincent",
+        };
+        if (repl.tracing) |*tracing| {
+            conn.tracer = tracing.tracer.tracer();
+        }
+
+        // Replace the prompt
+        repl.ls.prompt = try fmt.bufPrintZ(&repl.ls.prompt_buf, "{any}> ", .{address});
+
+        repl.endpoint = .{
+            .address = address,
+            .socket = socket,
+            .conn = conn,
+        };
+
+        return .save_history_line;
+    }
+};
+
+const DisconnectCommand = struct {
+    fn help() []const u8 {
+        return fmt.comptimePrint(
+            \\
+            \\    disconnect
+            \\    {s} disconnect the current connection
+            \\
+        ,
+            .{yellow("summary:")},
+        );
     }
 
-    return .save_history_line;
-}
+    fn execute(repl: *REPL, input: []const u8) anyerror!ExecuteResult {
+        // Command: disconnect
+
+        if (!mem.startsWith(u8, input, "disconnect")) {
+            return error.DoesNoMatch;
+        }
+
+        if (repl.endpoint) |*endpoint| {
+            // Close and free the current connection if there is one
+            endpoint.conn.deinit();
+            endpoint.socket.close();
+
+            repl.endpoint = null;
+
+            repl.ls.prompt = REPL.default_prompt;
+        }
+
+        return .save_history_line;
+    }
+};
 
 const AllCommands = &[_]Command{
-    executeHelp,
-    executeConnect,
-    executeDisconnect,
+    .{ .help = HelpCommand.help, .execute = HelpCommand.execute },
+    .{ .help = ConnectCommand.help, .execute = ConnectCommand.execute },
+    .{ .help = DisconnectCommand.help, .execute = DisconnectCommand.execute },
 };
 
 const REPL = struct {
@@ -206,8 +252,8 @@ const REPL = struct {
         const line = mem.trim(u8, input, " ");
         if (line.len == 0) return;
 
-        const result = for (AllCommands) |func| {
-            const result_err = func(repl, line);
+        const result = for (AllCommands) |cmd| {
+            const result_err = cmd.execute(repl, line);
 
             const result = result_err catch |err| switch (err) {
                 error.DoesNoMatch => continue,
@@ -388,6 +434,22 @@ fn resolveSingleAddress(allocator: mem.Allocator, hostname: []const u8, port: u1
     } else {
         return error.NoAddressResolved;
     }
+}
+
+const Color = enum(usize) {
+    yellow = 33,
+    gray = 90,
+};
+
+inline fn yellow(comptime format_string: []const u8) []const u8 {
+    return colored(format_string, .yellow);
+}
+inline fn gray(comptime format_string: []const u8) []const u8 {
+    return colored(format_string, .gray);
+}
+
+inline fn colored(comptime format_string: []const u8, color: Color) []const u8 {
+    return fmt.comptimePrint("\x1b[{d}m{s}\x1b[0m", .{ @intFromEnum(color), format_string });
 }
 
 inline fn print(comptime format_string: []const u8, args: anytype) void {
