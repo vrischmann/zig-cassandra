@@ -24,6 +24,7 @@ const ExecuteResult = enum {
 };
 
 const Command = struct {
+    name: []const u8,
     help: *const fn () []const u8,
     execute: *const fn (repl: *REPL, input: []const u8) anyerror!ExecuteResult,
 };
@@ -31,11 +32,18 @@ const Command = struct {
 const HelpCommand = struct {
     fn help() []const u8 {
         return fmt.comptimePrint(
+            \\Usage
             \\
             \\    help {s}
             \\
+            \\Commands
+            \\
+            \\    connect {s}
+            \\    disconnect
+            \\
         , .{
             gray("[topic]"),
+            gray("<hostname> [port]"),
         });
     }
 
@@ -51,13 +59,13 @@ const HelpCommand = struct {
         _ = iter.next() orelse "";
         const topic = iter.next() orelse "";
 
-        if (mem.eql(u8, topic, "connect")) {
-            print(ConnectCommand.help(), .{});
+        inline for (AllCommands) |cmd| {
+            if (mem.eql(u8, topic, cmd.name)) {
+                print(cmd.help(), .{});
+                break;
+            }
         } else {
-            print("Usage", .{});
-            print("", .{});
-            print("    connect \x1b[90m<hostname> [port]\x1b[0m", .{});
-            // TODO
+            print(HelpCommand.help(), .{});
         }
 
         return .save_history_line;
@@ -174,9 +182,9 @@ const DisconnectCommand = struct {
 };
 
 const AllCommands = &[_]Command{
-    .{ .help = HelpCommand.help, .execute = HelpCommand.execute },
-    .{ .help = ConnectCommand.help, .execute = ConnectCommand.execute },
-    .{ .help = DisconnectCommand.help, .execute = DisconnectCommand.execute },
+    .{ .name = "help", .help = HelpCommand.help, .execute = HelpCommand.execute },
+    .{ .name = "connect", .help = ConnectCommand.help, .execute = ConnectCommand.execute },
+    .{ .name = "disconnect", .help = DisconnectCommand.help, .execute = DisconnectCommand.execute },
 };
 
 const REPL = struct {
@@ -382,7 +390,7 @@ fn getHint(input: []const u8) mem.Allocator.Error!?[:0]u8 {
         if (endpoint.len > 0 and port.len == 0) {
             return try allocator.dupeZ(u8, " <port>");
         } else if (endpoint.len == 0 and port.len == 0) {
-            return try allocator.dupeZ(u8, " <endpoint> <port>");
+            return try allocator.dupeZ(u8, " <endpoint> [port]");
         }
     }
 
