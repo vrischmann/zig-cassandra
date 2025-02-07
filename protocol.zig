@@ -9,12 +9,11 @@ const os = std.os;
 const testing = std.testing;
 const assert = std.debug.assert;
 
-const snappy = @import("snappy");
-
 const event = @import("event.zig");
 const lz4 = @import("lz4.zig");
 const metadata = @import("metadata.zig");
 const QueryParameters = @import("QueryParameters.zig");
+const snappy = @import("snappy.zig");
 const testutils = @import("testutils.zig");
 
 const log = std.log.scoped(.protocol);

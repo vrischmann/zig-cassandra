@@ -66,11 +66,11 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    const snappy_dep = b.dependency("libsnappy", .{
+    const snappy_dep = b.dependency("snappy", .{
         .target = target,
         .optimize = optimize,
     });
-    const snappy_mod = snappy_dep.module("snappy");
+    const snappy_artifact = snappy_dep.artifact("snappy");
 
     const lz4_dep = b.dependency("lz4", .{
         .target = target,
@@ -94,13 +94,13 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     module.linkLibrary(lz4_artifact);
+    module.linkLibrary(snappy_artifact);
 
     const module_options = b.addOptions();
     module_options.addOption(bool, "enable_logging", enable_logging);
     module_options.addOption(bool, "with_cassandra", with_cassandra);
 
     module.addImport("build_options", module_options.createModule());
-    module.addImport("snappy", snappy_mod);
 
     //
     // Add the main tests for the library.
@@ -112,13 +112,13 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     main_tests_mod.linkLibrary(lz4_artifact);
+    main_tests_mod.linkLibrary(snappy_artifact);
 
     const main_tests_options = b.addOptions();
     main_tests_options.addOption(bool, "enable_logging", true);
     main_tests_options.addOption(bool, "with_cassandra", with_cassandra);
 
     main_tests_mod.addImport("build_options", main_tests_options.createModule());
-    main_tests_mod.addImport("snappy", snappy_mod);
 
     const main_tests = b.addTest(.{
         .name = "main",

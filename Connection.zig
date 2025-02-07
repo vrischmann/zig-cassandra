@@ -8,8 +8,6 @@ const testing = std.testing;
 const fifo = std.fifo.LinearFifo;
 const build_options = @import("build_options");
 
-const snappy = @import("snappy");
-
 const Iterator = @import("Iterator.zig");
 const lz4 = @import("lz4.zig");
 const protocol = @import("protocol.zig");
@@ -42,8 +40,9 @@ const ResultMessage = protocol.ResultMessage;
 const StartupMessage = protocol.StartupMessage;
 const SupportedMessage = protocol.SupportedMessage;
 const QueryParameters = @import("QueryParameters.zig");
-const tracing = @import("tracing.zig");
+const snappy = @import("snappy.zig");
 const testutils = @import("testutils.zig");
+const tracing = @import("tracing.zig");
 
 const log = std.log.scoped(.connection);
 
