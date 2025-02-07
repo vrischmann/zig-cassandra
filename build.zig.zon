@@ -15,6 +15,10 @@
             .url = "git+https://codeberg.org/raddari/zig-linenoise.git?ref=main#a81f79b507a16c0de85bee1d58f59ab1d7e8b9ec",
             .hash = "12207704373a5861f934feee0eff5dd67fff27968f800eeb25d30f91da7cd97cd07a",
         },
+        .snappy = .{
+            .url = "git+https://github.com/vrischmann/snappy?ref=1.2.1#9e25160544bee48be2ff34fa7dd51c27d727cef0",
+            .hash = "12207a96a8cd76d9c696cf15ab9535b9a70af8c7ec62c8b90f60007288f5007f91af",
+        },
     },
     .paths = .{
         "build.zig",
