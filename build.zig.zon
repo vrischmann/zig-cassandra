@@ -3,10 +3,6 @@
     .version = "0.0.0",
 
     .dependencies = .{
-        .libsnappy = .{
-            .url = "git+https://github.com/vrischmann/zig-snappy?ref=main#48be4a03ae792c68c0b20c2a2fbbcc1469b4ef1d",
-            .hash = "1220f12643d07429e6fd596467036e9e1ff0f93ad512fa0aa3e82a16b0db6f305227",
-        },
         .lz4 = .{
             .url = "git+https://github.com/allyourcodebase/lz4.git?ref=1.10.0-1#12b7e6d70a54a5c0f984abdde02449aa2131c0f0",
             .hash = "122070136dfb55e09993ea332aad05eed39a150e624d195bb4397a80531d50a8d176",
