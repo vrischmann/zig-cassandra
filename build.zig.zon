@@ -13,8 +13,8 @@
             .hash = "linenoise-0.0.0-AAAAAIAsAAB3BDc6WGH5NP7uDv9d1n__J5aPgA7rJdMP",
         },
         .snappy = .{
-            .url = "git+https://github.com/vrischmann/snappy?ref=1.2.1#3dba2fce41feea5c7fb0d95fca2caa4b26e74428",
-            .hash = "snappy-1.2.1-AAAAAKoQAAA-0v4HPZIcQwODgB_jc2xD32g8wPUZEJJy",
+            .url = "git+https://github.com/vrischmann/snappy?ref=1.2.1#a769b8992929419c3534099145264d9746823276",
+            .hash = "snappy-1.2.1-tCqyKbwQAAB9pgeqU-Z8CkXUu1pJCpSXXXAgeIEijLU7",
         },
     },
     .paths = .{
