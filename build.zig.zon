@@ -6,15 +6,15 @@
     .dependencies = .{
         .lz4 = .{
             .url = "git+https://github.com/allyourcodebase/lz4.git?ref=1.10.0-1#12b7e6d70a54a5c0f984abdde02449aa2131c0f0",
-            .hash = "122070136dfb55e09993ea332aad05eed39a150e624d195bb4397a80531d50a8d176",
+            .hash = "lz4-1.10.0-1-AAAAAKgMAABwE237VeCZk-ozKq0F7tOaFQ5iTRlbtDl6",
         },
         .linenoise = .{
             .url = "git+https://codeberg.org/raddari/zig-linenoise.git?ref=main#a81f79b507a16c0de85bee1d58f59ab1d7e8b9ec",
-            .hash = "12207704373a5861f934feee0eff5dd67fff27968f800eeb25d30f91da7cd97cd07a",
+            .hash = "linenoise-0.0.0-AAAAAIAsAAB3BDc6WGH5NP7uDv9d1n__J5aPgA7rJdMP",
         },
         .snappy = .{
             .url = "git+https://github.com/vrischmann/snappy?ref=1.2.1#3dba2fce41feea5c7fb0d95fca2caa4b26e74428",
-            .hash = "12203ed2fe073d921c430383801fe3736c43df683cc0f519109272a09e3bbb002e55",
+            .hash = "snappy-1.2.1-AAAAAKoQAAA-0v4HPZIcQwODgB_jc2xD32g8wPUZEJJy",
         },
     },
     .paths = .{
