@@ -1,6 +1,7 @@
 .{
     .name = .cassandra,
     .fingerprint = 0xd8594bb8eff1b5b0,
+    .minimum_zig_version = "0.14.0",
     .version = "0.0.0",
 
     .dependencies = .{

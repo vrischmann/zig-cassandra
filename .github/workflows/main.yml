@@ -25,7 +25,7 @@ jobs:
       - name: Setup zig
         uses: mlugg/setup-zig@v1
         with:
-          version: master
+          version: 0.14.0
 
       - run: zig fmt --check *.zig
 
