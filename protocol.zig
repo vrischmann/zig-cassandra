@@ -3961,7 +3961,7 @@ fn formatMessage(message: Message, comptime _: []const u8, _: std.fmt.FormatOpti
                 msg.compression,
             });
         },
-        .ready => |_| {
+        .ready => {
             try writer.print("READY::[]", .{});
         },
         .authenticate => |msg| {
@@ -3969,7 +3969,7 @@ fn formatMessage(message: Message, comptime _: []const u8, _: std.fmt.FormatOpti
                 msg.authenticator,
             });
         },
-        .options => |_| {
+        .options => {
             try writer.print("OPTIONS::[]", .{});
         },
         .supported => |msg| {

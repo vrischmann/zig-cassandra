@@ -355,18 +355,7 @@ fn readSlice(self: *Self, allocator: mem.Allocator, diags: *Diags, column_spec: 
 
     switch (ChildType) {
         u8, i8, u16, i16, u32, i32, i64, u64 => {
-            const NonConstType = @Type(std.builtin.Type{
-                .pointer = .{
-                    .size = .slice,
-                    .is_const = false,
-                    .is_volatile = type_info.pointer.is_volatile,
-                    .alignment = type_info.pointer.alignment,
-                    .address_space = type_info.pointer.address_space,
-                    .child = ChildType,
-                    .is_allowzero = type_info.pointer.is_allowzero,
-                    .sentinel_ptr = if (type_info.pointer.sentinel()) |s| &s else null,
-                },
-            });
+            const NonConstType = []ChildType;
 
             var slice: NonConstType = undefined;
 

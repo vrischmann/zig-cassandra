@@ -333,7 +333,7 @@ fn tickHandshake(conn: *Self, diags: *Diagnostics) !void {
                             return error.UnexepectedAuthenticator;
                         }
                     },
-                    .@"error" => |_| {
+                    .@"error" => {
                         // TODO(vincent): diags
                         return error.UnexpectedMessageType;
                     },
