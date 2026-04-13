@@ -6,12 +6,12 @@
 
     .dependencies = .{
         .lz4 = .{
-            .url = "git+https://github.com/allyourcodebase/lz4.git?ref=1.10.0-1#12b7e6d70a54a5c0f984abdde02449aa2131c0f0",
-            .hash = "lz4-1.10.0-1-AAAAAKgMAABwE237VeCZk-ozKq0F7tOaFQ5iTRlbtDl6",
+            .url = "git+https://github.com/allyourcodebase/lz4.git?ref=master#41f52ab227caf9d48cf88c89a4d2946caa12b102",
+            .hash = "lz4-1.10.0-6-ewyzw-4NAAAWDpY4xpiqr4LQhZQAC0x_rGnW2iPh6jk2",
         },
         .linenoise = .{
-            .url = "git+https://codeberg.org/raddari/zig-linenoise.git?ref=main#a81f79b507a16c0de85bee1d58f59ab1d7e8b9ec",
-            .hash = "linenoise-0.0.0-AAAAAIAsAAB3BDc6WGH5NP7uDv9d1n__J5aPgA7rJdMP",
+            .url = "git+https://codeberg.org/vrischmann/zig-linenoise?ref=fix-for-latest-zig#1c262f000474a5e880938b172ec7369a858e5f7a",
+            .hash = "linenoise-0.0.0-mhAhVj8tAADzoAsaVHaHWO0M2SDzNHf5W5UGA_0QPKQK",
         },
         .snappy = .{
             .url = "git+https://github.com/vrischmann/snappy?ref=1.2.1#a769b8992929419c3534099145264d9746823276",
