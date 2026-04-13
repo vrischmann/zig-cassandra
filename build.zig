@@ -110,6 +110,7 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("lib.zig"),
         .target = target,
         .optimize = optimize,
+        .link_libc = true,
     });
     main_tests_mod.linkLibrary(lz4_artifact);
     main_tests_mod.linkLibrary(snappy_artifact);
@@ -125,7 +126,6 @@ pub fn build(b: *std.Build) void {
         .root_module = main_tests_mod,
         .filters = b.args orelse &.{},
     });
-    main_tests.linkLibC();
 
     const run_main_tests = b.addRunArtifact(main_tests);
 
