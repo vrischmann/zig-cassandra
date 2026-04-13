@@ -1,47 +1,38 @@
 const std = @import("std");
-const io = std.io;
 const mem = std.mem;
 
-pub fn main() anyerror!void {
-    var gpa: std.heap.GeneralPurposeAllocator(.{}) = .init;
+pub fn main(init: std.process.Init) anyerror!void {
+    const io = init.io;
 
-    var arena = std.heap.ArenaAllocator.init(gpa.allocator());
-    defer arena.deinit();
-    const allocator = arena.allocator();
-
-    const base_args = try std.process.argsAlloc(allocator);
-    defer std.process.argsFree(allocator, base_args);
+    const base_args = try std.process.Args.toSlice(init.minimal.args, init.arena.allocator());
 
     if (base_args.len < 2) {
         std.debug.print("Usage: hex-convert <hex data>\n", .{});
         std.process.exit(1);
-        unreachable;
     }
 
-    //
-
     if (mem.eql(u8, "-", base_args[1])) {
-        const data = try io.getStdIn().readToEndAlloc(allocator, 10 * 1024 * 1024);
+        // Read all of stdin into memory, then print as hex escape sequences
+        var stdin_buf: [4096]u8 = undefined;
+        var stdin_reader = std.Io.File.stdin().reader(io, &stdin_buf);
+        const data = try stdin_reader.interface.allocRemaining(init.gpa, .unlimited);
+        defer init.gpa.free(data);
 
-        var builder = std.ArrayList(u8).init(allocator);
-        defer builder.deinit();
-
+        var stdout_buf: [4096]u8 = undefined;
+        var stdout_file = std.Io.File.stdout().writer(io, &stdout_buf);
         for (data) |b| {
-            try builder.writer().print("\\x{x:02}", .{b});
+            try stdout_file.interface.print("\\x{x:02}", .{b});
         }
-
-        std.debug.print("{s}", .{builder.items});
+        try stdout_file.flush();
     } else {
+        var stdout_buf: [4096]u8 = undefined;
+        var stdout_file = std.Io.File.stdout().writer(io, &stdout_buf);
+
         const data = base_args[1];
-
-        var builder = std.ArrayList(u8).init(allocator);
-        defer builder.deinit();
-
         var i: usize = 0;
         while (i < data.len) : (i += 2) {
-            try builder.writer().print("\\x{s}", .{data[i .. i + 2]});
+            try stdout_file.interface.print("\\x{s}", .{data[i..@min(i + 2, data.len)]});
         }
-
-        std.debug.print("{s}", .{builder.items});
+        try stdout_file.flush();
     }
 }
