@@ -39,7 +39,7 @@ fn getHint(input: []const u8) mem.Allocator.Error!?[:0]u8 {
     return null;
 }
 
-fn replHintsCallback(buf: [*:0]const u8, color: *c_int, bold: *c_int) callconv(.C) ?[*:0]u8 {
+fn replHintsCallback(buf: [*:0]const u8, color: *c_int, bold: *c_int) callconv(.c) ?[*:0]u8 {
     const input = mem.span(buf);
 
     const hint_opt = getHint(input) catch |err| switch (err) {
@@ -56,14 +56,14 @@ fn replHintsCallback(buf: [*:0]const u8, color: *c_int, bold: *c_int) callconv(.
 
 var hints_arena: heap.ArenaAllocator = undefined;
 
-fn replFreeHintsCallback(ptr: ?*anyopaque) callconv(.C) void {
+fn replFreeHintsCallback(ptr: ?*anyopaque) callconv(.c) void {
     const buf: [*c]u8 = @ptrCast(@alignCast(ptr));
     const slice = mem.span(buf);
 
     hints_arena.allocator().free(slice);
 }
 
-fn replCompletionCallback(buf: [*:0]const u8, lc: *linenoise.Completions) callconv(.C) void {
+fn replCompletionCallback(buf: [*:0]const u8, lc: *linenoise.Completions) callconv(.c) void {
     const input = mem.span(buf);
 
     if (mem.startsWith(u8, input, "co")) {
@@ -72,7 +72,7 @@ fn replCompletionCallback(buf: [*:0]const u8, lc: *linenoise.Completions) callco
 }
 
 pub fn main() anyerror!void {
-    var gpa: heap.GeneralPurposeAllocator(.{}) = .init;
+    var gpa: heap.DebugAllocator(.{}) = .init;
     defer debug.assert(gpa.deinit() == .ok);
 
     const allocator = gpa.allocator();
@@ -80,7 +80,9 @@ pub fn main() anyerror!void {
     // Initial setup
 
     const filenames = blk: {
-        const app_data_dir = try std.fs.getAppDataDir(allocator, "cqldebug");
+        const home_dir_z = std.c.getenv("HOME") orelse "/tmp";
+        const home_dir = std.mem.sliceTo(home_dir_z, 0);
+        const app_data_dir = try std.fs.path.join(allocator, &[_][]const u8{ home_dir, ".local", "share", "cqldebug" });
         defer allocator.free(app_data_dir);
 
         const history_filename = try std.fs.path.join(allocator, &[_][]const u8{ app_data_dir, "history" });

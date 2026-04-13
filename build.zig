@@ -132,6 +132,7 @@ pub fn build(b: *std.Build) void {
     const test_step = b.step("test", "Run library tests");
     test_step.dependOn(&run_main_tests.step);
 
-    setupCqldebug(b, target, optimize, module);
     setupTools(b, target, optimize);
+    // TODO(vincent): cqldebug requires std.net which was removed in Zig 0.16
+    // setupCqldebug(b, target, optimize, module);
 }
